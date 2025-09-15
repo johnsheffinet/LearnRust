@@ -1,0 +1,41 @@
+@host = {{$dotenv HOSTADDR}}:{{$dotenv HOSTPORT}}
+@itemId = 0
+@header = content-type: application/json
+@name = create_item
+@value = created
+###
+
+# @name create_item
+POST http://{{host}}/items HTTP/1.1
+{{header}}
+
+{
+  "name": "{{name}}",
+  "value": "{{value}}"
+}
+
+@itemId = {{create_item.response.body.id}}
+###
+
+# @name select_items
+GET http://{{host}}/items?name={{name}}&value={{value}} HTTP/1.1
+###
+
+
+# @name update_item
+PUT http://{{host}}/items/{{itemId}} HTTP/1.1
+{{header}}
+
+{
+  "name": "{{name}}",
+  "value": "{{value}}"
+}
+###
+
+# @name select_item
+GET http://{{host}}/items/{{itemId}} HTTP/1.1
+###
+
+# @name delete_item
+DELETE http://{{host}}/items/{{itemId}} HTTP/1.1
+###

@@ -1,11 +1,14 @@
-use axum::{debug_handler, extract::{Path, Query, State}, http::StatusCode, response::IntoResponse, routing::get, serve, Json, Router};
-use serde::{Deserialize, Serialize};
+use axum::{body::Body, debug_handler, extract::{Path, Query, State,}, http::StatusCode, Json, middleware, response::IntoResponse, Router, routing::{get, post,}, serve,};
+use axum_extra::{headers::{Authorization, authorization::Bearer,}, TypedHeader,};
+use chrono::{Duration, Utc,};
+use jsonwebtoken::{Algorithm, decode, DecodingKey, encode, EncodingKey, Header, Validation,};
+use serde::{Deserialize, Serialize,};
 use serde_json::json;
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
-use tokio::{net::TcpListener, sync::RwLock};
+use std::{collections::HashMap, env, net::SocketAddr, sync::Arc,};
+use tokio::{net::TcpListener, sync::RwLock,};
 use uuid::Uuid;
-use validator::{Validate, ValidationErrors};
-use tracing::{info, error, warn};
+use validator::{Validate, ValidationErrors,};
+use tracing::{error, info, warn,};
 use tracing_subscriber;
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -39,6 +42,20 @@ struct UpdateItem {
     value: Option<String>,
 }
 
+#[derive(Deserialize, Validate)]
+struct Signin {
+    #[validate(length(min = 1, message = "username field in signin request is empty"))]
+    username: String,
+    #[validate(length(min = 1, message = "password field in signin request is empty"))]
+    password: String,
+}
+
+#[derive(Deserialize, Serialize)]
+struct Claims {
+    sub: String,
+    exp: usize,
+}
+
 type Db = Arc<RwLock<HashMap<Uuid, Item>>>;
 
 #[tokio::main]
@@ -49,23 +66,29 @@ async fn main() {
         .init();
     // Create a shared database using Arc, RwLock and an empty HashMap
     let db = Arc::new(RwLock::new(HashMap::<Uuid, Item>::new()));
-    // Create the Axum application with routes and shared state
-    let app = Router::new()
+    // Create the protected, CRUD routes for Items with Middleware to check for valid JWT    
+    let item_routes = Router::new()
         .route("/items", get(select_items).post(create_item))
         .route("/items/{id}", get(select_item).put(update_item).delete(delete_item))
+        .layer(middleware::from_fn(authrz))
+        .with_state(db.clone());
+    // Create the Axum application with routes and shared database
+    let app = Router::new()
+        .route("/login", post(signin))
+        .merge(item_routes)
         .with_state(db);
     // Define the address for the server
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     // Bind the TCP listener to the specified address
     let listener = TcpListener::bind(addr)
         .await
-        .expect("Failed to bind address");
+        .expect("Failed to bind address!");
     // Log the address where the server is listening
     info!("Listening on http://{}", addr);
     // Start the Axum server with the listener and application
     serve(listener, app)
         .await
-        .expect("Failed to start server");
+        .expect("Failed to start service!");
 }
 
 // handler function for POST /items
@@ -102,7 +125,7 @@ async fn create_item(
     // Respond with 201 status and item in JSON format
     (
         StatusCode::CREATED, 
-        Json(serde_json::to_value(item).expect("Failed to serialize item!"))
+        Json(serde_json::to_value(item).expect("Failed to serialize created item!"))
     )
 }
 
@@ -142,7 +165,7 @@ async fn select_items(
     // Respond with 200 status and items in JSON format
     (
         StatusCode::OK,
-        Json(serde_json::to_value(items).expect("Failed to serialize items"))
+        Json(serde_json::to_value(items).expect("Failed to serialize selected items!"))
     )
 }
 
@@ -182,7 +205,7 @@ async fn update_item(
         // Respond with 200 status and item in JSON format
         (
             StatusCode::OK, 
-            Json(serde_json::to_value(item.clone()).expect("Failed to serialize item"))
+            Json(serde_json::to_value(item.clone()).expect("Failed to serialize updated item!"))
         )
     } else {
         // Log item not found
@@ -194,7 +217,7 @@ async fn update_item(
                 id,
                 name: "".to_string(),
                 value: "".to_string(),
-            }).expect("Failed to serialize empty item"))
+            }).expect("Failed to serialize empty item!"))
         )
     }
 }
@@ -268,6 +291,70 @@ fn validation_errors_to_map(errors: ValidationErrors) -> serde_json::Value {
         map.insert(field.to_string(), json!(messages));
     }
     json!(map)
+}
+
+// Helper function to get the JWT secret at runtime
+fn jwt_secret() -> Vec<u8> {
+    env::var("JWT_SECRET")
+    .expect("JWT_SECRET environment variable is empty!")
+    .as_bytes()
+    .to_vec()
+} // Use &jwt_secret() in encode and decode functions
+
+// Handler function for POST /login
+async fn signin(
+    Json(payload): Json<Signin>
+) -> impl IntoResponse {
+    // Log signin request recieved
+    info!("Recieved signin request");
+    // Validate the request
+    if let Err(errors) = payload.validate() {
+    // Log validation failed
+    error!("Failed signin validation: {:?}", errors);
+    // Respond with 422 status and errors in JSON format
+        return 
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(serde_json::json!({"errors": validation_errors_to_map(errors)})),
+        );
+    }
+    // Create JWT token with username and expiration claims
+    let username = payload.username;
+    let expiration = Utc::now()
+        .checked_add_signed(Duration::hours(24))
+        .expect("Failed to set expiration time!")
+        .timestamp() as usize;
+    let claims = Claims {
+        sub: username,
+        exp: expiration,
+    };
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(&jwt_secret()),)
+        .expect("Failed to encode token!");
+    // Respond with 200 status and token in JSON format
+    (
+        StatusCode::OK, 
+        Json(json!({"token": token}))
+    )
+}
+
+// Helper function for  middleware
+async fn authrz(
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+    req: axum::http::Request<Body>,
+    next: middleware::Next,
+) -> impl IntoResponse {
+    let token_data = decode::<Claims>(
+        auth.token(),
+        &DecodingKey::from_secret(&jwt_secret()),
+        &Validation::new(Algorithm::HS256),
+    );
+    match token_data {
+        Ok(_) => next.run(req).await,
+        Err(_) => (StatusCode::UNAUTHORIZED, Json(json!({"error": "Invalid or expired token"}))).into_response(),
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,23 @@
-use axum::{body::Body, debug_handler, extract::{Path, Query, State,}, http::StatusCode, Json, middleware, response::IntoResponse, Router, routing::{get, post,}, serve,};
+use rustls::{Certificate, PrivateKey, ServerConfig};
+use std::{fs::File, io::{BufReader, Read}};
+//use tokio_rustls;
+
+fn get_certs(path: &str) -> Vec<Certificate> {
+    // Open the file specified by the path parameter
+    let mut reader = BufReader::new(File::open(path).expect("Failed to open {} file", path));
+    // Read and return the list of certificates in the file
+    rustls_pemfile::certs(&mut reader)
+        /*.expect("Failed to read certificates!") */
+        .into_iter()
+        .map(Certificate)
+        .collect().expect("Failed to find certificates!")
+}
+fn main() {
+    println!("Hello, world!");
+}
+
+/*
+use axum::{body::Body, debug_handler, extract::{Path, Query, State,}, http::{StatusCode,}, middleware, response::IntoResponse, routing::{get, post,}, serve, Json, Router};
 use axum_extra::{headers::{Authorization, authorization::Bearer,}, TypedHeader,};
 use chrono::{Duration, Utc,};
 use jsonwebtoken::{Algorithm, decode, DecodingKey, encode, EncodingKey, Header, Validation,};
@@ -8,8 +27,9 @@ use std::{collections::HashMap, env, net::SocketAddr, sync::Arc,};
 use tokio::{net::TcpListener, sync::RwLock,};
 use uuid::Uuid;
 use validator::{Validate, ValidationErrors,};
-use tracing::{error, info, warn,};
-use tracing_subscriber;
+use tracing::{debug, error, info, warn,};
+
+use tracing_subscriber::{self,};
 
 #[derive(Clone, Deserialize, Serialize)]
 struct Item {
@@ -71,7 +91,8 @@ async fn main() {
         .route("/items", get(select_items).post(create_item))
         .route("/items/{id}", get(select_item).put(update_item).delete(delete_item))
         .layer(middleware::from_fn(authrz))
-        .with_state(db.clone());
+
+        /*.with_state(db)*/;
     // Create the Axum application with routes and shared database
     let app = Router::new()
         .route("/login", post(signin))
@@ -88,7 +109,7 @@ async fn main() {
     // Start the Axum server with the listener and application
     serve(listener, app)
         .await
-        .expect("Failed to start service!");
+        .expect("Failed to serve app!");
 }
 
 // handler function for POST /items
@@ -123,10 +144,12 @@ async fn create_item(
     // Log item inserted
     info!("Inserted item into database: id={}", item.id);
     // Respond with 201 status and item in JSON format
-    (
+    /*(
         StatusCode::CREATED, 
         Json(serde_json::to_value(item).expect("Failed to serialize created item!"))
     )
+     */
+    send_response(StatusCode::CREATED, json!(item))
 }
 
 // handler function for GET /items
@@ -239,6 +262,7 @@ async fn select_item(
         (
             StatusCode::OK, 
             Json(item.clone())
+            //Json(serde_json::to_value(item.clone()).expect("Failed to serialize selected item!"))
         )
     } else {
         // Log item not found
@@ -270,12 +294,14 @@ async fn delete_item(
         // Log item removed
         info!("Removed item in database: id={}", id);
         // Respond with 200 status and empty object in JSON format
-        StatusCode::OK.into_response()
+        //StatusCode::OK.into_response()
+        send_response(StatusCode::OK, json!({}))
     } else {
         // Log item not found
         warn!("Failed to find item: id={}", id);
         // Respond with 204 status and empty object in JSON format
-        StatusCode::NO_CONTENT.into_response()
+        //StatusCode::NO_CONTENT.into_response()
+        send_response(StatusCode::NO_CONTENT, json!({}))
     }
 }
 
@@ -309,14 +335,15 @@ async fn signin(
     info!("Recieved signin request");
     // Validate the request
     if let Err(errors) = payload.validate() {
-    // Log validation failed
-    error!("Failed signin validation: {:?}", errors);
-    // Respond with 422 status and errors in JSON format
-        return 
-        (
+        // Log validation failed
+        error!("Failed signin validation: {:?}", errors);
+        // Respond with 422 status and errors in JSON format
+        return send_response(StatusCode::UNPROCESSABLE_ENTITY, json!({"errors": validation_errors_to_map(errors)}))
+
+        /*(
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(serde_json::json!({"errors": validation_errors_to_map(errors)})),
-        );
+        );*/
     }
     // Create JWT token with username and expiration claims
     let username = payload.username;
@@ -331,13 +358,16 @@ async fn signin(
     let token = encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(&jwt_secret()),)
-        .expect("Failed to encode token!");
-    // Respond with 200 status and token in JSON format
-    (
-        StatusCode::OK, 
-        Json(json!({"token": token}))
+        &EncodingKey::from_secret(&jwt_secret()),
     )
+    .expect("Failed to encode token!");
+    // Respond with 200 status and token in JSON format
+    send_response(StatusCode::OK, json!({"token": token}))
+}
+
+fn send_response(status: StatusCode, body: serde_json::Value) -> (StatusCode, Json<serde_json::Value>) {
+    debug!("Sending response: status={:?}, body={:?}", status, body);
+    (status, Json(body))
 }
 
 // Helper function for  middleware
@@ -359,3 +389,4 @@ async fn authrz(
 
 #[cfg(test)]
 mod tests;
+ */

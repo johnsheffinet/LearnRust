@@ -1,0 +1,9 @@
+[package]
+name = "x-learnrust"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = "0.8.6"
+axum-server = { version = "0.7.2", features = ["tls-rustls"] }
+tokio = { version = "1.48.0", features = ["full"] }

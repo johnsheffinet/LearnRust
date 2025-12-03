@@ -1,17 +1,23 @@
+mod helpers;
 use crate::helpers::tls;
+use crate::helpers::utils;
 
 #[tokio::main]
 async fn main() {
 
-    let HTTP_ADDR: String = helpers::read_env_var("HTTP_ADDR");
+    let http_addr: String = utils::read_env_var("HTTP_ADDR");
+    let https_addr: String = utils::read_env_var("HTTPS_ADDR");
+    let key_path: String = utils::read_env_var("KEY_PATH");
+    let cert_path: String = utils::read_env_var("CERT_PATH");
 
-    let http_server_task = tokio::spawn(
+    let serve_http_app_task = tokio::spawn(
         tls::serve_http_app(
-            "HTTP_ADDR"
+            &http_addr,
+            &https_addr
         )
     );
     
-    let https_server_task = tokio::spawn(
+/*    let https_server_task = tokio::spawn(
         tls::serve_https_app(
             "HTTPS_ADDR", 
             "CERT_PATH", 
@@ -21,8 +27,8 @@ async fn main() {
 
     let _ = tokio::join!(http_server_task, https_server_task);
 }
-
-pub mod helpers {
+ */
+/* pub mod helpers {
     use std::{env, f32::consts::E};
 
     pub fn read_env_var(key: &str) -> String {
@@ -81,20 +87,28 @@ pub mod helpers {
                 );
         }
 
-        pub async fn serve_http_app(http_addr_env_var: &str) {
-            let http_addr = helpers::read_env_var(http_addr_env_var).await;
-
+        pub async fn serve_http_app(
+            http_addr: &str,
+            https_addr: &str,
+        ) {
             let addr = http_addr
                 .parse()
                 .expect(&format!(
-                        "Failed to parse {}={} into socket address!",
-                        http_addr_env_var,
-                        http_addr,
+                    "Failed to parse {} into socket address!",
+                    http_addr,
+                    )
+                );
+
+            let redirect_addr = https_addr
+                .parse()
+                .expect(&format!(
+                    "Failed to parse {} into socket address!",
+                    https_addr,
                     )
                 );
 
             let app = Router::new()
-                .route("/", get(redirect_to_https));
+                .route("/*path", get(redirect_to_https));
 
             axum_server::bind(addr)
                 .serve(app.into_make_service())
@@ -103,8 +117,83 @@ pub mod helpers {
         }
 
         async fn redirect_to_https(uri: Uri) -> Redirect {
-            let https_uri = format!("https://127.0.0.1:3443{}", uri.path());
-            Redirect::temporary(&https_uri)
+            // let https_uri = format!("https://{}{}", redirect_addr, uri.path());
+            // Redirect::temporary(&https_uri)
+            axum_server::response::Redirect::to(&format!("https://{}{}, redirect_addr, uri.path()").with_status(StatusCode::TEMPORARY_REDIRECT)
         }
     }
+ */
 }
+
+/*
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+hyper = { version = "1.0", features = ["full"] }
+tower = "0.4"
+http = "1.0"
+# For real HTTPS, you'd add 'axum-server' or similar crate
+
+use axum::{
+    http::{StatusCode, Uri},
+    response::IntoResponse,
+    routing::get,
+    Router,
+};
+use std::net::SocketAddr;
+use hyper::server::conn::http1;
+use tokio::net::TcpListener;
+use tower::ServiceExt; // for .into_make_service()
+
+#[tokio::main]
+async fn main() {
+    // Run the HTTP redirect server in a separate task
+    tokio::spawn(redirect_http_to_https());
+
+    // --- Main HTTPS Server Setup (Port 443) ---
+    // NOTE: A real application requires a crate like `axum-server` or a reverse proxy for actual TLS.
+    let app = Router::new()
+        .route("/", get(|| async { "Hello from HTTPS!" }))
+        .route("/*path", get(|| async { "Secure content accessed." }));
+        
+    let https_addr = SocketAddr::from(([0, 0, 0, 0], 443));
+    println!("Listening for HTTPS on {}", https_addr);
+
+    // This is a placeholder for actual HTTPS server binding:
+    let listener = TcpListener::bind(&https_addr).await.unwrap();
+    axum::serve(listener, app.into_make_service()).await.unwrap();
+}
+
+/// A dedicated server that catches all HTTP traffic and redirects to HTTPS.
+async fn redirect_http_to_https() {
+    let http_addr = SocketAddr::from(([0, 0, 0, 0], 80));
+
+    // A service that handles *all* incoming HTTP requests
+    let service = tower::service_fn(|req: http::Request<hyper::body::Incoming>| async move {
+        let uri = req.uri();
+
+        // Use the Host header to determine the original hostname, falling back to localhost
+        let host = req.headers()
+            .get("Host")
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("localhost");
+            
+        // Reconstruct the URI with the https scheme and correct host/path
+        // We use the 308 code to preserve the HTTP method during redirection.
+        let https_uri_string = format!("https://{}{}", host, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/"));
+        
+        let location = https_uri_string.parse::<Uri>().expect("Invalid URI");
+
+        // Create the redirect response
+        let response = axum::response::Redirect::permanent(&location.to_string());
+        
+        Ok::<_, std::convert::Infallible>(response.into_response())
+    });
+
+    println!("Listening for HTTP redirects on {}", http_addr);
+
+    // Bind to port 80 and run the redirection service
+    let listener = TcpListener::bind(&http_addr).await.unwrap();
+    axum::serve(listener, service.into_make_service()).await.unwrap();
+}
+*/

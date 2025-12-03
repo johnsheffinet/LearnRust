@@ -1,55 +1,9 @@
 /*
-    use axum::{
-    http::uri::Uri,
-    response::{IntoResponse, Redirect},
-    routing::get,
-    Json, Router,
+mod helpers;
+use crate::helpers::{
+    tls, 
+    utils,
 };
-use axum_server::tls_rustls::RustlsConfig;
-use serde::Serialize;
-use std::net::SocketAddr;
-
-// Define a simple structure for a REST response
-#[derive(Serialize)]
-struct Message {
-    message: String,
-}
-
-#[tokio::main]
-async fn main() {
-    // Certificate path (adjust as needed based on your generation method)
-    let cert_path = "certs/cert.pem";
-    let key_path = "certs/key.pem";
-    
-    // --- HTTPS Server Setup ---
-    let https_app = Router::new().route("/api/data", get(data_handler));
-    
-    let https_addr = SocketAddr::from(([127, 0, 0, 1], 3443));
-    println!("HTTPS listening on {}", https_addr);
-
-    // Load TLS config
-    let config = RustlsConfig::from_pem_file(cert_path, key_path)
-        .await
-        .expect("Failed to load TLS certificates");
-
-    let https_server = axum_server::bind_rustls(https_addr, config)
-        .serve(https_app.into_make_service());
-
-    // --- HTTP Server Setup for Redirection ---
-    let http_app = Router::new().route("/*path", get(http_handler));
-    
-    let http_addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    println!("HTTP listening on {}", http_addr);
-
-    let http_server = axum_server::bind(http_addr)
-        .serve(http_app.into_make_service());
-
-    // Run both servers concurrently
-    tokio::join!(
-        tokio::spawn(https_server),
-        tokio::spawn(http_server)
-    );
-}
 
 use axum::{
     http::uri::Uri,
@@ -63,16 +17,30 @@ use tokio;
 
 #[tokio::main]
 async fn main() {
-    // Spawn the HTTP server task
-    let http = tokio::spawn(http_server());
-    // Spawn the HTTPS server task
-    let https = tokio::spawn(https_server());
+    let http_addr: String = utils::read_env_var("HTTP_ADDR");
+    let https_addr: String = utils::read_env_var("HTTPS_ADDR");
+    let key_path: String = utils::read_env_var("KEY_PATH");
+    let cert_path: String = utils::read_env_var("CERT_PATH");
 
-    println!("HTTP server running on http://localhost:3000");
-    println!("HTTPS server running on https://localhost:3443");
+    let redirect_req_to_https_task = tokio::spawn(
+        tls::redirect_req_to_https(
+            &http_addr,
+            &https_addr,
+        );
+    );
 
-    // Wait for both servers to complete (which will be never in this case)
-    let _ = tokio::join!(http, https);
+    let serve_app_over_https_task = tokio::spawn(
+        tls::serve_app_over_https(
+            &https_addr,
+            &key_path,
+            &cert_path,
+        );
+    );
+
+    tokio::join!(
+        redirect_req_to_https_task,
+        serve_app_over_https_task,
+    );
 }
 
 // Function to run the HTTP server which redirects to HTTPS
@@ -80,21 +48,14 @@ async fn http_server() {
     let app = Router::new().route("/", get(http_handler));
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    //let svc = ...
     axum_server::bind(addr)
-        .serve(app.into_make_service())
+        .serve(svc)
         .await
         .unwrap();
 }
 
-// Handler to redirect the incoming HTTP request URI to the HTTPS URI
-async fn http_handler(uri: Uri) -> Redirect {
-    let uri = format!("https://127.0.0.1:3443{}", uri.path());
-    
-    // Use a 307 Temporary Redirect status code
-    Redirect::temporary(&uri)
-}
-/// A dedicated server that catches all HTTP traffic and redirects to HTTPS.
-async fn redirect_http_to_https() {
+async fn redirect_to_https() {
     let http_addr = SocketAddr::from(([0, 0, 0, 0], 80));
 
     // A service that handles *all* incoming HTTP requests
@@ -121,9 +82,10 @@ async fn redirect_http_to_https() {
 
     println!("Listening for HTTP redirects on {}", http_addr);
 
-    // Bind to port 80 and run the redirection service
-    let listener = TcpListener::bind(&http_addr).await.unwrap();
-    axum::serve(listener, service.into_make_service()).await.unwrap();
+    axum_server::bind(addr)
+        .serve(service)
+        .await
+        .unwrap();
 }
 // Function to run the HTTPS server
 async fn https_server() {
@@ -155,7 +117,6 @@ use crate::helpers::utils;
 
 #[tokio::main]
 async fn main() {
-
     let http_addr: String = utils::read_env_var("HTTP_ADDR");
     let https_addr: String = utils::read_env_var("HTTPS_ADDR");
     let key_path: String = utils::read_env_var("KEY_PATH");
@@ -172,15 +133,12 @@ async fn main() {
 }
 
 pub mod helpers {
-    use std::{env, f32::consts::E};
-
     pub fn read_env_var(key: &str) -> String {
-        env::var(key)
+        std::env::var(key)
             .expect(&format!(
                 "Failed to read {} environment variable!", 
                 key,
-            )
-        )
+            ))
     }
     pub mod tls {
         use axum::{http::Uri, response::Redirect, routing::get, Router};

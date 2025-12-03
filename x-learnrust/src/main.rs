@@ -17,18 +17,10 @@ async fn main() {
         )
     );
     
-/*    let https_server_task = tokio::spawn(
-        tls::serve_https_app(
-            "HTTPS_ADDR", 
-            "CERT_PATH", 
-            "KEY_PATH",
-        )
-    );
-
-    let _ = tokio::join!(http_server_task, https_server_task);
+    let _ = serve_http_app_task.await;
 }
- */
-/* pub mod helpers {
+
+pub mod helpers {
     use std::{env, f32::consts::E};
 
     pub fn read_env_var(key: &str) -> String {
@@ -119,31 +111,20 @@ async fn main() {
         async fn redirect_to_https(uri: Uri) -> Redirect {
             // let https_uri = format!("https://{}{}", redirect_addr, uri.path());
             // Redirect::temporary(&https_uri)
-            axum_server::response::Redirect::to(&format!("https://{}{}, redirect_addr, uri.path()").with_status(StatusCode::TEMPORARY_REDIRECT)
+            // axum_server::response::Redirect::to(&format!("https://{}{}, redirect_addr, uri.path()").with_status(StatusCode::TEMPORARY_REDIRECT)
         }
     }
- */
 }
 
-/*
-[dependencies]
+
+/*[dependencies]
 axum = "0.7"
 tokio = { version = "1", features = ["full"] }
 hyper = { version = "1.0", features = ["full"] }
 tower = "0.4"
 http = "1.0"
-# For real HTTPS, you'd add 'axum-server' or similar crate
-
-use axum::{
-    http::{StatusCode, Uri},
-    response::IntoResponse,
-    routing::get,
-    Router,
-};
-use std::net::SocketAddr;
-use hyper::server::conn::http1;
-use tokio::net::TcpListener;
-use tower::ServiceExt; // for .into_make_service()
+# For real HTTPS, you'd add 'axum-server' or similar crates
+ */
 
 #[tokio::main]
 async fn main() {
@@ -196,4 +177,4 @@ async fn redirect_http_to_https() {
     let listener = TcpListener::bind(&http_addr).await.unwrap();
     axum::serve(listener, service.into_make_service()).await.unwrap();
 }
-*/
+ */

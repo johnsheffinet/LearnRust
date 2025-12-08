@@ -752,3 +752,69 @@ async fn main() {
         .unwrap();
 }
  */
+
+/*
+// time limit
+use axum::{
+    routing::get,
+    error_handling::HandleErrorLayer,
+    http::{StatusCode, Request, Method, Uri},
+    BoxError,
+    Router,
+};
+use tower::{ServiceBuilder, timeout::TimeoutLayer};
+use std::time::Duration;
+use tower_http::trace::TraceLayer;
+use axum::response::IntoResponse;
+
+// The slow handler that will intentionally exceed the timeout
+async fn slow_handler() -> impl IntoResponse {
+    // Simulate a time-consuming operation
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    "This response might be late!"
+}
+
+// The error handler for the timeout error
+fn handle_timeout_error(method: Method, uri: Uri, err: BoxError) -> (StatusCode, String) {
+    if err.is::<tower::timeout::error::Elapsed>() {
+        (
+            StatusCode::REQUEST_TIMEOUT,
+            format!("Request to {} {} took too long", method, uri),
+        )
+    } else {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Unhandled internal error: {}", err),
+        )
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    // Define the timeout duration
+    const TIMEOUT_DURATION: Duration = Duration::from_secs(1);
+
+    // Build the middleware stack using ServiceBuilder
+    let middleware_stack = ServiceBuilder::new()
+        // The HandleErrorLayer must be placed above the TimeoutLayer
+        // so it can catch the error produced when a timeout occurs
+        .layer(HandleErrorLayer::new(handle_timeout_error))
+        // Apply the timeout layer
+        .layer(TimeoutLayer::new(TIMEOUT_DURATION));
+
+    // Create the router and apply the middleware
+    let app = Router::new()
+        .route("/slow", get(slow_handler))
+        // Apply the middleware to all routes in the application
+        .layer(middleware_stack);
+
+    // Run the server
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
+        .await
+        .unwrap();
+    println!("Listening on http://127.0.0.1:3000");
+    axum::serve(listener, app)
+        .await
+        .unwrap();
+}
+ */

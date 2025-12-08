@@ -397,3 +397,48 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
  */
+
+/*
+// cache
+use axum::{
+    Router,
+    extract::Path,
+    routing::get,
+};
+use axum_response_cache::CacheLayer;
+use std::time::Duration;
+use cached::TimedSizedCache;
+
+#[tokio::main]
+async fn main() {
+    // 1. Initialize the cache: a timed, sized cache with a capacity of 100 items.
+    let cache: TimedSizedCache<String, axum::response::Response> =
+        TimedSizedCache::with_size_and_lifespan(100, 60);
+
+    // 2. Create the CacheLayer with a default duration for routes where the header is not set.
+    let cache_layer = CacheLayer::new(cache)
+        .with_cache_duration(Duration::from_secs(60)); // Responses are cached for 60 seconds by default.
+
+    // 3. Define the application routes.
+    let app = Router::new()
+        // This route uses the CacheLayer for caching responses based on the unique {name} path parameter.
+        .route(
+            "/hello/:name",
+            get(|Path(name): Path<String>| async move {
+                // In a real application, this function would perform expensive operations
+                // (e.g., database query, API call) that you want to cache.
+                format!("Hello, {name}! This response is cached.")
+            })
+        )
+        // Apply the caching middleware to the specific route(s).
+        .layer(cache_layer);
+
+    // 4. Run the server.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
+        .await
+        .unwrap();
+
+    println!("Listening on http://127.0.0.1:3000");
+    axum::serve(listener, app).await.unwrap();
+}
+ */

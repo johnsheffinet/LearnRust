@@ -818,3 +818,15 @@ async fn main() {
         .unwrap();
 }
  */
+
+/*
+// utils
+async fn get_env_var(key: &str) -> &str {
+    std::env::var(key)
+        .await
+        .expect(&format!(
+            "Failed to get {} environment variable!",
+            key,
+        ))
+}
+ */

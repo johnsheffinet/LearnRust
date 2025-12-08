@@ -14,7 +14,11 @@ Develop a REST application in Rust that demonstrates CRUD operations with an in-
 6.  cors: *Show complete example to prevent cross origin resource sharing in layer method in axum.*  
 7.  csrf: *Show complete example to prevent cross site request forgery in layer method in axum.*  
 8.  xss: *Show complete example to prevent cross site scripting with ammonia in axum.*  
-9.  validate: *Show complete example to prevent cross site scripting with validator in axum.*  
-10.  rate limit: *Show complete example to limit request rates with layer method in axum.*  
-11.  size limit: *Show complete example to limit request sizes with layer method in axum.*  
-12.  time limit: *Show complete example to limit response times with layer method in axum.* 
+9.  validate: *Show complete example to prevent cross site scripting with validator in axum.*
+    - Key Practices
+    - Sanitize on Input/Output: Always treat user input as untrusted. In the example, ammonia::clean is called on the raw comment string from the form data.
+    - Whitelist-based: ammonia operates on a whitelist of safe HTML tags (e.g., <b>, <i>) and attributes, effectively stripping out any potentially malicious elements like <script> or onerror event handlers.
+    - Use Templating Engines: When rendering data back to a page, a robust templating engine (like Tera or Askama) can automatically perform output encoding, providing an additional layer of defense by converting special characters into their HTML entities (e.g., < becomes &lt;). 
+11.  rate limit: *Show complete example to limit request rates with layer method in axum.*  
+12.  size limit: *Show complete example to limit request sizes with layer method in axum.*  
+13.  time limit: *Show complete example to limit response times with layer method in axum.* 

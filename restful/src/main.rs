@@ -442,3 +442,49 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
  */
+
+/*
+// cors
+use axum::{
+    http::{header, Method, StatusCode},
+    routing::get,
+    Router,
+};
+use tower_http::cors::{AllowOrigin, CorsLayer};
+use std::time::Duration;
+
+async fn handler() -> StatusCode {
+    StatusCode::OK
+}
+
+#[tokio::main]
+async fn main() {
+    // Define the specific origin you want to allow. 
+    // This effectively prevents cross-origin requests from any other domain.
+    const ALLOWED_ORIGIN: &'static str = "http://localhost:3000";
+
+    let cors_layer = CorsLayer::new()
+        // Allow only the specified origin
+        .allow_origin(AllowOrigin::list([
+            ALLOWED_ORIGIN.parse().expect("Invalid origin URL"),
+        ]))
+        // Allow the methods needed by your application, e.g., GET and POST
+        .allow_methods([Method::GET, Method::POST])
+        // Allow specific headers
+        .allow_headers([header::CONTENT_TYPE])
+        // Max age for preflight requests, prevents repeated OPTIONS calls
+        .max_age(Duration::from_secs(60) * 10); 
+
+    let app = Router::new()
+        .route("/", get(handler).post(handler))
+        // Apply the restrictive CORS layer globally to the router
+        .layer(cors_layer);
+
+    // Run the application
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
+        .await
+        .unwrap();
+    println!("Listening on http://localhost:3000");
+    axum::serve(listener, app).await.unwrap();
+}
+ */

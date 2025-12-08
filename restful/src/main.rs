@@ -488,3 +488,54 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
  */
+
+/*
+// csrf
+use askama::Template;
+use axum::{
+    Form,
+    response::IntoResponse,
+    routing::{get, post},
+    Router,
+};
+use axum_csrf::{CsrfConfig, CsrfLayer, CsrfToken};
+use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
+
+// A simple template for demonstration (requires 'template.html' file in a 'templates' directory)
+#[derive(Template, Deserialize, Serialize)]
+#[template(path = "template.html")]
+struct Keys {
+    authenticity_token: String,
+}
+
+#[tokio::main]
+async fn main() {
+    // Basic setup...
+
+    let config = CsrfConfig::default();
+
+    let app = Router::new()
+        .route("/", get(root).post(check_key))
+        .layer(CsrfLayer::new(config)); // Apply the CSRF layer
+
+    // Run server...
+}
+
+// Handler to generate and include the CSRF token
+async fn root(token: CsrfToken) -> impl IntoResponse {
+    let keys = Keys {
+        authenticity_token: token.authenticity_token().unwrap(),
+    };
+    (token, keys).into_response()
+}
+
+// Handler to validate the submitted token
+async fn check_key(token: CsrfToken, Form(payload): Form<Keys>) -> &'static str {
+    if token.verify(&payload.authenticity_token).is_err() {
+        "Token is invalid"
+    } else {
+        "Token is Valid lets do stuff!"
+    }
+}
+ */

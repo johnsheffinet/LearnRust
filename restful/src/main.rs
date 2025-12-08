@@ -612,3 +612,37 @@ async fn handle_submit(Form(user_comment): Form<UserComment>) -> Html<String> {
     Html(response_html)
 }
  */
+
+/*
+// validate
+use axum::{routing::post, Router};
+use axum_valid::Valid;
+use serde::Deserialize;
+use validator::Validate;
+
+// 1. Define the data structure with validation rules.
+#[derive(Debug, Deserialize, Validate)]
+pub struct CreateUser {
+    // Validate that the username has a minimum length of 3.
+    #[validate(length(min = 3))]
+    pub username: String,
+    // Validate that the email is a valid email format.
+    #[validate(email)]
+    pub email: String,
+    // Validate the URL starts with a safe protocol (http/https)
+    #[validate(url(protocols = &["http", "https"]))]
+    pub website: String,
+}
+
+// 2. Use the `Valid` extractor in your handler.
+// Axum will automatically return a 400 Bad Request if validation fails.
+async fn create_user(Valid(user): Valid<CreateUser>) -> String {
+    // The 'user' is guaranteed to be valid here.
+    format!("User created with valid username: {}", user.username)
+}
+
+// 3. Set up the router.
+fn app_router() -> Router {
+    Router::new().route("/users", post(create_user))
+}
+ */

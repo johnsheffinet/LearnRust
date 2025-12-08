@@ -718,3 +718,37 @@ async fn main() {
     .unwrap();
 }
  */
+
+/*
+// size limit
+use axum::{
+    Router,
+    routing::post,
+    extract::DefaultBodyLimit,
+    http::StatusCode,
+    response::IntoResponse,
+};
+use std::net::SocketAddr;
+
+// A handler that accepts a String body.
+// If the body exceeds the limit set by the layer, axum will return a 413 Payload Too Large error automatically.
+async fn handler(body: String) -> impl IntoResponse {
+    format!("Received body with length: {}", body.len())
+}
+
+#[tokio::main]
+async fn main() {
+    // Set the maximum body size to 1024 bytes (1 KB)
+    let app = Router::new()
+        .route("/", post(handler))
+        .layer(DefaultBodyLimit::max(1024)); //
+
+    // run our app with hyper
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    println!("listening on {}", addr);
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
+}
+ */

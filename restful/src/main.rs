@@ -539,3 +539,76 @@ async fn check_key(token: CsrfToken, Form(payload): Form<Keys>) -> &'static str 
     }
 }
  */
+
+/*
+// xss
+use axum::{
+    extract::Form,
+    response::Html,
+    routing::{get, post},
+    Router,
+};
+use serde::Deserialize;
+use ammonia::clean; // Import the clean function
+
+// A struct to model the input data from the HTML form
+#[derive(Debug, Deserialize)]
+struct UserComment {
+    username: String,
+    comment: String,
+}
+
+#[tokio::main]
+async fn main() {
+    // build our application with a route
+    let app = Router::new()
+        .route("/", get(show_form))
+        .route("/submit_comment", post(handle_submit));
+
+    // run our app with hyper
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    println!("Server listening on http://0.0.0.0:3000");
+    axum::serve(listener, app).await.unwrap();
+}
+
+// Handler to display the input form
+async fn show_form() -> Html<String> {
+    Html(r#"
+    <!DOCTYPE html>
+    <html>
+    <body>
+        <h2>Submit a Comment</h2>
+        <form action="/submit_comment" method="post">
+            <label for="username">Username:</label><br>
+            <input type="text" id="username" name="username" value="Anonymous"><br>
+            <label for="comment">Comment (some HTML allowed):</label><br>
+            <textarea id="comment" name="comment" rows="4" cols="50"></textarea><br><br>
+            <input type="submit" value="Submit">
+        </form>
+    </body>
+    </html>
+    "#.to_string())
+}
+
+// Handler to process the form submission
+async fn handle_submit(Form(user_comment): Form<UserComment>) -> Html<String> {
+    // Sanitize the comment using ammonia::clean()
+    // This removes dangerous tags/attributes like <script> or onerror
+    let sanitized_comment = clean(&user_comment.comment);
+
+    // Use the username and sanitized comment in the response
+    let response_html = format!(
+        "<h3>Comment Received</h3>
+        <p><strong>Username:</strong> {}</p>
+        <p><strong>Comment:</strong> {}</p>
+        <a href='/'>Go back</a>",
+        // The username should be HTML-encoded if it can contain HTML
+        // If it's expected to be just text, displaying it directly is fine
+        // but for full safety, use a proper templating engine that auto-escapes.
+        html_escape::encode_safe(&user_comment.username), 
+        sanitized_comment
+    );
+
+    Html(response_html)
+}
+ */

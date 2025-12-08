@@ -646,3 +646,75 @@ fn app_router() -> Router {
     Router::new().route("/users", post(create_user))
 }
  */
+
+/*
+// rate limit
+use axum::{
+    error_handling::HandleErrorLayer,
+    routing::get,
+    BoxError,
+    Router,
+};
+use http::StatusCode;
+use std::{net::SocketAddr, sync::Arc, time::Duration};
+use tower::ServiceBuilder;
+use tower_governor::{
+    governor::{GovernorConfigBuilder, GovernorConfig},
+    GovernorLayer,
+    // Use the SmartIpKeyExtractor to handle cases where your app is behind a reverse proxy
+    // it falls back to the peer IP if no headers are present
+    key_extractor::SmartIpKeyExtractor,
+};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
+async fn handler() -> &'static str {
+    "Hello, limited world!"
+}
+
+#[tokio::main]
+async fn main() {
+    // Initialize tracing for better logging and visibility
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .init();
+
+    // 1. Configure the rate limiter
+    // Allow bursts with up to 5 requests per IP address and replenishes 1 element every 1 second (5 per minute)
+    let governor_conf = Box::new(
+        GovernorConfigBuilder::default()
+            .per_second(1) // replenished every 1 second
+            .burst_size(5) // max burst size of 5 requests
+            .finish()
+            .unwrap(),
+    );
+
+    // The configuration needs a static lifetime to be used with the layer.
+    // Box::leak is a way to achieve this for demonstration purposes. In a real app, manage this carefully.
+    let governor_conf: &'static GovernorConfig = Box::leak(governor_conf);
+
+    // 2. Create the Axum router
+    let app = Router::new()
+        .route("/", get(handler))
+        .route("/unlimited", get(handler)) // This route will be rate-limited too, because the layer is applied globally
+        .layer(
+            ServiceBuilder::new()
+                // Handle errors from the rate limiter layer
+                .layer(HandleErrorLayer::new(|e: BoxError| async move {
+                    StatusCode::TOO_MANY_REQUESTS
+                }))
+                // Apply the rate limiting layer using SmartIpKeyExtractor for IP detection
+                .layer(GovernorLayer::new(governor_conf, SmartIpKeyExtractor)),
+        );
+
+    // 3. Run the application
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    tracing::info!("Listening on {}", addr);
+    axum::serve(
+        tokio::net::TcpListener::bind(addr).await.unwrap(),
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .unwrap();
+}
+ */

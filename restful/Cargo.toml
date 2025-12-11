@@ -4,6 +4,21 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ammonia = "4.1.2"
+axum = "0.8.7"
+axum-governor = "1.0.2"
+axum-response-cache = "0.4.0"
+axum-server = { version = "0.8.0", features = ["tls-rustls"] }
+axum-valid = "0.24.0"
+axum_csrf = "0.11.0"
+chrono = { version = "0.4.42", features = ["serde"] }
+jsonwebtoken = { version = "10.2.0", features = ["aws_lc_rs"] }
+http = "1.4.0"
+hyper = { version = "1.8.1", features = ["full"] }
+serde = { version = "1.0.228", features = ["derive"] }
+tokio = { version = "1.48.0", features = ["full"] }
+tower = { version = "0.5.2", features = ["limit", "buffer"] }
+validator = { version = "0.20.0", features = ["derive"] }
 # cargo add ammonia
 # cargo add axum
 # cargo add axum-csrf
@@ -12,13 +27,13 @@ edition = "2024"
 # cargo add axum-server --features tls-rustls
 # cargo add axum-valid
 # cargo add chrono --features serde
-# cargo add jsonwebtoken
+# cargo add jsonwebtoken --features aws_lc_rs
 # cargo add http
 # cargo add hyper --features full
 # cargo add serde --features derive
 # cargo add tokio --features full
-# cargo add tower --features limit, buffer
-# cargo add tower-http --features cors, limit, timeout, trace
+# cargo add tower --features limit,buffer
+# cargo add tower-http --features cors,limit,timeout,trace
 # cargo add tracing
 # cargo add tracing-subscriber
 # cargo add validator --features derive

@@ -4,79 +4,34 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-# tls
-# axum = "0.7"
-# axum-server = { version = "0.7", features = ["tls-rustls"] }
-# tokio = { version = "1", features = ["full"] }
-# # Optional for logging
-# tracing = "0.2"
-# tracing-subscriber = "0.3"
+# cargo add ammonia
+# cargo add axum
+# cargo add axum-csrf
+# cargo add axum-governor
+# cargo add axum-response-cache
+# cargo add axum-server --features tls-rustls
+# cargo add axum-valid
+# cargo add chrono --features serde
+# cargo add jsonwebtoken
+# cargo add http
+# cargo add hyper --features full
+# cargo add serde --features derive
+# cargo add tokio --features full
+# cargo add tower --features limit, buffer
+# cargo add tower-http --features cors, limit, timeout, trace
+# cargo add tracing
+# cargo add tracing-subscriber
+# cargo add validator --features derive
 
 # trc
-# axum = "0.7"
-# tokio = { version = "1", features = ["full"] }
-# hyper = { version = "0.14", features = ["full"] }
 # bytes = "1"
 # log = "0.4"
 # env_logger = "0.10"
 
 # auth
-# axum = "0.7"
-# tokio = { version = "1", features = ["full"] }
-# jsonwebtoken = "0.4"
-# serde = { version = "1", features = ["derive"] }
-# chrono = { version = "0.4", features = ["serde"] }
-# tower = "0.4"
 # anyhow = "1.0"
 # lazy_static = "1.4"
 
-# cache
-# axum = "0.7"
-# axum-response-cache = "0.4" # Check crates.io for the latest version
-# tokio = { version = "1", features = ["full"] }
-
-# cors
-# axum = "0.7"
-# tokio = { version = "1.0", features = ["full"] }
-# tower-http = { version = "0.5", features = ["cors", "trace"] }
-# http = "1.0"
-
-# csrf
-# axum = "0.7"
-# tokio = { version = "1.38", features = ["full"] }
-# tower-http = { version = "0.5", features = ["cors", "trace"] }
-# axum_csrf = "0.1.1" # Or a newer compatible version
-# tracing-subscriber = "0.3"
-# serde = { version = "1.0", features = ["derive"] }
-
-# xss
-# ammonia = "4.1" # Use the latest version from crates.io
-# axum = "0.7"
-# tokio = { version = "1", features = ["full"] }
-# serde = { version = "1.0", features = ["derive"] }
-
-# validate
-# axum = "0.7"
-# serde = { version = "1.0", features = ["derive"] }
-# tokio = { version = "1.0", features = ["full"] }
-# validator = { version = "0.16", features = ["derive"] }
-# axum-valid = "0.10" # or axum-validated-extractors
-# ammonia = "0.7" # for output sanitization later
-
 # rate limit
-# axum = "0.7"
-# tokio = { version = "1", features = ["full"] }
-# tower = { version = "0.4", features = ["limit", "buffer"] }
-# axum-governor = "0.2" # Use the latest version
 # lazy-limit = "2"      # Use the latest version
 # real = { version = "0.5", features = ["axum"] } # Use the latest version with axum feature
-
-# size limit
-# tower-http = { version = "0.5", features = ["limit"] }
-
-# time limit
-# axum = "0.7"
-# tokio = { version = "1", features = ["full"] }
-# tower = "0.4"
-# tower-http = { version = "0.5", features = ["timeout"] }
-# http = "1.0"

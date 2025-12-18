@@ -2,8 +2,8 @@ fn main() {
     println!("Hello, world!");
 }
 
-// mod handlers {
-//     mod tls {
+mod handlers {
+    mod tls {
             // use axum::{
             //     body::Body,
             //     http::{Request, StatusCode, Uri},
@@ -94,7 +94,8 @@ fn main() {
             // async fn https_fallback(uri: Uri) -> impl IntoResponse {
             //     (StatusCode::NOT_FOUND, format!("Not Found: No route for {}", uri.path()))
             // }
-//     }
+    }
+}
 //     mod trc {
 //         use axum::{
 //             body::{Body, Bytes},

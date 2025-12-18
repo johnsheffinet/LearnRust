@@ -4,92 +4,96 @@ fn main() {
 
 // mod handlers {
 //     mod tls {
-//         use axum::{
-//             http::uri::Uri,
-//             response::Redirect,
-//             routing::get,
-//             Router,
-//         };
-//         use axum_server::tls_rustls::RustlsConfig;
-//         use std::net::SocketAddr;
-//         use tokio;
-        
-//         // Function to generate certs (as shown in Step 2)
-//         fn generate_certs() {
-//             // ... (insert the generate_certs function from above) ...
-//             use rcgen::{generate_simple_self_signed, CertifiedKey};
-//             use std::fs;
-        
-//             let subject_alt_names = vec!["localhost".to_string(), "127.0.0.1".to_string()];
-//             let CertifiedKey { cert, key_pair } = generate_simple_self_signed(subject_alt_names)
-//                 .expect("Failed to generate self-signed certs");
-        
-//             fs::create_dir_all("certs").expect("Failed to create certs directory");
-//             fs::write("certs/cert.pem", cert.pem.as_bytes()).expect("Failed to write cert.pem");
-//             fs::write("certs/key.pem", key_pair.serialize_pem().as_bytes()).expect("Failed to write key.pem");
-//             println!("Generated self-signed certificates in 'certs/' directory.");
-//         }
-        
-        
-//         #[tokio::main]
-//         async fn main() {
-//             // Generate certificates if they don't exist
-//             if !std::path::Path::new("certs/cert.pem").exists() {
-//                 generate_certs();
-//             }
-        
-//             let http_port = 3000;
-//             let https_port = 3443;
-        
-//             let http_server_handle = tokio::spawn(http_server(http_port, https_port));
-//             let https_server_handle = tokio::spawn(https_server(https_port));
-        
-//             // Wait for both servers to complete (which should be never in a long-running app)
-//             let _ = tokio::join!(http_server_handle, https_server_handle);
-//         }
-        
-//         // The HTTP server's job is purely to redirect to HTTPS
-//         async fn http_server(http_port: u16, https_port: u16) {
-//             let app = Router::new().route("/*path", get(http_handler));
-        
-//             let addr = SocketAddr::from(([127, 0, 0, 1], http_port));
-//             println!("HTTP server listening on {}", addr);
+            // use axum::{
+            //     body::Body,
+            //     http::{Request, StatusCode, Uri},
+            //     response::{IntoResponse, Redirect},
+            //     routing::get,
+            //     Router,
+            // };
+            // use axum_server::tls_rustls::RustlsConfig;
+            // use std::net::SocketAddr;
+            // use std::path::PathBuf;
+            // use tower::ServiceBuilder;
+            // use std::convert::Infallible;
+            // use axum::error_handling::HandleErrorLayer;
             
-//             axum_server::bind(addr)
-//                 .serve(app.into_make_service())
-//                 .await
-//                 .unwrap();
-//         }
-        
-//         // The handler extracts the path and redirects to the HTTPS URL
-//         async fn http_handler(uri: Uri) -> Redirect {
-//             let uri_string = format!("https://127.0.0.1:3443{}", uri.path());
-//             Redirect::temporary(&uri_string) // Use temporary redirect for development
-//         }
-        
-//         // The main HTTPS server with the REST application routes
-//         async fn https_server(https_port: u16) {
-//             // Configure the server to use the generated self-signed certificates
-//             let config = RustlsConfig::from_pem_file(
-//                 "certs/cert.pem",
-//                 "certs/key.pem",
-//             )
-//             .await
-//             .expect("Failed to load TLS config");
-        
-//             // Define your application routes
-//             let app = Router::new()
-//                 .route("/", get(|| async { "Hello from HTTPS!" }))
-//                 .route("/api/data", get(|| async { "{ \"data\": \"secure data\" }" }));
-        
-//             let addr = SocketAddr::from(([127, 0, 0, 1], https_port));
-//             println!("HTTPS server listening on {}", addr);
-        
-//             axum_server::bind_rustls(addr, config)
-//                 .serve(app.into_make_service())
-//                 .await
-//                 .unwrap();
-//         }
+            // #[tokio::main]
+            // async fn main() {
+            //     // Define HTTP and HTTPS ports
+            //     let http_port = 3000;
+            //     let https_port = 3443;
+            
+            //     // Spawn the HTTP server in a separate task
+            //     tokio::spawn(http_server(http_port, https_port));
+            
+            //     // Run the HTTPS server
+            //     https_server(https_port).await;
+            // }
+            
+            // // Function to handle HTTP requests and redirect them to HTTPS
+            // async fn http_server(http_port: u16, https_port: u16) {
+            //     // The main logic is in the fallback: any request not matched by a specific route goes here.
+            //     // Since we have no other routes, all requests are handled by http_handler.
+            //     let app = Router::new()
+            //         .fallback(http_handler)
+            //         .layer(
+            //             ServiceBuilder::new()
+            //                 .layer(HandleErrorLayer::new(|_| async move {
+            //                     (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
+            //                 }))
+            //         );
+            
+            //     let addr = SocketAddr::from((, http_port));
+            //     println!("HTTP listening on {}", addr);
+            
+            //     axum_server::bind(addr)
+            //         .serve(app.into_make_service())
+            //         .await
+            //         .unwrap();
+            // }
+            
+            // async fn http_handler(req: Request<Body>) -> impl IntoResponse {
+            //     let uri = req.uri();
+            //     // Reconstruct the URI as HTTPS, preserving the path and query
+            //     let new_uri_string = format!("https://127.0.0.1:{}{}", 3443, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/"));
+                
+            //     // Use Temporary Redirect (307) to preserve the original HTTP method (POST, PUT, etc.) and body.
+            //     Redirect::temporary(&new_uri_string)
+            // }
+            
+            // // Function to run the HTTPS server with rest endpoints and a fallback
+            // async fn https_server(https_port: u16) {
+            //     // Configure TLS with the self-signed certificates
+            //     let config = RustlsConfig::from_pem_file(
+            //         PathBuf::from("cert.pem"), // Adjust path if necessary
+            //         PathBuf::from("key.pem"),  // Adjust path if necessary
+            //     )
+            //     .await
+            //     .unwrap();
+            
+            //     // Define the main application router for HTTPS
+            //     let app = Router::new()
+            //         // Define specific REST routes
+            //         .route("/", get(|| async { "Hello from HTTPS GET!" }))
+            //         .route("/users", axum::routing::post(|| async { "User created via HTTPS POST!" }))
+            //         // Add more routes here...
+            //         // Fallback for HTTPS server if no route matches
+            //         .fallback(https_fallback);
+            
+            //     let addr = SocketAddr::from((, https_port));
+            //     println!("HTTPS listening on {}", addr);
+            
+            //     axum_server::bind_rustls(addr, config)
+            //         .serve(app.into_make_service())
+            //         .await
+            //         .unwrap();
+            // }
+            
+            // // Fallback handler for the HTTPS server (e.g., a 404 Not Found)
+            // async fn https_fallback(uri: Uri) -> impl IntoResponse {
+            //     (StatusCode::NOT_FOUND, format!("Not Found: No route for {}", uri.path()))
+            // }
 //     }
 //     mod trc {
 //         use axum::{

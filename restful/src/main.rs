@@ -1,8 +1,55 @@
-fn main() {
-    println!("Hello, world!");
+#[tokio::main]
+async fn main() {
+    use crate::handlers::utils;
+    use crate::handlers::tls;
+
+    let http_addr = utils::get_env_var("HTTP_ADDR");
+    let https_addr = utils::get_env_var("HTTPS_ADDR");
+    let cert_path = utils::get_env_var("CERT_PATH");
+    let key_path = utils::get_env_var("KEY_PATH");
+
+    let serve_app_over_https_task = tokio::spawn(
+        tls::serve_app_over_https(
+            https_addr,
+            cert_path,
+            key_path,
+        )
+    )
+
+    let redirect_req_to_https_task = tokio::spawn(
+        tls::redirect_req_to_https(
+            http_addr,
+            https_addr,
+        )
+    )
+
+    tokio::join!(
+        serve_app_over_https_task,
+        redirect_req_to_https_task,
+    );
 }
 
 mod handlers {
+    mod utils {
+        async fn get_env_var(key: &str) -> &str {
+            std::env::var(key)
+                .await
+                .expect(
+                    &format!(
+                        "Failed to get {} environment variable!",
+                        key,
+                    )
+                )
+        }
+        async fn get_env_var(key: &str) -> &str {
+            std::env::var(key)
+                .await
+                .expect(&format!(
+                    "Failed to get {} environment variable!",
+                    key,
+                ))
+        }
+    }
     mod tls {
             // use axum::{
             //     body::Body,
@@ -17,19 +64,6 @@ mod handlers {
             // use tower::ServiceBuilder;
             // use std::convert::Infallible;
             // use axum::error_handling::HandleErrorLayer;
-            
-            // #[tokio::main]
-            // async fn main() {
-            //     // Define HTTP and HTTPS ports
-            //     let http_port = 3000;
-            //     let https_port = 3443;
-            
-            //     // Spawn the HTTP server in a separate task
-            //     tokio::spawn(http_server(http_port, https_port));
-            
-            //     // Run the HTTPS server
-            //     https_server(https_port).await;
-            // }
             
             // // Function to handle HTTP requests and redirect them to HTTPS
             // async fn http_server(http_port: u16, https_port: u16) {
@@ -947,15 +981,5 @@ mod handlers {
 //             axum::serve(listener, app)
 //                 .await
 //                 .unwrap();
-//         }
-//         mod utils {
-//             async fn get_env_var(key: &str) -> &str {
-//                 std::env::var(key)
-//                     .await
-//                     .expect(&format!(
-//                         "Failed to get {} environment variable!",
-//                         key,
-//                     ))
-//             }
 //         }
 // }

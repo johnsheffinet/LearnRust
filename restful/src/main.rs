@@ -14,18 +14,13 @@ async fn main() {
             cert_path,
             key_path,
         )
-    )
+    );
 
     let redirect_req_to_https_task = tokio::spawn(
         tls::redirect_req_to_https(
             http_addr,
             https_addr,
         )
-    )
-
-    tokio::join!(
-        serve_app_over_https_task,
-        redirect_req_to_https_task,
     );
 }
 
@@ -51,51 +46,56 @@ mod handlers {
         }
     }
     mod tls {
-            // use axum::{
-            //     body::Body,
-            //     http::{Request, StatusCode, Uri},
-            //     response::{IntoResponse, Redirect},
-            //     routing::get,
-            //     Router,
-            // };
-            // use axum_server::tls_rustls::RustlsConfig;
-            // use std::net::SocketAddr;
-            // use std::path::PathBuf;
-            // use tower::ServiceBuilder;
-            // use std::convert::Infallible;
-            // use axum::error_handling::HandleErrorLayer;
-            
-            // // Function to handle HTTP requests and redirect them to HTTPS
-            // async fn http_server(http_port: u16, https_port: u16) {
-            //     // The main logic is in the fallback: any request not matched by a specific route goes here.
-            //     // Since we have no other routes, all requests are handled by http_handler.
-            //     let app = Router::new()
-            //         .fallback(http_handler)
-            //         .layer(
-            //             ServiceBuilder::new()
-            //                 .layer(HandleErrorLayer::new(|_| async move {
-            //                     (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
-            //                 }))
-            //         );
-            
-            //     let addr = SocketAddr::from((, http_port));
-            //     println!("HTTP listening on {}", addr);
-            
-            //     axum_server::bind(addr)
-            //         .serve(app.into_make_service())
-            //         .await
-            //         .unwrap();
-            // }
-            
-            // async fn http_handler(req: Request<Body>) -> impl IntoResponse {
-            //     let uri = req.uri();
-            //     // Reconstruct the URI as HTTPS, preserving the path and query
-            //     let new_uri_string = format!("https://127.0.0.1:{}{}", 3443, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/"));
-                
-            //     // Use Temporary Redirect (307) to preserve the original HTTP method (POST, PUT, etc.) and body.
-            //     Redirect::temporary(&new_uri_string)
-            // }
-            
+        async fn serve_app_over_https(
+            https_addr: &str,
+            cert_path: &str,
+            key_path: &str,
+        ) {
+            let addr: std::net::SocketAddr = https_addr
+                .parse()
+                .expect(
+                    &format!(
+                        "",
+                        https_addr,
+                    )
+                );
+
+            let config = axum_server::tls_rustls::RustlsConfig::
+                from_pem_file(
+                    &cert_path,
+                    &key_path,
+                )
+                .await
+                .expect(
+                    &format!(
+                        "",
+                        &cert_path,
+                        &key_path,
+                    )
+                );
+
+            let app = axum::Router::new()
+                .route(
+                    "",
+                    
+                )
+                .fallback()
+
+            loop {
+                axum_server::
+                    bind_rustls(
+                        addr,
+                        config,
+                    )
+                    .serve(app.make_into_service)
+                    .await
+                    .expect(
+                        &format!(
+                            "",
+                            ,
+                        )
+                    );
+            }
             // // Function to run the HTTPS server with rest endpoints and a fallback
             // async fn https_server(https_port: u16) {
             //     // Configure TLS with the self-signed certificates
@@ -125,9 +125,63 @@ mod handlers {
             // }
             
             // // Fallback handler for the HTTPS server (e.g., a 404 Not Found)
-            // async fn https_fallback(uri: Uri) -> impl IntoResponse {
-            //     (StatusCode::NOT_FOUND, format!("Not Found: No route for {}", uri.path()))
+            // async fn https_fallback(uri: axum::http::Uri) -> impl axum::response::IntoResponse {
+            //     (axum::http::StatusCode::NOT_FOUND, format!("Not Found: No route for {}", uri.path()))
             // }
+            
+        }
+
+        async fn redirect_req_to https(
+            http_addr: &str,
+            https_addr: &str,
+        ) {
+
+            // // Function to handle HTTP requests and redirect them to HTTPS
+            // async fn http_server(http_port: u16, https_port: u16) {
+            //     // The main logic is in the fallback: any request not matched by a specific route goes here.
+            //     // Since we have no other routes, all requests are handled by http_handler.
+            //     let app = axum::Router::new()
+            //         .fallback(http_handler)
+            //         .layer(
+            //             tower::ServiceBuilder::new()
+            //                 .layer(axum::error_handling::HandleErrorLayer::new(|_| async move {
+            //                     (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
+            //                 }))
+            //         );
+            
+            //     let addr = std::net::SocketAddr::from((, http_port));
+            //     println!("HTTP listening on {}", addr);
+            
+            //     axum_server::bind(addr)
+            //         .serve(app.into_make_service())
+            //         .await
+            //         .unwrap();
+            // }
+            
+            // async fn http_handler(req: axum::http::Request<axum::body::Body>) -> impl axum::response::IntoResponse {
+            //     let uri = req.uri();
+            //     // Reconstruct the URI as HTTPS, preserving the path and query
+            //     let new_uri_string = format!("https://127.0.0.1:{}{}", 3443, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/"));
+                
+            //     // Use Temporary Redirect (307) to preserve the original HTTP method (POST, PUT, etc.) and body.
+            //     axum::response::Redirect::temporary(&new_uri_string)
+            // }            
+        }
+            // use axum::{
+            //     body::Body,
+            //     http::{Request, StatusCode, Uri},
+            //     response::{IntoResponse, Redirect},
+            //     routing::get,
+            //     Router,
+            // };
+            // use axum_server::tls_rustls::RustlsConfig;
+            // use std::net::SocketAddr;
+            // use std::path::PathBuf;
+            // use tower::ServiceBuilder;
+            // use std::convert::Infallible;
+            // use axum::error_handling::HandleErrorLayer;
+            
+            
     }
 }
 //     mod trc {

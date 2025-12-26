@@ -38,6 +38,8 @@ mod handlers {
         }
     }
     mod tls {
+        use axum::http::StatusCode;
+        
         async fn serve_app_over_https(
             https_addr: &str,
             cert_path: &str,
@@ -47,7 +49,7 @@ mod handlers {
                 .parse()
                 .expect(
                     &format!(
-                        "",
+                        "Failed to parse {} address!",
                         https_addr,
                     )
                 );
@@ -60,7 +62,7 @@ mod handlers {
                 .await
                 .expect(
                     &format!(
-                        "",
+                        "Failed to load {} or {} file!",
                         &cert_path,
                         &key_path,
                     )
@@ -68,23 +70,29 @@ mod handlers {
 
             let app = axum::Router::new()
                 .route(
-                    "",
-                    
+                    "/healthz",
+                    axum::routing::get(|| async {(StatusCode::OK).into_response}
                 )
-                .fallback()
+                .fallback(|uri| async {(
+                    StatusCode::NOT_FOUND, 
+                    &format!(
+                        "{} route is invalid!", 
+                        uri.path(),
+                    )
+                    .into_response
+                )}
 
             loop {
                 axum_server::
                     bind_rustls(
                         addr,
-                        config,
-                    )
+                        config,)
                     .serve(app.make_into_service)
                     .await
                     .expect(
                         &format!(
-                            "",
-                            ,
+                            "Failed to serve app over {} address!",
+                            addr,
                         )
                     );
             }
@@ -123,7 +131,7 @@ mod handlers {
             
         }
 
-        async fn redirect_req_to https(
+        async fn redirect_req_to_https(
             http_addr: &str,
             https_addr: &str,
         ) {

@@ -1,84 +1,50 @@
 #[tokio::main]
 async fn main() {
-    use crate::handlers::utils;
     use crate::handlers::tls;
+    use crate::handlers::utils;
 
     let http_addr = utils::get_env_var("HTTP_ADDR");
     let https_addr = utils::get_env_var("HTTPS_ADDR");
     let cert_path = utils::get_env_var("CERT_PATH");
     let key_path = utils::get_env_var("KEY_PATH");
 
-    tokio::spawn(
-        tls::serve_app_over_https(
-            https_addr.clone(),
-            cert_path,
-            key_path,
-        )
-    );
+    tokio::spawn(tls::serve_app_over_https(
+        https_addr.clone(),
+        cert_path,
+        key_path,
+    ));
 
-    tokio::spawn(
-        tls::redirect_req_to_https(
-            http_addr,
-            https_addr,
-        )
-    );
+    tokio::spawn(tls::redirect_req_to_https(http_addr, https_addr));
 }
 
 pub(crate) mod handlers {
     pub mod utils {
         pub fn get_env_var(key: &str) -> String {
-            std::env::var(key)
-                .expect(
-                    &format!(
-                        "Failed to get {} environment variable!",
-                        key,
-                    )
-                )
+            std::env::var(key).expect(&format!("Failed to get {} environment variable!", key,))
         }
     }
     pub mod tls {
         use axum::http::StatusCode;
-        
-        pub async fn serve_app_over_https(
-            https_addr: String,
-            cert_path: String,
-            key_path: String,
-        ) {
+
+        pub async fn serve_app_over_https(https_addr: String, cert_path: String, key_path: String) {
             let addr: std::net::SocketAddr = https_addr
                 .parse()
-                .expect(
-                    &format!(
-                        "Failed to parse {} address!",
-                        https_addr,
-                    )
-                );
+                .expect(&format!("Failed to parse {} address!", https_addr,));
 
-            let config = axum_server::tls_rustls::RustlsConfig::
-                from_pem_file(
-                    &cert_path,
-                    &key_path,
-                )
-                .await
-                .expect(
-                    &format!(
+            let config =
+                axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path)
+                    .await
+                    .expect(&format!(
                         "Failed to load {} or {} file!",
-                        &cert_path,
-                        &key_path,
-                    )
-                );
+                        &cert_path, &key_path,
+                    ));
 
             let app = axum::Router::new()
-                .route(
-                    "/healthz",
-                    axum::routing::get(|| async {StatusCode::OK})
-                )
-                .fallback(|uri: axum::http::Uri| async move{
+                .route("/healthz", axum::routing::get(|| async { StatusCode::OK }))
+                .fallback(|uri: axum::http::Uri| async move {
                     (
                         StatusCode::NOT_FOUND,
-                        format!(
-                            "{} route is invalid!",
-                            uri.path(),
-                        ),
+                        format!("{} route is invalid!", uri.path(),),
                     )
                 });
 
@@ -86,12 +52,7 @@ pub(crate) mod handlers {
                 axum_server::bind_rustls(addr, config.clone())
                     .serve(app.clone().into_make_service())
                     .await
-                    .expect(
-                        &format!(
-                            "Failed to serve app over {} address!",
-                            addr,
-                        )
-                    );
+                    .expect(&format!("Failed to serve app over {} address!", addr,));
             }
             // // Function to run the HTTPS server with rest endpoints and a fallback
             // async fn https_server(https_port: u16) {
@@ -102,7 +63,7 @@ pub(crate) mod handlers {
             //     )
             //     .await
             //     .unwrap();
-            
+
             //     // Define the main application router for HTTPS
             //     let app = Router::new()
             //         // Define specific REST routes
@@ -111,27 +72,23 @@ pub(crate) mod handlers {
             //         // Add more routes here...
             //         // Fallback for HTTPS server if no route matches
             //         .fallback(https_fallback);
-            
+
             //     let addr = SocketAddr::from((, https_port));
             //     println!("HTTPS listening on {}", addr);
-            
+
             //     axum_server::bind_rustls(addr, config)
             //         .serve(app.into_make_service())
             //         .await
             //         .unwrap();
             // }
-            
+
             // // Fallback handler for the HTTPS server (e.g., a 404 Not Found)
             // async fn https_fallback(uri: axum::http::Uri) -> impl axum::response::IntoResponse {
             //     (axum::http::StatusCode::NOT_FOUND, format!("Not Found: No route for {}", uri.path()))
             // }
-            
         }
 
-        pub async fn redirect_req_to_https(
-            http_addr: String,
-            https_addr: String,
-        ) {
+        pub async fn redirect_req_to_https(http_addr: String, https_addr: String) {
 
             // // Function to handle HTTP requests and redirect them to HTTPS
             // async fn http_server(http_port: u16, https_port: u16) {
@@ -145,40 +102,38 @@ pub(crate) mod handlers {
             //                     (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
             //                 }))
             //         );
-            
+
             //     let addr = std::net::SocketAddr::from((, http_port));
             //     println!("HTTP listening on {}", addr);
-            
+
             //     axum_server::bind(addr)
             //         .serve(app.into_make_service())
             //         .await
             //         .unwrap();
             // }
-            
+
             // async fn http_handler(req: axum::http::Request<axum::body::Body>) -> impl axum::response::IntoResponse {
             //     let uri = req.uri();
             //     // Reconstruct the URI as HTTPS, preserving the path and query
             //     let new_uri_string = format!("https://127.0.0.1:{}{}", 3443, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/"));
-                
+
             //     // Use Temporary Redirect (307) to preserve the original HTTP method (POST, PUT, etc.) and body.
             //     axum::response::Redirect::temporary(&new_uri_string)
-            // }            
+            // }
         }
-            // use axum::{
-            //     body::Body,
-            //     http::{Request, StatusCode, Uri},
-            //     response::{IntoResponse, Redirect},
-            //     routing::get,
-            //     Router,
-            // };
-            // use axum_server::tls_rustls::RustlsConfig;
-            // use std::net::SocketAddr;
-            // use std::path::PathBuf;
-            // use tower::ServiceBuilder;
-            // use std::convert::Infallible;
-            // use axum::error_handling::HandleErrorLayer;
-            
-            
+        // use axum::{
+        //     body::Body,
+        //     http::{Request, StatusCode, Uri},
+        //     response::{IntoResponse, Redirect},
+        //     routing::get,
+        //     Router,
+        // };
+        // use axum_server::tls_rustls::RustlsConfig;
+        // use std::net::SocketAddr;
+        // use std::path::PathBuf;
+        // use tower::ServiceBuilder;
+        // use std::convert::Infallible;
+        // use axum::error_handling::HandleErrorLayer;
     }
 }
 //     mod trc {
@@ -195,14 +150,14 @@ pub(crate) mod handlers {
 //         use std::task::{Context, Poll};
 //         use tracing::{info, Level};
 //         use tracing_subscriber::{fmt, prelude::*, filter::LevelFilter};
-        
+
 //         // A helper function to buffer and print the body.
 //         // This is necessary because the body is a stream and must be consumed or re-wrapped.
 //         async fn buffer_and_print(label: &str, body: Body) -> Result<Bytes, StatusCode> {
 //             let bytes = hyper::body::to_bytes(body)
 //                 .await
 //                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        
+
 //             if !bytes.is_empty() {
 //                 if let Ok(s) = std::str::from_utf8(&bytes) {
 //                     info!("{} body: {}", label, s);
@@ -212,64 +167,64 @@ pub(crate) mod handlers {
 //             } else {
 //                 info!("{} body: (empty)", label);
 //             }
-        
+
 //             Ok(bytes)
 //         }
-        
+
 //         // The core middleware function
 //         async fn logging_middleware(
 //             req: Request<Body>,
 //             next: Next<Body>,
 //         ) -> Result<Response<Body>, (StatusCode, String)> {
 //             let (req_parts, req_body) = req.into_parts();
-            
+
 //             // Log Request details
 //             info!("Incoming Request:");
 //             info!("- Method: {:?}", req_parts.method);
 //             info!("- URI: {:?}", req_parts.uri);
 //             info!("- Version: {:?}", req_parts.version);
 //             info!("- Headers: {:#?}", req_parts.headers);
-        
+
 //             // Buffer and log the request body, then create a new request with the buffered body
 //             let req_bytes = buffer_and_print("Request", req_body).await.map_err(|e| (e, "Bad request body".to_string()))?;
 //             let req = Request::from_parts(req_parts, Body::from(req_bytes));
-        
+
 //             // Process the request
 //             let res = next.run(req).await;
-        
+
 //             let (res_parts, res_body) = res.into_parts();
-        
+
 //             // Log Response details
 //             info!("Outgoing Response:");
 //             info!("- Version: {:?}", res_parts.version);
 //             info!("- Status: {:?}", res_parts.status);
 //             info!("- Headers: {:#?}", res_parts.headers);
-        
+
 //             // Buffer and log the response body, then create a new response with the buffered body
 //             let res_bytes = buffer_and_print("Response", res_body).await.map_err(|e| (e, "Bad response body".to_string()))?;
 //             let res = Response::from_parts(res_parts, Body::from(res_bytes));
-            
+
 //             Ok(res)
 //         }
-        
+
 //         // A simple handler
 //         async fn hello_world() -> &'static str {
 //             "Hello, World!"
 //         }
-        
+
 //         #[tokio::main]
 //         async fn main() {
 //             // Initialize tracing subscriber for logging
 //             tracing_subscriber::fmt()
 //                 .with_max_level(Level::INFO)
 //                 .init();
-        
+
 //             // Build the application with the custom middleware layer
 //             let app = Router::new()
 //                 .route("/", get(hello_world))
 //                 // Apply the middleware as a layer
 //                 .layer(middleware::from_fn(logging_middleware));
-        
+
 //             // Run the server
 //             let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
 //             info!("listening on {}", addr);
@@ -292,20 +247,20 @@ pub(crate) mod handlers {
 //         use once_cell::sync::Lazy;
 //         use serde::{Deserialize, Serialize};
 //         use std::{collections::HashMap, sync::Arc};
-        
+
 //         // --- Configuration and State ---
-        
+
 //         // Secret key for JWT signing/verification. In a real app, load this securely.
 //         static KEYS: Lazy<Keys> = Lazy::new(|| {
 //             let secret = "your-secret-key"; // Use a strong, persistent key in production
 //             Keys::new(secret.as_bytes())
 //         });
-        
+
 //         struct Keys {
 //             encoding: EncodingKey,
 //             decoding: DecodingKey,
 //         }
-        
+
 //         impl Keys {
 //             fn new(secret: &[u8]) -> Self {
 //                 Self {
@@ -314,14 +269,14 @@ pub(crate) mod handlers {
 //                 }
 //             }
 //         }
-        
+
 //         // User role definition
 //         #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Hash)]
 //         enum Role {
 //             User,
 //             Admin,
 //         }
-        
+
 //         // Claims in the JWT
 //         #[derive(Debug, Deserialize, Serialize)]
 //         struct Claims {
@@ -329,19 +284,19 @@ pub(crate) mod handlers {
 //             role: Role,
 //             exp: usize, // Expiration time
 //         }
-        
+
 //         // In-memory user store for RBAC (mapping user ID to Role)
 //         // In a real application, this would likely be a database lookup
 //         type RbacStore = Arc<HashMap<String, Role>>;
-        
+
 //         // Application state to hold the RBAC store
 //         #[derive(Clone)]
 //         struct AppState {
 //             rbac_store: RbacStore,
 //         }
-        
+
 //         // --- Authentication and Authorization Logic (Middleware) ---
-        
+
 //         async fn auth_middleware(
 //             State(state): State<AppState>,
 //             headers: HeaderMap,
@@ -352,13 +307,13 @@ pub(crate) mod handlers {
 //                 .get(http::header::AUTHORIZATION)
 //                 .and_then(|header| header.to_str().ok())
 //                 .ok_or(StatusCode::UNAUTHORIZED)?;
-        
+
 //             if !auth_header.starts_with("Bearer ") {
 //                 return Err(StatusCode::UNAUTHORIZED);
 //             }
-        
+
 //             let token = &auth_header[7..];
-        
+
 //             // Decode the token
 //             let claims = decode::<Claims>(
 //                 token,
@@ -367,30 +322,30 @@ pub(crate) mod handlers {
 //             )
 //             .map_err(|_| StatusCode::UNAUTHORIZED)?
 //             .claims;
-        
+
 //             // Verify user role in the in-memory store
 //             let user_role = state.rbac_store.get(&claims.sub);
 //             if user_role.is_none() || user_role.unwrap() != &claims.role {
 //                 return Err(StatusCode::FORBIDDEN); // Token is valid but role doesn't match store
 //             }
-            
+
 //             // Insert the claims into request extensions for handler access
 //             req.extensions_mut().insert(claims);
-        
+
 //             Ok(next.run(req).await)
 //         }
-        
+
 //         // Handler extractor for protected routes
 //         #[derive(Debug, Clone, Deserialize, Serialize)]
 //         struct CurrentUser(Claims);
-        
+
 //         #[axum::async_trait]
 //         impl<S> FromRequestParts<S> for CurrentUser
 //         where
 //             S: Send + Sync,
 //         {
 //             type Rejection = StatusCode;
-        
+
 //             async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
 //                 // Extract the `CurrentUser` from the request extensions
 //                 parts
@@ -401,46 +356,46 @@ pub(crate) mod handlers {
 //                     .ok_or(StatusCode::INTERNAL_SERVER_ERROR) // Should be set by middleware
 //             }
 //         }
-        
+
 //         // --- Route Handlers ---
-        
+
 //         // Public handler
 //         async fn public_handler() -> &'static str {
 //             "Hello, public user!"
 //         }
-        
+
 //         // Login handler (generates a JWT)
 //         async fn login_handler() -> Json<String> {
 //             let user_id = "test-user-id-123".to_string(); // In a real app, validate credentials first
 //             let user_role = Role::User;
-        
+
 //             let expiration = chrono::Utc::now()
 //                 .checked_add_days(chrono::Days::new(1))
 //                 .expect("valid timestamp")
 //                 .timestamp();
-        
+
 //             let claims = Claims {
 //                 sub: user_id.clone(),
 //                 role: user_role,
 //                 exp: expiration as usize,
 //             };
-        
+
 //             let token = encode(&Header::default(), &claims, &KEYS.encoding)
 //                 .expect("Failed to encode JWT");
-        
+
 //             // Add the user to the in-memory store upon successful "login"
 //             // (This is a simplistic in-memory store simulation)
 //             // For this example, we populate the store in `main` for simplicity of demonstration
 //             // state.rbac_store.lock().unwrap().insert(user_id, user_role);
-        
+
 //             Json(token)
 //         }
-        
+
 //         // Protected handler, requires valid JWT and role
 //         async fn protected_handler(CurrentUser(user): CurrentUser) -> String {
 //             format!("Hello, protected user: {} with role {:?}", user.sub, user.role)
 //         }
-        
+
 //         // Admin-only handler, requires admin role (not fully implemented in the generic middleware above,
 //         // but the role is available in `CurrentUser` for a specific handler check or a more granular middleware)
 //         async fn admin_handler(CurrentUser(user): CurrentUser) -> Result<String, StatusCode> {
@@ -450,14 +405,14 @@ pub(crate) mod handlers {
 //                 Err(StatusCode::FORBIDDEN)
 //             }
 //         }
-        
+
 //         // --- Main Application Setup ---
-        
+
 //         use axum::extract::FromRequestParts;
 //         use axum::http::request::Parts;
 //         use axum::response::Response;
 //         use axum::Request;
-        
+
 //         #[tokio::main]
 //         async fn main() {
 //             // Setup in-memory RBAC store with some initial users
@@ -465,9 +420,9 @@ pub(crate) mod handlers {
 //             rbac_map.insert("test-user-id-123".to_string(), Role::User);
 //             rbac_map.insert("admin-user-id-456".to_string(), Role::Admin);
 //             let rbac_store = Arc::new(rbac_map);
-        
+
 //             let app_state = AppState { rbac_store };
-        
+
 //             // Build the application routes
 //             let app = Router::new()
 //                 .route("/public", get(public_handler))
@@ -477,19 +432,19 @@ pub(crate) mod handlers {
 //                 .route("/protected", get(protected_handler))
 //                 .route("/admin", get(admin_handler))
 //                 .with_state(app_state); // Share state with all handlers
-        
+
 //             // Run the server
 //             let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
 //             println!("Server running on http://0.0.0.0:3000");
 //             axum::serve(listener, app).await.unwrap();
 //         }
-        
+
 //         // Add the necessary imports:
 //         use std::sync::Mutex;
 //         // ... other imports from the previous example
-        
+
 //         // --- Updated Claims and State ---
-        
+
 //         #[derive(Debug, Deserialize, Serialize, Clone)]
 //         struct Claims {
 //             sub: String, // User ID (subject)
@@ -497,65 +452,65 @@ pub(crate) mod handlers {
 //             exp: usize, // Expiration time
 //             jti: String, // JWT ID for token pair tracking
 //         }
-        
+
 //         // In-memory store for active refresh tokens.
 //         // Stores jti (JWT ID) of the refresh token to allow validation and invalidation.
-//         type RefreshTokenStore = Arc<Mutex<HashMap<String, String>>>; 
-        
+//         type RefreshTokenStore = Arc<Mutex<HashMap<String, String>>>;
+
 //         #[derive(Clone)]
 //         struct AppState {
 //             rbac_store: RbacStore,
 //             refresh_tokens: RefreshTokenStore, // Add refresh token store
 //         }
-        
+
 //         // --- Helper Functions ---
-        
+
 //         // Function to generate a new token
 //         fn generate_token(user_id: &str, role: Role, expiration_days: u64, jti: String) -> String {
 //             let expiration = chrono::Utc::now()
 //                 .checked_add_days(chrono::Days::new(expiration_days))
 //                 .expect("valid timestamp")
 //                 .timestamp();
-        
+
 //             let claims = Claims {
 //                 sub: user_id.to_string(),
 //                 role,
 //                 exp: expiration as usize,
 //                 jti,
 //             };
-        
+
 //             encode(&Header::default(), &claims, &KEYS.encoding)
 //                 .expect("Failed to encode JWT")
 //         }
-        
+
 //         // --- Handlers ---
-        
+
 //         // Updated Login handler (generates both access and refresh tokens)
 //         #[derive(Serialize)]
 //         struct AuthTokens {
 //             access_token: String,
 //             refresh_token: String,
 //         }
-        
+
 //         async fn login_handler(State(state): State<AppState>) -> Json<AuthTokens> {
 //             let user_id = "admin-user-id-456".to_string(); // Example admin user
 //             let user_role = Role::Admin;
-        
+
 //             // Generate a unique ID for this login session token pair
-//             let session_id = uuid::Uuid::new_v4().to_string(); 
-        
+//             let session_id = uuid::Uuid::new_v4().to_string();
+
 //             // Access token (short lived, e.g., 30 minutes)
 //             let access_token = generate_token(&user_id, user_role, 0, session_id.clone()); // 0 days, use a few minutes in production
-        
+
 //             // Refresh token (long lived, e.g., 7 days)
 //             let refresh_token = generate_token(&user_id, user_role, 7, session_id.clone());
-        
+
 //             // Store the refresh token JTI in the server-side store
 //             state.refresh_tokens.lock().unwrap().insert(session_id, user_id);
-        
+
 //             Json(AuthTokens { access_token, refresh_token })
 //         }
-        
+
 //         // New Refresh Token handler
 //         async fn refresh_token_handler(
 //             State(state): State<AppState>,
@@ -565,13 +520,13 @@ pub(crate) mod handlers {
 //                 .get(http::header::AUTHORIZATION)
 //                 .and_then(|header| header.to_str().ok())
 //                 .ok_or(StatusCode::UNAUTHORIZED)?;
-            
+
 //             if !auth_header.starts_with("Bearer ") {
 //                 return Err(StatusCode::UNAUTHORIZED);
 //             }
-            
+
 //             let token = &auth_header[7..];
-        
+
 //             // Decode the *refresh* token
 //             let claims = decode::<Claims>(
 //                 token,
@@ -580,13 +535,13 @@ pub(crate) mod handlers {
 //             )
 //             .map_err(|_| StatusCode::UNAUTHORIZED)?
 //             .claims;
-        
+
 //             // Validate the refresh token's JTI against the server-side store
 //             let store = state.refresh_tokens.lock().unwrap();
 //             if !store.contains_key(&claims.jti) {
 //                 return Err(StatusCode::FORBIDDEN); // Token is not recognized or was revoked
 //             }
-            
+
 //             // Check if the user ID from the token matches the stored user ID
 //             if let Some(user_id) = store.get(&claims.jti) {
 //                 if user_id != &claims.sub {
@@ -595,37 +550,36 @@ pub(crate) mod handlers {
 //             } else {
 //                 return Err(StatusCode::FORBIDDEN);
 //             }
-        
+
 //             // If valid, issue a *new* access token (and optionally a new refresh token with rotation)
 //             // For simplicity here, we issue just a new access token
 //             let new_access_token = generate_token(&claims.sub, claims.role, 0, claims.jti.clone());
-            
-//             Ok(Json(AuthTokens { 
-//                 access_token: new_access_token, 
+
+//             Ok(Json(AuthTokens {
+//                 access_token: new_access_token,
 //                 refresh_token: token.to_string() // Return same refresh token if not doing token rotation
 //             }))
 //         }
-        
-        
+
 //         // --- Main Application Setup ---
-        
+
 //         #[tokio::main]
 //         async fn main() {
 //             // ... (RbacStore setup as before) ...
 //             let rbac_store = Arc::new(HashMap::new()); // simplified for this snippet
-            
+
 //             // Setup refresh token store
 //             let refresh_tokens = Arc::new(Mutex::new(HashMap::new()));
-            
+
 //             let app_state = AppState { rbac_store, refresh_tokens };
-        
+
 //             let app = Router::new()
 //                 // ... (Public routes) ...
 //                 .route("/login", get(login_handler))
 //                 .route("/refresh", post(refresh_token_handler)) // Add the refresh route
 //                 // ... (Protected routes with middleware as before) ...
 //                 .with_state(app_state);
-        
+
 //             // ... (Server run logic) ...
 //         }
 //     }
@@ -638,17 +592,17 @@ pub(crate) mod handlers {
 //         use axum_response_cache::CacheLayer;
 //         use std::time::Duration;
 //         use cached::TimedSizedCache;
-        
+
 //         #[tokio::main]
 //         async fn main() {
 //             // 1. Initialize the cache: a timed, sized cache with a capacity of 100 items.
 //             let cache: TimedSizedCache<String, axum::response::Response> =
 //                 TimedSizedCache::with_size_and_lifespan(100, 60);
-        
+
 //             // 2. Create the CacheLayer with a default duration for routes where the header is not set.
 //             let cache_layer = CacheLayer::new(cache)
 //                 .with_cache_duration(Duration::from_secs(60)); // Responses are cached for 60 seconds by default.
-        
+
 //             // 3. Define the application routes.
 //             let app = Router::new()
 //                 // This route uses the CacheLayer for caching responses based on the unique {name} path parameter.
@@ -662,12 +616,12 @@ pub(crate) mod handlers {
 //                 )
 //                 // Apply the caching middleware to the specific route(s).
 //                 .layer(cache_layer);
-        
+
 //             // 4. Run the server.
 //             let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
 //                 .await
 //                 .unwrap();
-        
+
 //             println!("Listening on http://127.0.0.1:3000");
 //             axum::serve(listener, app).await.unwrap();
 //         }
@@ -680,17 +634,17 @@ pub(crate) mod handlers {
 //         };
 //         use tower_http::cors::{AllowOrigin, CorsLayer};
 //         use std::time::Duration;
-        
+
 //         async fn handler() -> StatusCode {
 //             StatusCode::OK
 //         }
-        
+
 //         #[tokio::main]
 //         async fn main() {
-//             // Define the specific origin you want to allow. 
+//             // Define the specific origin you want to allow.
 //             // This effectively prevents cross-origin requests from any other domain.
 //             const ALLOWED_ORIGIN: &'static str = "http://localhost:3000";
-        
+
 //             let cors_layer = CorsLayer::new()
 //                 // Allow only the specified origin
 //                 .allow_origin(AllowOrigin::list([
@@ -701,13 +655,13 @@ pub(crate) mod handlers {
 //                 // Allow specific headers
 //                 .allow_headers([header::CONTENT_TYPE])
 //                 // Max age for preflight requests, prevents repeated OPTIONS calls
-//                 .max_age(Duration::from_secs(60) * 10); 
-        
+//                 .max_age(Duration::from_secs(60) * 10);
+
 //             let app = Router::new()
 //                 .route("/", get(handler).post(handler))
 //                 // Apply the restrictive CORS layer globally to the router
 //                 .layer(cors_layer);
-        
+
 //             // Run the application
 //             let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
 //                 .await
@@ -727,27 +681,27 @@ pub(crate) mod handlers {
 //         use axum_csrf::{CsrfConfig, CsrfLayer, CsrfToken};
 //         use serde::{Deserialize, Serialize};
 //         use std::net::SocketAddr;
-        
+
 //         // A simple template for demonstration (requires 'template.html' file in a 'templates' directory)
 //         #[derive(Template, Deserialize, Serialize)]
 //         #[template(path = "template.html")]
 //         struct Keys {
 //             authenticity_token: String,
 //         }
-        
+
 //         #[tokio::main]
 //         async fn main() {
 //             // Basic setup...
-        
+
 //             let config = CsrfConfig::default();
-        
+
 //             let app = Router::new()
 //                 .route("/", get(root).post(check_key))
 //                 .layer(CsrfLayer::new(config)); // Apply the CSRF layer
-        
+
 //             // Run server...
 //         }
-        
+
 //         // Handler to generate and include the CSRF token
 //         async fn root(token: CsrfToken) -> impl IntoResponse {
 //             let keys = Keys {
@@ -755,7 +709,7 @@ pub(crate) mod handlers {
 //             };
 //             (token, keys).into_response()
 //         }
-        
+
 //         // Handler to validate the submitted token
 //         async fn check_key(token: CsrfToken, Form(payload): Form<Keys>) -> &'static str {
 //             if token.verify(&payload.authenticity_token).is_err() {
@@ -774,27 +728,27 @@ pub(crate) mod handlers {
 //         };
 //         use serde::Deserialize;
 //         use ammonia::clean; // Import the clean function
-        
+
 //         // A struct to model the input data from the HTML form
 //         #[derive(Debug, Deserialize)]
 //         struct UserComment {
 //             username: String,
 //             comment: String,
 //         }
-        
+
 //         #[tokio::main]
 //         async fn main() {
 //             // build our application with a route
 //             let app = Router::new()
 //                 .route("/", get(show_form))
 //                 .route("/submit_comment", post(handle_submit));
-        
+
 //             // run our app with hyper
 //             let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
 //             println!("Server listening on http://0.0.0.0:3000");
 //             axum::serve(listener, app).await.unwrap();
 //         }
-        
+
 //         // Handler to display the input form
 //         async fn show_form() -> Html<String> {
 //             Html(r#"
@@ -813,13 +767,13 @@ pub(crate) mod handlers {
 //             </html>
 //             "#.to_string())
 //         }
-        
+
 //         // Handler to process the form submission
 //         async fn handle_submit(Form(user_comment): Form<UserComment>) -> Html<String> {
 //             // Sanitize the comment using ammonia::clean()
 //             // This removes dangerous tags/attributes like <script> or onerror
 //             let sanitized_comment = clean(&user_comment.comment);
-        
+
 //             // Use the username and sanitized comment in the response
 //             let response_html = format!(
 //                 "<h3>Comment Received</h3>
@@ -829,10 +783,10 @@ pub(crate) mod handlers {
 //                 // The username should be HTML-encoded if it can contain HTML
 //                 // If it's expected to be just text, displaying it directly is fine
 //                 // but for full safety, use a proper templating engine that auto-escapes.
-//                 html_escape::encode_safe(&user_comment.username), 
+//                 html_escape::encode_safe(&user_comment.username),
 //                 sanitized_comment
 //             );
-        
+
 //             Html(response_html)
 //         }
 //     }
@@ -841,7 +795,7 @@ pub(crate) mod handlers {
 //         use axum_valid::Valid;
 //         use serde::Deserialize;
 //         use validator::Validate;
-        
+
 //         // 1. Define the data structure with validation rules.
 //         #[derive(Debug, Deserialize, Validate)]
 //         pub struct CreateUser {
@@ -855,14 +809,14 @@ pub(crate) mod handlers {
 //             #[validate(url(protocols = &["http", "https"]))]
 //             pub website: String,
 //         }
-        
+
 //         // 2. Use the `Valid` extractor in your handler.
 //         // Axum will automatically return a 400 Bad Request if validation fails.
 //         async fn create_user(Valid(user): Valid<CreateUser>) -> String {
 //             // The 'user' is guaranteed to be valid here.
 //             format!("User created with valid username: {}", user.username)
 //         }
-        
+
 //         // 3. Set up the router.
 //         fn app_router() -> Router {
 //             Router::new().route("/users", post(create_user))
@@ -886,11 +840,11 @@ pub(crate) mod handlers {
 //             key_extractor::SmartIpKeyExtractor,
 //         };
 //         use tracing_subscriber::{fmt, prelude::*, EnvFilter};
-        
+
 //         async fn handler() -> &'static str {
 //             "Hello, limited world!"
 //         }
-        
+
 //         #[tokio::main]
 //         async fn main() {
 //             // Initialize tracing for better logging and visibility
@@ -898,7 +852,7 @@ pub(crate) mod handlers {
 //                 .with(fmt::layer())
 //                 .with(EnvFilter::from_default_env())
 //                 .init();
-        
+
 //             // 1. Configure the rate limiter
 //             // Allow bursts with up to 5 requests per IP address and replenishes 1 element every 1 second (5 per minute)
 //             let governor_conf = Box::new(
@@ -908,11 +862,11 @@ pub(crate) mod handlers {
 //                     .finish()
 //                     .unwrap(),
 //             );
-        
+
 //             // The configuration needs a static lifetime to be used with the layer.
 //             // Box::leak is a way to achieve this for demonstration purposes. In a real app, manage this carefully.
 //             let governor_conf: &'static GovernorConfig = Box::leak(governor_conf);
-        
+
 //             // 2. Create the Axum router
 //             let app = Router::new()
 //                 .route("/", get(handler))
@@ -926,7 +880,7 @@ pub(crate) mod handlers {
 //                         // Apply the rate limiting layer using SmartIpKeyExtractor for IP detection
 //                         .layer(GovernorLayer::new(governor_conf, SmartIpKeyExtractor)),
 //                 );
-        
+
 //             // 3. Run the application
 //             let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
 //             tracing::info!("Listening on {}", addr);
@@ -947,20 +901,20 @@ pub(crate) mod handlers {
 //             response::IntoResponse,
 //         };
 //         use std::net::SocketAddr;
-        
+
 //         // A handler that accepts a String body.
 //         // If the body exceeds the limit set by the layer, axum will return a 413 Payload Too Large error automatically.
 //         async fn handler(body: String) -> impl IntoResponse {
 //             format!("Received body with length: {}", body.len())
 //         }
-        
+
 //         #[tokio::main]
 //         async fn main() {
 //             // Set the maximum body size to 1024 bytes (1 KB)
 //             let app = Router::new()
 //                 .route("/", post(handler))
 //                 .layer(DefaultBodyLimit::max(1024)); //
-        
+
 //             // run our app with hyper
 //             let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
 //             println!("listening on {}", addr);
@@ -982,14 +936,14 @@ pub(crate) mod handlers {
 //         use std::time::Duration;
 //         use tower_http::trace::TraceLayer;
 //         use axum::response::IntoResponse;
-        
+
 //         // The slow handler that will intentionally exceed the timeout
 //         async fn slow_handler() -> impl IntoResponse {
 //             // Simulate a time-consuming operation
 //             tokio::time::sleep(Duration::from_secs(2)).await;
 //             "This response might be late!"
 //         }
-        
+
 //         // The error handler for the timeout error
 //         fn handle_timeout_error(method: Method, uri: Uri, err: BoxError) -> (StatusCode, String) {
 //             if err.is::<tower::timeout::error::Elapsed>() {
@@ -1004,12 +958,12 @@ pub(crate) mod handlers {
 //                 )
 //             }
 //         }
-        
+
 //         #[tokio::main]
 //         async fn main() {
 //             // Define the timeout duration
 //             const TIMEOUT_DURATION: Duration = Duration::from_secs(1);
-        
+
 //             // Build the middleware stack using ServiceBuilder
 //             let middleware_stack = ServiceBuilder::new()
 //                 // The HandleErrorLayer must be placed above the TimeoutLayer
@@ -1017,13 +971,13 @@ pub(crate) mod handlers {
 //                 .layer(HandleErrorLayer::new(handle_timeout_error))
 //                 // Apply the timeout layer
 //                 .layer(TimeoutLayer::new(TIMEOUT_DURATION));
-        
+
 //             // Create the router and apply the middleware
 //             let app = Router::new()
 //                 .route("/slow", get(slow_handler))
 //                 // Apply the middleware to all routes in the application
 //                 .layer(middleware_stack);
-        
+
 //             // Run the server
 //             let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
 //                 .await

@@ -8,15 +8,15 @@ async fn main() {
     let cert_path = utils::get_env_var("CERT_PATH");
     let key_path = utils::get_env_var("KEY_PATH");
 
-    let serve_app_over_https_task = tokio::spawn(
+    tokio::spawn(
         tls::serve_app_over_https(
-            https_addr,
+            https_addr.clone(),
             cert_path,
             key_path,
         )
     );
 
-    let redirect_req_to_https_task = tokio::spawn(
+    tokio::spawn(
         tls::redirect_req_to_https(
             http_addr,
             https_addr,
@@ -24,11 +24,10 @@ async fn main() {
     );
 }
 
-mod handlers {
-    mod utils {
-        async fn get_env_var(key: &str) -> &str {
+pub(crate) mod handlers {
+    pub mod utils {
+        pub fn get_env_var(key: &str) -> String {
             std::env::var(key)
-                .await
                 .expect(
                     &format!(
                         "Failed to get {} environment variable!",
@@ -37,13 +36,13 @@ mod handlers {
                 )
         }
     }
-    mod tls {
+    pub mod tls {
         use axum::http::StatusCode;
         
-        async fn serve_app_over_https(
-            https_addr: &str,
-            cert_path: &str,
-            key_path: &str,
+        pub async fn serve_app_over_https(
+            https_addr: String,
+            cert_path: String,
+            key_path: String,
         ) {
             let addr: std::net::SocketAddr = https_addr
                 .parse()
@@ -71,23 +70,21 @@ mod handlers {
             let app = axum::Router::new()
                 .route(
                     "/healthz",
-                    axum::routing::get(|| async {(StatusCode::OK).into_response}
+                    axum::routing::get(|| async {StatusCode::OK})
                 )
-                .fallback(|uri| async {(
-                    StatusCode::NOT_FOUND, 
-                    &format!(
-                        "{} route is invalid!", 
-                        uri.path(),
+                .fallback(|uri: axum::http::Uri| async move{
+                    (
+                        StatusCode::NOT_FOUND,
+                        format!(
+                            "{} route is invalid!",
+                            uri.path(),
+                        ),
                     )
-                    .into_response
-                )}
+                });
 
             loop {
-                axum_server::
-                    bind_rustls(
-                        addr,
-                        config,)
-                    .serve(app.make_into_service)
+                axum_server::bind_rustls(addr, config.clone())
+                    .serve(app.clone().into_make_service())
                     .await
                     .expect(
                         &format!(
@@ -131,9 +128,9 @@ mod handlers {
             
         }
 
-        async fn redirect_req_to_https(
-            http_addr: &str,
-            https_addr: &str,
+        pub async fn redirect_req_to_https(
+            http_addr: String,
+            https_addr: String,
         ) {
 
             // // Function to handle HTTP requests and redirect them to HTTPS

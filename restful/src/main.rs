@@ -29,7 +29,7 @@ pub(crate) mod handlers {
         pub async fn serve_app_over_https(https_addr: String, cert_path: String, key_path: String) {
             let addr: std::net::SocketAddr = https_addr
                 .parse()
-                .expect(&format!("Failed to parse '{}' address!", https_addr,));
+                .expect(&format!("Failed to parse '{}' https address!", https_addr,));
 
             let config =
                 axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path)

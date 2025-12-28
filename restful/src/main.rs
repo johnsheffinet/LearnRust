@@ -20,7 +20,7 @@ async fn main() {
 pub(crate) mod handlers {
     pub mod utils {
         pub fn get_env_var(key: &str) -> String {
-            std::env::var(key).expect(&format!("Failed to get {} environment variable!", key,))
+            std::env::var(key).expect(&format!("Failed to get '{}' environment variable!", key,))
         }
     }
     pub mod tls {
@@ -29,13 +29,13 @@ pub(crate) mod handlers {
         pub async fn serve_app_over_https(https_addr: String, cert_path: String, key_path: String) {
             let addr: std::net::SocketAddr = https_addr
                 .parse()
-                .expect(&format!("Failed to parse {} address!", https_addr,));
+                .expect(&format!("Failed to parse '{}' address!", https_addr,));
 
             let config =
                 axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path)
                     .await
                     .expect(&format!(
-                        "Failed to load {} or {} file!",
+                        "Failed to load '{}' or '{}' files!",
                         &cert_path, &key_path,
                     ));
 

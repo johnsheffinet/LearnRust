@@ -35,7 +35,7 @@ pub(crate) mod handlers {
                 axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path)
                     .await
                     .expect(&format!(
-                        "Failed to load '{}' or '{}' files!",
+                        "Failed to load '{}' or '{}' pem files!",
                         &cert_path, &key_path,
                     ));
 

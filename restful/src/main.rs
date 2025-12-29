@@ -33,61 +33,18 @@ pub(crate) mod handlers {
                 .parse()
                 .expect(&format!("Failed to parse '{}' https address!", https_addr,));
 
-            let config =
-                axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path)
-                    .await
-                    .expect(&format!(
-                        "Failed to load '{}' or '{}' pem files!",
-                        &cert_path, &key_path,
-                    ));
+            let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path)
+                .await
+                .expect(&format!("Failed to load '{}' or '{}' pem files!", &cert_path, &key_path,));
 
             let app = axum::Router::new()
-                .route("/healthz", axum::routing::get(|| async { (StatusCode::OK, "OK") }))
-                .fallback(|uri: axum::http::Uri| async move {
-                    (
-                        StatusCode::NOT_FOUND,
-                        format!("{} route is invalid!", uri.path(),),
-                    )
-                });
+                .route("/healthz", axum::routing::get(|| async {(StatusCode::OK, "App is healthy.")}))
+                .fallback(|uri: axum::http::Uri| async move {(StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri.path(),))});
 
-            //loop {
-                axum_server::bind_rustls(addr, config.clone())
-                    .serve(app.clone().into_make_service())
-                    .await
-                    .expect(&format!("Failed to serve app over {} address!", addr,));
-            //}
-            // // Function to run the HTTPS server with rest endpoints and a fallback
-            // async fn https_server(https_port: u16) {
-            //     // Configure TLS with the self-signed certificates
-            //     let config = RustlsConfig::from_pem_file(
-            //         PathBuf::from("cert.pem"), // Adjust path if necessary
-            //         PathBuf::from("key.pem"),  // Adjust path if necessary
-            //     )
-            //     .await
-            //     .unwrap();
-
-            //     // Define the main application router for HTTPS
-            //     let app = Router::new()
-            //         // Define specific REST routes
-            //         .route("/", get(|| async { "Hello from HTTPS GET!" }))
-            //         .route("/users", axum::routing::post(|| async { "User created via HTTPS POST!" }))
-            //         // Add more routes here...
-            //         // Fallback for HTTPS server if no route matches
-            //         .fallback(https_fallback);
-
-            //     let addr = SocketAddr::from((, https_port));
-            //     println!("HTTPS listening on {}", addr);
-
-            //     axum_server::bind_rustls(addr, config)
-            //         .serve(app.into_make_service())
-            //         .await
-            //         .unwrap();
-            // }
-
-            // // Fallback handler for the HTTPS server (e.g., a 404 Not Found)
-            // async fn https_fallback(uri: axum::http::Uri) -> impl axum::response::IntoResponse {
-            //     (axum::http::StatusCode::NOT_FOUND, format!("Not Found: No route for {}", uri.path()))
-            // }
+            axum_server::bind_rustls(addr, config)
+                .serve(app.into_make_service())
+                .await
+                .expect(&format!("Failed to serve app over {} address!", addr,));
         }
 
         pub async fn redirect_req_to_https(http_addr: String, https_addr: String) {

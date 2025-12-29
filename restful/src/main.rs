@@ -8,13 +8,15 @@ async fn main() {
     let cert_path = utils::get_env_var("CERT_PATH");
     let key_path = utils::get_env_var("KEY_PATH");
 
-    tokio::spawn(tls::serve_app_over_https(
+    let serve_app_over_https_task =tokio::spawn(tls::serve_app_over_https(
         https_addr.clone(),
         cert_path,
         key_path,
     ));
 
-    tokio::spawn(tls::redirect_req_to_https(http_addr, https_addr));
+//    tokio::spawn(tls::redirect_req_to_https(http_addr, https_addr));
+
+    let _ = tokio::join!(serve_app_over_https_task);
 }
 
 pub(crate) mod handlers {
@@ -40,7 +42,7 @@ pub(crate) mod handlers {
                     ));
 
             let app = axum::Router::new()
-                .route("/healthz", axum::routing::get(|| async { StatusCode::OK }))
+                .route("/healthz", axum::routing::get(|| async { (StatusCode::OK, "OK") }))
                 .fallback(|uri: axum::http::Uri| async move {
                     (
                         StatusCode::NOT_FOUND,
@@ -48,12 +50,12 @@ pub(crate) mod handlers {
                     )
                 });
 
-            loop {
+            //loop {
                 axum_server::bind_rustls(addr, config.clone())
                     .serve(app.clone().into_make_service())
                     .await
                     .expect(&format!("Failed to serve app over {} address!", addr,));
-            }
+            //}
             // // Function to run the HTTPS server with rest endpoints and a fallback
             // async fn https_server(https_port: u16) {
             //     // Configure TLS with the self-signed certificates

@@ -8,13 +8,9 @@ async fn main() {
     let cert_path = utils::get_env_var("CERT_PATH");
     let key_path = utils::get_env_var("KEY_PATH");
 
-    let serve_app_over_https_task =tokio::spawn(tls::serve_app_over_https(
-        https_addr.clone(),
-        cert_path,
-        key_path,
-    ));
+    let serve_app_over_https_task = tokio::spawn(tls::serve_app_over_https(https_addr.clone(), cert_path, key_path,));
 
-//    tokio::spawn(tls::redirect_req_to_https(http_addr, https_addr));
+    let redirect_req_to_https_task = tokio::spawn(tls::redirect_req_to_https(http_addr, https_addr));
 
     let _ = tokio::join!(serve_app_over_https_task);
 }
@@ -48,6 +44,13 @@ pub(crate) mod handlers {
         }
 
         pub async fn redirect_req_to_https(http_addr: String, https_addr: String) {
+            let addr: std::net::SocketAddr = http_addr
+                .parse()
+                .expect(&format!("Failed to parse '{}' http address!", http_addr,));
+
+            let app = axum::Router::new()
+                .fallback(|uri: axum::http::Uri| async move 
+                    {axum::response::Redirect::temporary(&format!("https://{}{}", https_addr, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/")))});
 
             // // Function to handle HTTP requests and redirect them to HTTPS
             // async fn http_server(http_port: u16, https_port: u16) {

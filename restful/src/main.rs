@@ -12,7 +12,7 @@ async fn main() {
 
     let redirect_req_to_https_task = tokio::spawn(tls::redirect_req_to_https(http_addr, https_addr));
 
-    let _ = tokio::join!(serve_app_over_https_task);
+    let _ = tokio::join!(serve_app_over_https_task, redirect_req_to_https_task);
 }
 
 pub(crate) mod handlers {
@@ -49,53 +49,20 @@ pub(crate) mod handlers {
                 .expect(&format!("Failed to parse '{}' http address!", http_addr,));
 
             let app = axum::Router::new()
-                .fallback(|uri: axum::http::Uri| async move 
-                    {axum::response::Redirect::temporary(&format!("https://{}{}", https_addr, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/")))});
+                .fallback(|uri: axum::http::Uri| async move {
+                    let https_uri = uri
+                        .path_and_query()
+                        .map(|pq| pq.as_str
+                        .expect(&format!("Failed to map '{}{}' uri!", uri.path(), uri.query())));
+                    
+                    (axum::response::Redirect::temporary(&format!("https://{}{}", https_addr, https_uri)))
+                });
 
-            // // Function to handle HTTP requests and redirect them to HTTPS
-            // async fn http_server(http_port: u16, https_port: u16) {
-            //     // The main logic is in the fallback: any request not matched by a specific route goes here.
-            //     // Since we have no other routes, all requests are handled by http_handler.
-            //     let app = axum::Router::new()
-            //         .fallback(http_handler)
-            //         .layer(
-            //             tower::ServiceBuilder::new()
-            //                 .layer(axum::error_handling::HandleErrorLayer::new(|_| async move {
-            //                     (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
-            //                 }))
-            //         );
-
-            //     let addr = std::net::SocketAddr::from((, http_port));
-            //     println!("HTTP listening on {}", addr);
-
-            //     axum_server::bind(addr)
-            //         .serve(app.into_make_service())
-            //         .await
-            //         .unwrap();
-            // }
-
-            // async fn http_handler(req: axum::http::Request<axum::body::Body>) -> impl axum::response::IntoResponse {
-            //     let uri = req.uri();
-            //     // Reconstruct the URI as HTTPS, preserving the path and query
-            //     let new_uri_string = format!("https://127.0.0.1:{}{}", 3443, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/"));
-
-            //     // Use Temporary Redirect (307) to preserve the original HTTP method (POST, PUT, etc.) and body.
-            //     axum::response::Redirect::temporary(&new_uri_string)
-            // }
+            axum_server::bind(addr)
+                .serve(app.into_make_service)
+                .await
+                .expect(&format!("Failed to redirect request from '{}' address!", http_addr);
         }
-        // use axum::{
-        //     body::Body,
-        //     http::{Request, StatusCode, Uri},
-        //     response::{IntoResponse, Redirect},
-        //     routing::get,
-        //     Router,
-        // };
-        // use axum_server::tls_rustls::RustlsConfig;
-        // use std::net::SocketAddr;
-        // use std::path::PathBuf;
-        // use tower::ServiceBuilder;
-        // use std::convert::Infallible;
-        // use axum::error_handling::HandleErrorLayer;
     }
 }
 //     mod trc {

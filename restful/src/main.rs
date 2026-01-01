@@ -52,16 +52,16 @@ pub(crate) mod handlers {
                 .fallback(|uri: axum::http::Uri| async move {
                     let https_uri = uri
                         .path_and_query()
-                        .map(|pq| pq.as_str
-                        .expect(&format!("Failed to map '{}{}' uri!", uri.path(), uri.query())));
+                        .map(|pq| pq.as_str())
+                        .unwrap_or("/");
                     
-                    (axum::response::Redirect::temporary(&format!("https://{}{}", https_addr, https_uri)))
+                    axum::response::Redirect::temporary(&format!("https://{}{}", https_addr, https_uri))
                 });
 
             axum_server::bind(addr)
-                .serve(app.into_make_service)
+                .serve(app.into_make_service())
                 .await
-                .expect(&format!("Failed to redirect request from '{}' address!", http_addr);
+                .expect(&format!("Failed to redirect request from '{}' address!", http_addr));
         }
     }
 }

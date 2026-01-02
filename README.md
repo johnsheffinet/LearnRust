@@ -112,9 +112,6 @@ openssl req -newkey rsa:4096 -nodes -keyout learnrust.key -subj "/CN=localhost" 
 - Create private key and certificate in one command. 
 
 ```
-openssl req -newkey rsa:4096 -nodes -keyout learnrust.key -subj "/CN=localhost" -x509 -days 365 -out learnrust.crt
-```
-```
 openssl req -newkey rsa:4096 -nodes -keyout learnrust.key -addext "subjectAltName = IP:127.0.0.1" -x509 -days 365 -out learnrust.crt
 ```
 

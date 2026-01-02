@@ -50,12 +50,7 @@ pub(crate) mod handlers {
 
             let app = axum::Router::new()
                 .fallback(|uri: axum::http::Uri| async move {
-                    let https_uri = uri
-                        .path_and_query()
-                        .map(|pq| pq.as_str())
-                        .unwrap_or("/");
-                    
-                    axum::response::Redirect::temporary(&format!("https://{}{}", https_addr, https_uri))
+                    axum::response::Redirect::temporary(&format!("https://{}{}", https_addr, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/")))
                 });
 
             axum_server::bind(addr)

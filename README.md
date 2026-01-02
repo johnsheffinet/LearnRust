@@ -114,6 +114,9 @@ openssl req -newkey rsa:4096 -nodes -keyout learnrust.key -subj "/CN=localhost" 
 ```
 openssl req -newkey rsa:4096 -nodes -keyout learnrust.key -subj "/CN=localhost" -x509 -days 365 -out learnrust.crt
 ```
+```
+openssl req -newkey rsa:4096 -nodes -keyout learnrust.key -addext "subjectAltName = IP:127.0.0.1" -x509 -days 365 -out learnrust.crt
+```
 
 6. Archive Private Key and Certificate (PFX file)
 

@@ -1,0 +1,62 @@
+@https_addr = {{$processenv HTTPS_ADDR}}
+
+GET https://{{$processenv HTTPS_ADDR}}/healthz
+
+
+@host = {{$dotenv HOSTADDR}}:{{$dotenv HOSTPORT}}
+@itemId = 0
+@name = create_item
+@value = created
+###
+
+# @name signin
+POST http://{{host}}/login HTTP/1.1
+Content-Type: application/json
+
+{
+  "username": "testusername",
+  "password": "testpassword"
+}
+
+@token = {{signin.response.body.token}}
+###
+
+# @name create_item
+POST http://{{host}}/items HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "{{name}}",
+  "value": "{{value}}"
+}
+
+@itemId = {{create_item.response.body.id}}
+###
+
+# @name select_items
+GET http://{{host}}/items?name={{name}}&value={{value}} HTTP/1.1
+Authorization: Bearer {{token}}
+###
+
+
+# @name update_item
+PUT http://{{host}}/items/{{itemId}} HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "update_item",
+  "value": "ok"
+}
+###
+
+# @name select_item
+GET http://{{host}}/items/{{itemId}} HTTP/1.1
+Authorization: Bearer {{token}}
+###
+
+# @name delete_item
+DELETE http://{{host}}/items/{{itemId}} HTTP/1.1
+Authorization: Bearer {{token}}
+###

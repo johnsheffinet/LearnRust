@@ -1,9 +1,16 @@
-@https_addr = {{$processenv HTTPS_ADDR}}
 
-GET https://{{$processenv HTTPS_ADDR}}/healthz
+GET https://{{$processEnv HTTPS_ADDR}}/healthz
+###
 
+GET https://{{$processEnv HTTPS_ADDR}}/
+###
 
-@host = {{$dotenv HOSTADDR}}:{{$dotenv HOSTPORT}}
+GET http://{{$processEnv HTTP_ADDR}}/healthz
+###
+
+GET http://{{$processEnv HTTP_ADDR}}/
+###
+
 @itemId = 0
 @name = create_item
 @value = created

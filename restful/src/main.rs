@@ -15,6 +15,22 @@ async fn main() {
     let _ = tokio::join!(serve_app_over_https_task, redirect_req_to_https_task);
 }
 
+#[cfg(test]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_env_var_present() {
+        let result = tls::get_env_var("HTTP_ADDR");
+        assert_eq!(result, "127.0.0.1:3080");
+    }
+
+    #[test]
+    #[should_panic(expected = "Failed to get 'http_addr' environment variable!")]
+    fn get_env_var_not_present() {
+        let result = tls::get_env_var("http_addr");
+    }
+}
 pub(crate) mod handlers {
     pub mod utils {
         pub fn get_env_var(key: &str) -> String {

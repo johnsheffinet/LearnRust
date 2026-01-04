@@ -40,7 +40,7 @@ pub(crate) mod handlers {
             axum_server::bind_rustls(addr, config)
                 .serve(app.into_make_service())
                 .await
-                .expect(&format!("Failed to serve app over {} address!", addr,));
+                .expect(&format!("Failed to serve app over '{}' address!", addr,));
         }
 
         pub async fn redirect_req_to_https(http_addr: String, https_addr: String) {
@@ -56,25 +56,35 @@ pub(crate) mod handlers {
             axum_server::bind(addr)
                 .serve(app.into_make_service())
                 .await
-                .expect(&format!("Failed to redirect request from '{}' address!", http_addr));
+                .expect(&format!("Failed to redirect request from '{}' http address!", http_addr));
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::handlers::utils;
+    mod utils_tests {
+        use crate::handlers::utils;
+        
+        #[test]
+        #[should_panic(expected = "Failed to get 'http_addr' environment variable!")]
+        fn test_get_env_var_failed_to_get_environment_variable() {
+            let _ = utils::get_env_var("http_addr");
+        }
     
-    #[test]
-    fn get_env_var_present() {
-        let result = utils::get_env_var("HTTP_ADDR");
-        assert_eq!(result, "127.0.0.1:3080");
+        #[test]
+        fn test_get_env_var_success() {
+            let result = utils::get_env_var("HTTP_ADDR");
+            assert_eq!(result, "127.0.0.1:3080");
+        }
     }
-
-    #[test]
-    #[should_panic(expected = "Failed to get 'http_addr' environment variable!")]
-    fn get_env_var_not_present() {
-        let _ = utils::get_env_var("http_addr");
+    mod tls_tests {
+        fn test_serve_app_over_https_failed_to_parse_https_addr() {}
+        fn test_serve_app_over_https_failed_to_load_cert_pem_file() {}
+        fn test_serve_app_over_https_failed_to_load_key_pem_file() {}
+        fn test_serve_app_over_https_failed_to_serve_app_over_https_addr() {}
+        fn test_redirect_req_to_https_failed_to_parse_http_addr() {}
+        fn test_redirect_req_to_https_failed_to_redirect_from_http_addr() {}
     }
 }
 //     mod trc {

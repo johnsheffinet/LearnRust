@@ -79,8 +79,27 @@ mod tests {
         }
     }
     mod tls_tests {
-        fn test_serve_app_over_https_failed_to_parse_https_addr() {}
-        fn test_serve_app_over_https_failed_to_load_cert_pem_file() {}
+        use crate::handlers::tls;
+        use crate::handlers::utils;
+        
+        let http_addr = utils::get_env_var("HTTP_ADDR");
+        let https_addr = utils::get_env_var("HTTPS_ADDR");
+        let cert_path = utils::get_env_var("CERT_PATH");
+        let key_path = utils::get_env_var("KEY_PATH");
+        let invalid_value = " ";
+        
+        #[tokio::test]
+        #[should_panic(expected = &format!("Failed to parse '{}' https address!", &invalid_value,))]
+        fn test_serve_app_over_https_failed_to_parse_https_address() {
+            let _ = tls::serve_app_over_https(&invalid_value, cert_path, key_path);
+        }
+        
+        #[tokio::test]
+        #[should_panic(expected = &format!("Failed to load '{}' or '{}' pem files!", &invalid_value, &key_path,))]
+        fn test_serve_app_over_https_failed_to_load_cert_pem_file() {
+            let _ = tls::serve_app_over_https(https_addr, &invalid_value, key_path);
+        }
+
         fn test_serve_app_over_https_failed_to_load_key_pem_file() {}
         fn test_serve_app_over_https_failed_to_serve_app_over_https_addr() {}
         fn test_redirect_req_to_https_failed_to_parse_http_addr() {}

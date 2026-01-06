@@ -96,10 +96,15 @@ mod tests {
         }
         
         fn test_serve_app_over_https_failed_to_load_cert_pem_file() {}
+                .expect(&format!("Failed to load '{}' or '{}' pem files!", &cert_path, &key_path,));
         fn test_serve_app_over_https_failed_to_load_key_pem_file() {}
+                .expect(&format!("Failed to load '{}' or '{}' pem files!", &cert_path, &key_path,));
         fn test_serve_app_over_https_failed_to_serve_app_over_https_addr() {}
+                .expect(&format!("Failed to serve app over '{}' address!", addr,));
         fn test_redirect_req_to_https_failed_to_parse_http_addr() {}
+                .expect(&format!("Failed to parse '{}' http address!", http_addr,));
         fn test_redirect_req_to_https_failed_to_redirect_from_http_addr() {}
+                .expect(&format!("Failed to redirect request from '{}' http address!", http_addr));
     }
 }
 //     mod trc {

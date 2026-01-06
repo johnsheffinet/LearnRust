@@ -73,21 +73,21 @@ mod tests {
         use super::*;
         use crate::handlers::utils;
         
-        #[test]
+        #[tokio::test]
         #[should_panic(expected = "Failed to get '' environment variable!")]
-        fn test_get_env_var_failed_to_get_environment_variable() {
+        async fn test_get_env_var_failed_to_get_environment_variable() {
             let _ = utils::get_env_var(INVALID_VALUE.as_str());
         }
     
-        #[test]
-        fn test_get_env_var_success() {
+        #[tokio::test]
+        async fn test_get_env_var_success() {
             let result = utils::get_env_var("HTTP_ADDR");
             assert_eq!(result, *crate::HTTP_ADDR);
         }
     }
     mod tls_tests {
         use super::*;
-        use crate::{CERT_PATH, KEY_PATH, handlers::tls};
+        use crate::handlers::tls;
         
         #[tokio::test]
         #[should_panic(expected = "Failed to parse '' https address!")]
@@ -95,16 +95,50 @@ mod tests {
             let _ = tls::serve_app_over_https(INVALID_VALUE.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string(),).await;
         }
         
-        fn test_serve_app_over_https_failed_to_load_cert_pem_file() {}
-                .expect(&format!("Failed to load '{}' or '{}' pem files!", &cert_path, &key_path,));
-        fn test_serve_app_over_https_failed_to_load_key_pem_file() {}
-                .expect(&format!("Failed to load '{}' or '{}' pem files!", &cert_path, &key_path,));
-        fn test_serve_app_over_https_failed_to_serve_app_over_https_addr() {}
-                .expect(&format!("Failed to serve app over '{}' address!", addr,));
-        fn test_redirect_req_to_https_failed_to_parse_http_addr() {}
-                .expect(&format!("Failed to parse '{}' http address!", http_addr,));
-        fn test_redirect_req_to_https_failed_to_redirect_from_http_addr() {}
-                .expect(&format!("Failed to redirect request from '{}' http address!", http_addr));
+        #[tokio::test]
+        #[should_panic(expected = "Failed to load '' public certificate, pem file!")]
+        async fn test_serve_app_over_https_failed_to_load_cert_pem_file() {
+            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), INVALID_VALUE.to_string(), KEY_PATH.to_string(),).await;                
+        }
+        
+        #[tokio::test]
+        #[should_panic(expected = "Failed to load '' private key, pem file!")]
+        async fn test_serve_app_over_https_failed_to_load_key_pem_file() {
+            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), INVALID_VALUE.to_string(),).await;                
+        }
+        
+        #[tokio::test]
+        #[should_panic(expected = "Failed to serve app over '' address!")]
+        async fn test_serve_app_over_https_failed_to_serve_app_over_https_addr() {
+            let _ = tls::serve_app_over_https(INVALID_VALUE.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string(),).await;                
+        }
+        
+        #[tokio::test]
+        async fn test_serve_app_over_https_ok_app_is_healthy() {
+            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string(),).await;                
+        }
+        
+        #[tokio::test]
+        async fn test_serve_app_over_https_not_found_route_is_invalid() {
+            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string(),).await;                
+        }
+        
+        #[tokio::test]
+        #[should_panic(expected = "Failed to parse '' http address!")]
+        async fn test_redirect_req_to_https_failed_to_parse_http_addr() {
+            let _ = tls::redirect_req_to_https(INVALID_VALUE.to_string(), HTTPS_ADDR.to_string(),).await;                
+        }
+        
+        #[tokio::test]
+        #[should_panic(expected = "Failed to redirect request from '' http address!")]
+        async fn test_redirect_req_to_https_failed_to_redirect_from_http_addr() {
+            let _ = tls::redirect_req_to_https(HTTP_ADDR.to_string(), INVALID_VALUE.to_string(),).await;                
+        }
+        
+        #[tokio::test]
+        async fn test_redirect_req_to_https_temporary_redirect() {
+            let _ = tls::redirect_req_to_https(HTTP_ADDR.to_string(), HTTPS_ADDR.to_string(),).await;                
+        }
     }
 }
 //     mod trc {

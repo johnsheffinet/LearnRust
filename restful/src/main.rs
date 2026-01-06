@@ -1,16 +1,18 @@
+use once_cell::sync::Lazy;
+use crate::handlers::utils;
+
+const HTTP_ADDR: Lazy<String> = Lazy::new(|| {utils::get_env_var("HTTP_ADDR")});
+const HTTPS_ADDR: Lazy<String> = Lazy::new(|| {utils::get_env_var("HTTPS_ADDR")});
+const CERT_PATH: Lazy<String> = Lazy::new(|| {utils::get_env_var("CERT_PATH")});
+const KEY_PATH: Lazy<String> = Lazy::new(|| {utils::get_env_var("KEY_PATH")});
+
 #[tokio::main]
 async fn main() {
     use crate::handlers::tls;
-    use crate::handlers::utils;
 
-    let http_addr = utils::get_env_var("HTTP_ADDR");
-    let https_addr = utils::get_env_var("HTTPS_ADDR");
-    let cert_path = utils::get_env_var("CERT_PATH");
-    let key_path = utils::get_env_var("KEY_PATH");
+    let serve_app_over_https_task = tokio::spawn(tls::serve_app_over_https(HTTPS_ADDR, &CERT_PATH, &KEY_PATH,));
 
-    let serve_app_over_https_task = tokio::spawn(tls::serve_app_over_https(https_addr.clone(), cert_path, key_path,));
-
-    let redirect_req_to_https_task = tokio::spawn(tls::redirect_req_to_https(http_addr, https_addr));
+    let redirect_req_to_https_task = tokio::spawn(tls::redirect_req_to_https(&HTTP_ADDR, &HTTPS_ADDR,));
 
     let _ = tokio::join!(serve_app_over_https_task, redirect_req_to_https_task);
 }
@@ -18,7 +20,7 @@ async fn main() {
 pub(crate) mod handlers {
     pub mod utils {
         pub fn get_env_var(key: &str) -> String {
-            std::env::var(key).expect(&format!("Failed to get '{}' environment variable!", key,))
+            std::env::var(&key).expect(&format!("Failed to get '{}' environment variable!", &key,))
         }
     }
     pub mod tls {
@@ -75,29 +77,27 @@ mod tests {
         #[test]
         fn test_get_env_var_success() {
             let result = utils::get_env_var("HTTP_ADDR");
-            assert_eq!(result, "127.0.0.1:3080");
+            assert_eq!(result, *crate::HTTP_ADDR);
         }
     }
     mod tls_tests {
-        use crate::handlers::tls;
-        use crate::handlers::utils;
+        use crate::Lazy;
+use once_cell::sync::Lazy;
+use once_cell::unsync::Lazy;
+use crate::handlers::tls;
         
-        let http_addr = utils::get_env_var("HTTP_ADDR");
-        let https_addr = utils::get_env_var("HTTPS_ADDR");
-        let cert_path = utils::get_env_var("CERT_PATH");
-        let key_path = utils::get_env_var("KEY_PATH");
-        let invalid_value = " ";
+        const INVALID_VALUE: String = Lazy::new(|| {" "});
         
         #[tokio::test]
         #[should_panic(expected = &format!("Failed to parse '{}' https address!", &invalid_value,))]
-        fn test_serve_app_over_https_failed_to_parse_https_address() {
-            let _ = tls::serve_app_over_https(&invalid_value, cert_path, key_path);
+        async fn test_serve_app_over_https_failed_to_parse_https_address() {
+            let _ = tls::serve_app_over_https(INVALID_VALUE, cert_path, key_path);
         }
         
         #[tokio::test]
         #[should_panic(expected = &format!("Failed to load '{}' or '{}' pem files!", &invalid_value, &key_path,))]
         fn test_serve_app_over_https_failed_to_load_cert_pem_file() {
-            let _ = tls::serve_app_over_https(https_addr, &invalid_value, key_path);
+            let _ = tls::serve_app_over_https(HTTPS_ADDR, INVALID_VALUE, key_path);
         }
 
         fn test_serve_app_over_https_failed_to_load_key_pem_file() {}

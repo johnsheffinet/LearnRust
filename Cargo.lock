@@ -1508,6 +1508,7 @@ dependencies = [
  "http",
  "hyper",
  "jsonwebtoken",
+ "once_cell",
  "serde",
  "tokio",
  "tower",

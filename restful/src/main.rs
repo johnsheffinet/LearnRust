@@ -27,11 +27,17 @@ pub(crate) mod handlers {
     pub mod tls {
         use axum::http::StatusCode;
 
-            pub async fn get_addr(addr: String) -> std::net::SocketAddr {
-                addr
+        pub async fn get_socket_addr(addr: String) -> std::net::SocketAddr {
+            addr
                 .parse()
                 .expect(&format!("Failed to parse '{}' address!", addr))                    
-            }
+        }
+
+        pub async fn get_rustls_config(cert_path: String, key_path: String) {
+            axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path.clone(), key_path.clone())
+                .await
+                .expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path))                
+        }
             
 
         pub async fn serve_app_over_https(https_addr: String, cert_path: String, key_path: String) {
@@ -39,21 +45,26 @@ pub(crate) mod handlers {
             //     .parse()
             //     .expect(&format!("Failed to parse '{}' https address!", https_addr));
             
-            let addr = get_addr(https_addr);
+            let addr = get_socket_addr(https_addr);
             
+            #[tokio::test]
             #[should_panic(expected = "Failed to parse ' ' address!")]
-            async fn test_get_addr_failed_to_parse_address() {
+            async fn test_get_socket_addr_failed_to_parse_address() {
                 let _ = get_addr(" ".to_string());    
             }
+            
+            #[tokio::test]
             async fn test_get_addr_success() {
                 let result = get_addr("HTTPS_ADDR".to_string());
                 assert!(result.is_ipv4());    
             }    
 
-            let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path.clone(), key_path.clone())
-                .await
-                .expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path));
+            // let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path.clone(), key_path.clone())
+            //     .await
+            //     .expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path));
 
+            let config = get_rustls_config(cert_path.clone(), key_path.clone());
+            
             let app = axum::Router::new()
                 .route("/healthz", axum::routing::get(|| async {(StatusCode::OK, "App is healthy.")}))
                 .fallback(|uri: axum::http::Uri| async move {(StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri.path()))});

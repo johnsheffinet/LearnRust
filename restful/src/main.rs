@@ -11,9 +11,9 @@ const KEY_PATH: Lazy<String> = Lazy::new(|| {get_env_var("KEY_PATH")});
 async fn main() {
     use crate::handlers::tls;
 
-    let serve_app_over_https_task = tokio::spawn(tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string(),));
+    let serve_app_over_https_task = tokio::spawn(tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string()));
 
-    let redirect_req_to_https_task = tokio::spawn(tls::redirect_req_to_https(HTTP_ADDR.to_string(), HTTPS_ADDR.to_string(),));
+    let redirect_req_to_https_task = tokio::spawn(tls::redirect_req_to_https(HTTP_ADDR.to_string(), HTTPS_ADDR.to_string()));
 
     let _ = tokio::join!(serve_app_over_https_task, redirect_req_to_https_task);
 }
@@ -21,7 +21,7 @@ async fn main() {
 pub(crate) mod handlers {
     pub mod utils {
         pub fn get_env_var(key: &str) -> String {
-            std::env::var(&key).expect(&format!("Failed to get '{}' environment variable!", &key,))
+            std::env::var(&key).expect(&format!("Failed to get '{}' environment variable!", &key))
         }
     }
     pub mod tls {
@@ -30,26 +30,26 @@ pub(crate) mod handlers {
         pub async fn serve_app_over_https(https_addr: String, cert_path: String, key_path: String) {
             let addr: std::net::SocketAddr = https_addr
                 .parse()
-                .expect(&format!("Failed to parse '{}' https address!", https_addr,));
+                .expect(&format!("Failed to parse '{}' https address!", https_addr));
 
             let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path.clone(), key_path.clone())
                 .await
-                .expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path,));
+                .expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path));
 
             let app = axum::Router::new()
                 .route("/healthz", axum::routing::get(|| async {(StatusCode::OK, "App is healthy.")}))
-                .fallback(|uri: axum::http::Uri| async move {(StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri.path(),))});
+                .fallback(|uri: axum::http::Uri| async move {(StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri.path()))});
 
             axum_server::bind_rustls(addr, config)
                 .serve(app.into_make_service())
                 .await
-                .expect(&format!("Failed to serve app over '{}' https address!", addr,));
+                .expect(&format!("Failed to serve app over '{}' https address!", addr));
         }
 
         pub async fn redirect_req_to_https(http_addr: String, https_addr: String) {
             let addr: std::net::SocketAddr = http_addr
                 .parse()
-                .expect(&format!("Failed to parse '{}' http address!", http_addr,));
+                .expect(&format!("Failed to parse '{}' http address!", http_addr));
 
             let app = axum::Router::new()
                 .fallback(|uri: axum::http::Uri,| async move {
@@ -71,7 +71,7 @@ mod tests {
 
     mod utils_tests {
         use super::*;
-        use crate::{HTTP_ADDR, handlers::utils,};
+        use crate::{HTTP_ADDR, handlers::utils};
         
         #[test]
         #[should_panic(expected = "Failed to get ' ' environment variable!")]
@@ -87,64 +87,64 @@ mod tests {
     }
     mod tls_tests {
         use super::*;
-        use crate::{HTTP_ADDR, HTTPS_ADDR, CERT_PATH, KEY_PATH, handlers::tls,};
+        use crate::{HTTP_ADDR, HTTPS_ADDR, CERT_PATH, KEY_PATH, handlers::tls};
         
         #[tokio::test]
         #[should_panic(expected = "Failed to parse ' ' https address!")]
         async fn test_serve_app_over_https_failed_to_parse_https_address() {
-            let _ = tls::serve_app_over_https(INVALID_VALUE.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string(),).await;
+            let _ = tls::serve_app_over_https(INVALID_VALUE.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string()).await;
         }
         
         #[tokio::test]
 //        #[should_panic(expected = "Failed to load ' ' or '/workspaces/LearnRust/learnrust.key' pem files!")]
         #[should_panic]
         async fn test_serve_app_over_https_failed_to_load_cert_pem_file() {
-            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), INVALID_VALUE.to_string(), KEY_PATH.to_string(),).await;                
+            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), INVALID_VALUE.to_string(), KEY_PATH.to_string()).await;                
         }
         
         #[tokio::test]
-//        #[should_panic(expected = "Failed to load '' private key, pem file!")]
+//        #[should_panic(expected = "Failed to load '/workspaces/LearnRust/learnrust.crt' or ' ' pem files!!")]
         #[should_panic]
         async fn test_serve_app_over_https_failed_to_load_key_pem_file() {
-            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), INVALID_VALUE.to_string(),).await;                
+            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), INVALID_VALUE.to_string()).await;                
         }
         
         #[tokio::test]
-//        #[should_panic(expected = "Failed to serve app over ' ' https address!")]
+//        #[should_panic(expected = "Failed to serve app over '127.0.0.1:3443' https address!")]
         #[should_panic]
         async fn test_serve_app_over_https_failed_to_serve_app_over_https_addr() {
-            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string(),).await;                
-            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string(),).await;                
+            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string()).await;                
+            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string()).await;                
         }
         
 //        #[tokio::test]
 //        async fn test_serve_app_over_https_ok_app_is_healthy() {
-//            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string(),).await;                
+//            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string()).await;                
 //        }
         
 //        #[tokio::test]
 //        async fn test_serve_app_over_https_not_found_route_is_invalid() {
-//            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string(),).await;                
+//            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string()).await;                
 //        }
         
         #[tokio::test]
-        #[should_panic(expected = "Failed to parse ' ' http address!")]
+        #[should_panic(expected = "Failed to parse '127.0.0.1:3080' http address!")]
 //        #[should_panic]
         async fn test_redirect_req_to_https_failed_to_parse_http_addr() {
-            let _ = tls::redirect_req_to_https(INVALID_VALUE.to_string(), HTTPS_ADDR.to_string(),).await;                
+            let _ = tls::redirect_req_to_https(INVALID_VALUE.to_string(), HTTPS_ADDR.to_string()).await;                
         }
         
         #[tokio::test]
-        #[should_panic(expected = "Failed to redirect request from ' ' http address!")]
+        #[should_panic(expected = "Failed to redirect request from '127.0.0.1:3080' http address!")]
 //        #[should_panic]
         async fn test_redirect_req_to_https_failed_to_redirect_from_http_addr() {
-            let _ = tls::redirect_req_to_https(HTTP_ADDR.to_string(), HTTPS_ADDR.to_string(),).await;                
-            let _ = tls::redirect_req_to_https(HTTP_ADDR.to_string(), HTTPS_ADDR.to_string(),).await;                
+            let _ = tls::redirect_req_to_https(HTTP_ADDR.to_string(), HTTPS_ADDR.to_string()).await;                
+            let _ = tls::redirect_req_to_https(HTTP_ADDR.to_string(), HTTPS_ADDR.to_string()).await;                
         }
         
 //        #[tokio::test]
 //        async fn test_redirect_req_to_https_temporary_redirect() {
-//            let _ = tls::redirect_req_to_https(HTTP_ADDR.to_string(), HTTPS_ADDR.to_string(),).await;                
+//            let _ = tls::redirect_req_to_https(HTTP_ADDR.to_string(), HTTPS_ADDR.to_string()).await;                
 //        }
     }
 }

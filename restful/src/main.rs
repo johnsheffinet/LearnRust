@@ -27,10 +27,28 @@ pub(crate) mod handlers {
     pub mod tls {
         use axum::http::StatusCode;
 
-        pub async fn serve_app_over_https(https_addr: String, cert_path: String, key_path: String) {
-            let addr: std::net::SocketAddr = https_addr
+            pub async fn get_addr(addr: String) -> std::net::SocketAddr {
+                addr
                 .parse()
-                .expect(&format!("Failed to parse '{}' https address!", https_addr));
+                .expect(&format!("Failed to parse '{}' address!", addr))                    
+            }
+            
+
+        pub async fn serve_app_over_https(https_addr: String, cert_path: String, key_path: String) {
+            // let addr: std::net::SocketAddr = https_addr
+            //     .parse()
+            //     .expect(&format!("Failed to parse '{}' https address!", https_addr));
+            
+            let addr = get_addr(https_addr);
+            
+            #[should_panic(expected = "Failed to parse ' ' address!")]
+            async fn test_get_addr_failed_to_parse_address() {
+                let _ = get_addr(" ".to_string());    
+            }
+            async fn test_get_addr_success() {
+                let result = get_addr("HTTPS_ADDR".to_string());
+                assert!(result.is_ipv4());    
+            }    
 
             let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path.clone(), key_path.clone())
                 .await

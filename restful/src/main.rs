@@ -33,13 +33,25 @@ pub(crate) mod handlers {
                 .expect(&format!("Failed to parse '{}' address!", addr))                    
         }
 
-        pub async fn get_rustls_config(cert_path: String, key_path: String) {
-            axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path.clone(), key_path.clone())
+        pub async fn get_rustls_config(cert_path: String, key_path: String) -> axum_server::tls_rustls::RustlsConfig {
+            axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path)
                 .await
                 .expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path))                
         }
-            
 
+        pub async fn get_https_router() {
+            axum::Router::new()
+                .route("/healthz", axum::routing::get(|| async {(StatusCode::OK, "App is healthy.")}))
+                .fallback(|uri: axum::http::Uri| async move {(StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri.path()))})            
+        }
+        
+        pub async fn get_http_router() {
+            axum::Router::new()
+                .fallback(|uri: axum::http::Uri,| async move {
+                    axum::response::Redirect::temporary(&format!("https://{}{}", https_addr, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/")))
+                })            
+        }
+        
         pub async fn serve_app_over_https(https_addr: String, cert_path: String, key_path: String) {
             // let addr: std::net::SocketAddr = https_addr
             //     .parse()
@@ -47,32 +59,22 @@ pub(crate) mod handlers {
             
             let addr = get_socket_addr(https_addr);
             
-            #[tokio::test]
-            #[should_panic(expected = "Failed to parse ' ' address!")]
-            async fn test_get_socket_addr_failed_to_parse_address() {
-                let _ = get_addr(" ".to_string());    
-            }
-            
-            #[tokio::test]
-            async fn test_get_addr_success() {
-                let result = get_addr("HTTPS_ADDR".to_string());
-                assert!(result.is_ipv4());    
-            }    
-
-            // let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path.clone(), key_path.clone())
+            // let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path)
             //     .await
             //     .expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path));
 
             let config = get_rustls_config(cert_path.clone(), key_path.clone());
-            
-            let app = axum::Router::new()
-                .route("/healthz", axum::routing::get(|| async {(StatusCode::OK, "App is healthy.")}))
-                .fallback(|uri: axum::http::Uri| async move {(StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri.path()))});
 
+            // let app = axum::Router::new()
+            //     .route("/healthz", axum::routing::get(|| async {(StatusCode::OK, "App is healthy.")}))
+            //     .fallback(|uri: axum::http::Uri| async move {(StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri.path()))});
+
+            let router = get_https_router();
+            
             axum_server::bind_rustls(addr, config)
-                .serve(app.into_make_service())
-                .await
-                .expect(&format!("Failed to serve app over '{}' https address!", addr));
+                .serve(router.into_make_service())
+                .await;
+                // .expect(&format!("Failed to serve app over '{}' https address!", addr));
         }
 
         pub async fn redirect_req_to_https(http_addr: String, https_addr: String) {
@@ -118,63 +120,82 @@ mod tests {
         use super::*;
         use crate::{HTTP_ADDR, HTTPS_ADDR, CERT_PATH, KEY_PATH, handlers::tls};
         
-        #[tokio::test]
-        #[should_panic(expected = "Failed to parse ' ' https address!")]
-        async fn test_serve_app_over_https_failed_to_parse_https_address() {
-            let _ = tls::serve_app_over_https(INVALID_VALUE.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string()).await;
-        }
-        
-        #[tokio::test]
-//        #[should_panic(expected = "Failed to load ' ' or '/workspaces/LearnRust/learnrust.key' pem files!")]
-        #[should_panic]
-        async fn test_serve_app_over_https_failed_to_load_cert_pem_file() {
-            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), INVALID_VALUE.to_string(), KEY_PATH.to_string()).await;                
-        }
-        
-        #[tokio::test]
-//        #[should_panic(expected = "Failed to load '/workspaces/LearnRust/learnrust.crt' or ' ' pem files!!")]
-        #[should_panic]
-        async fn test_serve_app_over_https_failed_to_load_key_pem_file() {
-            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), INVALID_VALUE.to_string()).await;                
-        }
-        
-        #[tokio::test]
-//        #[should_panic(expected = "Failed to serve app over '127.0.0.1:3443' https address!")]
-        #[should_panic]
-        async fn test_serve_app_over_https_failed_to_serve_app_over_https_addr() {
-            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string()).await;                
-            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string()).await;                
-        }
-        
-//        #[tokio::test]
-//        async fn test_serve_app_over_https_ok_app_is_healthy() {
-//            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string()).await;                
-//        }
-        
-//        #[tokio::test]
-//        async fn test_serve_app_over_https_not_found_route_is_invalid() {
-//            let _ = tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string()).await;                
-//        }
-        
-        #[tokio::test]
-        #[should_panic(expected = "Failed to parse ' ' http address!")]
-//        #[should_panic]
-        async fn test_redirect_req_to_https_failed_to_parse_http_addr() {
-            let _ = tls::redirect_req_to_https(INVALID_VALUE.to_string(), HTTPS_ADDR.to_string()).await;                
-        }
-        
-        #[tokio::test]
-//        #[should_panic(expected = "Failed to redirect request from '127.0.0.1:3080' http address!")]
-        #[should_panic]
-        async fn test_redirect_req_to_https_failed_to_redirect_from_http_addr() {
-            let _ = tls::redirect_req_to_https(HTTP_ADDR.to_string(), HTTPS_ADDR.to_string()).await;                
-            let _ = tls::redirect_req_to_https(HTTP_ADDR.to_string(), HTTPS_ADDR.to_string()).await;                
-        }
-        
-//        #[tokio::test]
-//        async fn test_redirect_req_to_https_temporary_redirect() {
-//            let _ = tls::redirect_req_to_https(HTTP_ADDR.to_string(), HTTPS_ADDR.to_string()).await;                
-//        }
+            #[tokio::test]
+            #[should_panic(expected = "Failed to parse ' ' address!")]
+            async fn test_get_socket_addr_failed_to_parse_address() {
+                let _ = get_socket_addr(" ".to_string());    
+            }
+            
+            #[tokio::test]
+            async fn test_get_addr_success() {
+                let result = get_socket_addr(HTTPS_ADDR);
+                assert!(result.is_ipv4());    
+            }    
+
+            #[tokio::test]
+            #[should_panic(expected = "Failed to load ' ' or '/workspaces/LearnRust/learnrust.key' pem files!")]
+            async fn test_get_rustls_config_failed_to_load_cert_pem_file() {
+                let _ = axum_server::tls_rustls::RustlsConfig::from_pem_file(" ".to_string(), KEY_PATH.clone());
+            }
+            
+            #[tokio::test]
+            #[should_panic(expected = "Failed to load '/workspaces/LearnRust/learnrust.crt' or ' ' pem files!")]
+            async fn test_get_rustls_config_failed_to_load_key_pem_file() {
+                let _ = axum_server::tls_rustls::RustlsConfig::from_pem_file(CERT_PATH.clone(), " ".to_string());
+            }
+            
+            #[tokio::test]
+            async fn test_get_rustls_config_success() {
+                let result = axum_server::tls_rustls::RustlsConfig::from_pem_file(CERT_PATH.clone(), KEY_PATH.clone());
+            }
+            
+            #[tokio::test]
+            async fn test_get_https_router_ok_app_is_healthy() {
+                let router = tls::get_https_router().await;
+                let response = router
+                    .oneshot(Request::get("/healthz")
+                                .header("Content-Type", "text/plain; charset=utf-8")
+                                .unwrap())
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+                let body = body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                assert_eq!(body, "App is healthy.");
+            }
+            
+            #[tokio::test]
+            async fn test_get_https_router_not_found_route_is_invalid() {
+                let router = tls::get_https_router().await;
+                let response = router
+                    .oneshot(Request::get("/")
+                                .header("Content-Type", "text/plain; charset=utf-8")
+                                .unwrap())
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::NOT_FOUND);
+                let body = body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                assert_eq!(body, "'/' route is invalid!");
+            }
+            
+            #[tokio::test]
+            async fn test_get_http_router_temporary_redirect() {
+                let router = tls::get_https_router().await;
+                let response = router
+                    .oneshot(Request::get("/")
+                                .header("Content-Type", "text/plain; charset=utf-8")
+                                .unwrap())
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+                let body = body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                assert_eq!(body, "'/' route is invalid!");
+            }
     }
 }
 //     mod trc {

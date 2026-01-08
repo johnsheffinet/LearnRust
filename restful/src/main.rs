@@ -78,19 +78,23 @@ pub(crate) mod handlers {
         }
 
         pub async fn redirect_req_to_https(http_addr: String, https_addr: String) {
-            let addr: std::net::SocketAddr = http_addr
-                .parse()
-                .expect(&format!("Failed to parse '{}' http address!", http_addr));
+            // let addr: std::net::SocketAddr = http_addr
+            //     .parse()
+            //     .expect(&format!("Failed to parse '{}' http address!", http_addr));
 
-            let app = axum::Router::new()
-                .fallback(|uri: axum::http::Uri,| async move {
-                    axum::response::Redirect::temporary(&format!("https://{}{}", https_addr, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/")))
-                });
+            let addr = get_socket_addr(http_addr);
+            
+            // let app = axum::Router::new()
+            //     .fallback(|uri: axum::http::Uri,| async move {
+            //         axum::response::Redirect::temporary(&format!("https://{}{}", https_addr, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/")))
+            //     });
 
+            let router = get_http_router();
+            
             axum_server::bind(addr)
-                .serve(app.into_make_service())
+                .serve(router.into_make_service())
                 .await
-                .expect(&format!("Failed to redirect request from '{}' http address!", http_addr));
+                // .expect(&format!("Failed to redirect request from '{}' http address!", http_addr));
         }
     }
 }

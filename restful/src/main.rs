@@ -1,10 +1,10 @@
 use once_cell::sync::Lazy;
 use crate::handlers::utils::get_env_var;
 
-const HTTP_ADDR: Lazy<String> = Lazy::new(|| {get_env_var("HTTP_ADDR")});
-const HTTPS_ADDR: Lazy<String> = Lazy::new(|| {get_env_var("HTTPS_ADDR")});
-const CERT_PATH: Lazy<String> = Lazy::new(|| {get_env_var("CERT_PATH")});
-const KEY_PATH: Lazy<String> = Lazy::new(|| {get_env_var("KEY_PATH")});
+const HTTP_ADDR: Lazy<String> = Lazy::new(|| {get_env_var("HTTP_ADDR".to_string())});
+const HTTPS_ADDR: Lazy<String> = Lazy::new(|| {get_env_var("HTTPS_ADDR".to_string())});
+const CERT_PATH: Lazy<String> = Lazy::new(|| {get_env_var("CERT_PATH".to_string())});
+const KEY_PATH: Lazy<String> = Lazy::new(|| {get_env_var("KEY_PATH".to_string())});
         
 
 #[tokio::main]
@@ -20,8 +20,9 @@ async fn main() {
 
 pub(crate) mod handlers {
     pub mod utils {
-        pub fn get_env_var(key: &str) -> String {
-            std::env::var(&key).expect(&format!("Failed to get '{}' environment variable!", &key))
+        pub fn get_env_var(key: String) -> String {
+            std::env::var(key.clone())
+                .expect(&format!("Failed to get '{}' environment variable!", key))
         }
     }
     pub mod tls {
@@ -34,18 +35,18 @@ pub(crate) mod handlers {
         }
 
         pub async fn get_rustls_config(cert_path: String, key_path: String) -> axum_server::tls_rustls::RustlsConfig {
-            axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path)
+            axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path.clone(), key_path.clone())
                 .await
                 .expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path))                
         }
 
-        pub async fn get_https_router() {
+        pub async fn get_https_router() -> axum::Router {
             axum::Router::new()
                 .route("/healthz", axum::routing::get(|| async {(StatusCode::OK, "App is healthy.")}))
                 .fallback(|uri: axum::http::Uri| async move {(StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri.path()))})            
         }
         
-        pub async fn get_http_router() {
+        pub async fn get_http_router(https_addr: String) -> axum::Router {
             axum::Router::new()
                 .fallback(|uri: axum::http::Uri,| async move {
                     axum::response::Redirect::temporary(&format!("https://{}{}", https_addr, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/")))
@@ -57,24 +58,24 @@ pub(crate) mod handlers {
             //     .parse()
             //     .expect(&format!("Failed to parse '{}' https address!", https_addr));
             
-            let addr = get_socket_addr(https_addr);
+            let addr = get_socket_addr(https_addr).await;
             
             // let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path)
             //     .await
             //     .expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path));
 
-            let config = get_rustls_config(cert_path.clone(), key_path.clone());
+            let config = get_rustls_config(cert_path.clone(), key_path.clone()).await;
 
             // let app = axum::Router::new()
             //     .route("/healthz", axum::routing::get(|| async {(StatusCode::OK, "App is healthy.")}))
             //     .fallback(|uri: axum::http::Uri| async move {(StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri.path()))});
 
-            let router = get_https_router();
+            let router = get_https_router().await;
             
             axum_server::bind_rustls(addr, config)
                 .serve(router.into_make_service())
-                .await;
-                // .expect(&format!("Failed to serve app over '{}' https address!", addr));
+                .await
+                .unwrap();
         }
 
         pub async fn redirect_req_to_https(http_addr: String, https_addr: String) {
@@ -82,19 +83,19 @@ pub(crate) mod handlers {
             //     .parse()
             //     .expect(&format!("Failed to parse '{}' http address!", http_addr));
 
-            let addr = get_socket_addr(http_addr);
+            let addr = get_socket_addr(http_addr).await;
             
             // let app = axum::Router::new()
             //     .fallback(|uri: axum::http::Uri,| async move {
             //         axum::response::Redirect::temporary(&format!("https://{}{}", https_addr, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/")))
             //     });
 
-            let router = get_http_router();
+            let router = get_http_router(https_addr).await;
             
             axum_server::bind(addr)
                 .serve(router.into_make_service())
                 .await
-                // .expect(&format!("Failed to redirect request from '{}' http address!", http_addr));
+                .unwrap();
         }
     }
 }
@@ -111,12 +112,12 @@ mod tests {
         #[tokio::test]
         #[should_panic(expected = "Failed to get ' ' environment variable!")]
         async fn test_get_env_var_failed_to_get_environment_variable() {
-            let _ = utils::get_env_var(INVALID_VALUE.as_str());
+            let _ = utils::get_env_var(" ".to_string());
         }
     
         #[tokio::test]
         async fn test_get_env_var_success() {
-            let result = utils::get_env_var("HTTP_ADDR");
+            let result = utils::get_env_var("HTTP_ADDR".to_string());
             assert_eq!(result, *HTTP_ADDR);
         }
     }
@@ -127,12 +128,12 @@ mod tests {
             #[tokio::test]
             #[should_panic(expected = "Failed to parse ' ' address!")]
             async fn test_get_socket_addr_failed_to_parse_address() {
-                let _ = get_socket_addr(" ".to_string());    
+                let _ = tls::get_socket_addr(" ".to_string());    
             }
             
             #[tokio::test]
             async fn test_get_addr_success() {
-                let result = get_socket_addr(HTTPS_ADDR);
+                let result = tls::get_socket_addr(HTTPS_ADDR.to_string()).await;
                 assert!(result.is_ipv4());    
             }    
 
@@ -150,18 +151,16 @@ mod tests {
             
             #[tokio::test]
             async fn test_get_rustls_config_success() {
-                let result = axum_server::tls_rustls::RustlsConfig::from_pem_file(CERT_PATH.clone(), KEY_PATH.clone());
+                let _ = axum_server::tls_rustls::RustlsConfig::from_pem_file(CERT_PATH.clone(), KEY_PATH.clone());
             }
             
             #[tokio::test]
             async fn test_get_https_router_ok_app_is_healthy() {
                 let router = tls::get_https_router().await;
                 let response = router
-                    .oneshot(Request::get("/healthz")
+                    .oneshot(axum::http::Request::get("/healthz")
                                 .header("Content-Type", "text/plain; charset=utf-8")
-                                .unwrap())
-                    .await
-                    .unwrap();
+                    .unwrap());
                 assert_eq!(response.status(), StatusCode::OK);
                 let body = body::to_bytes(response.into_body(), usize::MAX)
                     .await

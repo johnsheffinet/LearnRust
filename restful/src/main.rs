@@ -30,6 +30,48 @@ pub(crate) mod handlers {
             std::env::var(key.clone())
                 .expect(&format!("Failed to get '{}' environment variable!", key))
         }
+
+        // use http::{Method, Request, Uri, Version, HeaderValue};
+        // use http::header::{CONTENT_TYPE, AUTHORIZATION};
+        
+        // fn create_internal_request() -> Request<String> {
+        //     // 1. Define the Method
+        //     let method = Method::POST;
+        
+        //     // 2. Define the URI
+        //     let uri: Uri = "/api/v1/data".parse().expect("Invalid URI");
+        
+        //     // 3. Define Headers
+        //     let mut headers = http::HeaderMap::new();
+        //     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        //     headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer test_token"));
+        
+        //     // 4. Define the Body
+        //     let body = r#"{"key": "value", "count": 42}"#.to_string();
+        
+        //     // 5. Use the Request::builder() to assemble the components
+        //     let request = Request::builder()
+        //         .method(method)
+        //         .uri(uri)
+        //         .version(Version::HTTP_11) // Optional: specify HTTP version
+        //         .headers(headers)
+        //         .body(body)
+        //         .expect("Failed to build request");
+        
+        //     println!("--- Constructed Request ---");
+        //     println!("Method: {}", request.method());
+        //     println!("URI: {}", request.uri());
+        //     println!("Headers: {:#?}", request.headers());
+        //     println!("Body: {}", request.body());
+        //     println!("---------------------------");
+        
+        //     request
+}
+
+fn main() {
+    create_internal_request();
+}
+
     }
     pub mod tls {
         use axum::http::StatusCode;

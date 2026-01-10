@@ -31,6 +31,14 @@ pub(crate) mod handlers {
                 .expect(&format!("Failed to get '{}' environment variable!", key))
         }
 
+        pub fn get_router_response(router: axum::Router, request: axum::http::Request) -> axum::http::Response {
+            router
+                .oneshot(request)
+                .await
+                .expect("Failed to get response from request with '{}' method, '{}' uri, '{}' version, '{}' headers, '{}' body!", 
+                        request.method(), request.uri(), request.version(), request.headers(), request.body())
+        }
+        
         // use http::{Method, Request, Uri, Version, HeaderValue};
         // use http::header::{CONTENT_TYPE, AUTHORIZATION};
         
@@ -48,30 +56,6 @@ pub(crate) mod handlers {
         
         //     // 4. Define the Body
         //     let body = r#"{"key": "value", "count": 42}"#.to_string();
-        
-        //     // 5. Use the Request::builder() to assemble the components
-        //     let request = Request::builder()
-        //         .method(method)
-        //         .uri(uri)
-        //         .version(Version::HTTP_11) // Optional: specify HTTP version
-        //         .headers(headers)
-        //         .body(body)
-        //         .expect("Failed to build request");
-        
-        //     println!("--- Constructed Request ---");
-        //     println!("Method: {}", request.method());
-        //     println!("URI: {}", request.uri());
-        //     println!("Headers: {:#?}", request.headers());
-        //     println!("Body: {}", request.body());
-        //     println!("---------------------------");
-        
-        //     request
-}
-
-fn main() {
-    create_internal_request();
-}
-
     }
     pub mod tls {
         use axum::http::StatusCode;
@@ -183,50 +167,61 @@ mod tests {
             
             #[tokio::test]
             async fn test_get_https_router_ok_app_is_healthy() {
-                let router = tls::get_https_router().await;
-                let response = router
-                    .oneshot(axum::http::Request::get("/healthz")
-                                .header("Content-Type", "text/plain; charset=utf-8")
-                    .unwrap());
-                assert_eq!(response.status(), StatusCode::OK);
-                let body = body::to_bytes(response.into_body(), usize::MAX)
+                let router = get_https_router();
+
+                let request = axum::http::Request::builder()
+                    .method(axum::http::Method::GET)
+                    .uri(|| -> axum::http::Uri {
+                        let path = "/healthz".to_string();
+                        path.parse().expect(&format!("Failed to parse '{}' uri!", path))})
+                    .version(axum::http::Version::HTTP_11)
                     .await
-                    .unwrap();
-                assert_eq!(body, "App is healthy.");
+                    .expect("Failed to create request for 'app is healthy' test!");
+
+                let response = get_router_response(router, request);
+                
+                assert_eq!(response.status(), axum::http::StatusCode::OK);
+                assert_eq!(response.body(), "App is healthy.".to_string());
             }
             
             #[tokio::test]
             async fn test_get_https_router_not_found_route_is_invalid() {
-                let router = tls::get_https_router().await;
-                let response = router
-                    .oneshot(Request::get("/")
-                                .header("Content-Type", "text/plain; charset=utf-8")
-                                .unwrap())
+                let router = get_https_router();
+
+                let request = axum::http::Request::builder()
+                    .method(axum::http::Method::GET)
+                    .uri(|| -> axum::http::Uri {
+                        let path = "/".to_string();
+                        path.parse().expect(&format!("Failed to parse '{}' uri!", path))})
+                    .version(axum::http::Version::HTTP_11)
                     .await
-                    .unwrap();
+                    .expect("Failed to create request!");
+
+                let response = get_router_response(router, request);
+                
                 assert_eq!(response.status(), StatusCode::NOT_FOUND);
-                let body = body::to_bytes(response.into_body(), usize::MAX)
-                    .await
-                    .unwrap();
-                assert_eq!(body, "'/' route is invalid!");
+                assert_eq!(response.body(), "'/' route is invalid!".to_string());
             }
             
             #[tokio::test]
             async fn test_get_http_router_temporary_redirect() {
-                let router = tls::get_https_router().await;
-                let response = router
-                    .oneshot(Request::get("/")
-                                .header("Content-Type", "text/plain; charset=utf-8")
-                                .unwrap())
+                let router = get_https_router();
+
+                let request = axum::http::Request::builder()
+                    .method(axum::http::Method::GET)
+                    .uri(|| -> axum::http::Uri {
+                        let path = "/".to_string();
+                        path.parse().expect(&format!("Failed to parse '{}' uri!", path))})
+                    .version(axum::http::Version::HTTP_11)
                     .await
-                    .unwrap();
+                    .expect("Failed to create request!");
+
+                let response = get_router_response(router, request);
+                
                 assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
-                let body = body::to_bytes(response.into_body(), usize::MAX)
-                    .await
-                    .unwrap();
-                assert_eq!(body, "'/' route is invalid!");
+                // assert_eq!(response.headers(), "'/' route is invalid!".to_string());
             }
-    }
+        }
 }
 //     mod trc {
 //         use axum::{

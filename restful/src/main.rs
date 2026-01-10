@@ -11,10 +11,16 @@ const KEY_PATH: Lazy<String> = Lazy::new(|| {get_env_var("KEY_PATH".to_string())
 async fn main() {
     use crate::handlers::tls;
 
-    let serve_app_over_https_task = tokio::spawn(tls::serve_app_over_https(HTTPS_ADDR.to_string(), CERT_PATH.to_string(), KEY_PATH.to_string()));
+    let serve_app_over_https_task = tokio::spawn(axum_server::bind_rustls(get_socket_addr(HTTPS_ADDR.to_string()), get_rustls_config(CERT_PATH.to_string(), KEY_PATH.to_string()))
+        .serve(get_https_router().into_make_service())
+        .await
+        .unwrap());
 
-    let redirect_req_to_https_task = tokio::spawn(tls::redirect_req_to_https(HTTP_ADDR.to_string(), HTTPS_ADDR.to_string()));
-
+    let redirect_req_to_https_task = tokio::spawn(axum_server::bind(get_socket_addr(HTTP_ADDR.to_string()))
+        .serve(get_http_router(HTTPS_ADDR.to_string()).into_make_service())
+        .await
+        .unwrap());
+    
     let _ = tokio::join!(serve_app_over_https_task, redirect_req_to_https_task);
 }
 
@@ -53,50 +59,29 @@ pub(crate) mod handlers {
                 })            
         }
         
-        pub async fn serve_app_over_https(https_addr: String, cert_path: String, key_path: String) {
-            // let addr: std::net::SocketAddr = https_addr
-            //     .parse()
-            //     .expect(&format!("Failed to parse '{}' https address!", https_addr));
+        // pub async fn serve_app_over_https(https_addr: String, cert_path: String, key_path: String) {
+        //     let addr = get_socket_addr(https_addr).await;
             
-            let addr = get_socket_addr(https_addr).await;
+        //     let config = get_rustls_config(cert_path.clone(), key_path.clone()).await;
+
+        //     let router = get_https_router().await;
             
-            // let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path)
-            //     .await
-            //     .expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path));
+        //     axum_server::bind_rustls(addr, config)
+        //         .serve(router.into_make_service())
+        //         .await
+        //         .unwrap();            
+        // }
 
-            let config = get_rustls_config(cert_path.clone(), key_path.clone()).await;
-
-            // let app = axum::Router::new()
-            //     .route("/healthz", axum::routing::get(|| async {(StatusCode::OK, "App is healthy.")}))
-            //     .fallback(|uri: axum::http::Uri| async move {(StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri.path()))});
-
-            let router = get_https_router().await;
+        // pub async fn redirect_req_to_https(http_addr: String, https_addr: String) {
+        //     let addr = get_socket_addr(http_addr).await;
             
-            axum_server::bind_rustls(addr, config)
-                .serve(router.into_make_service())
-                .await
-                .unwrap();
-        }
-
-        pub async fn redirect_req_to_https(http_addr: String, https_addr: String) {
-            // let addr: std::net::SocketAddr = http_addr
-            //     .parse()
-            //     .expect(&format!("Failed to parse '{}' http address!", http_addr));
-
-            let addr = get_socket_addr(http_addr).await;
+        //     let router = get_http_router(https_addr).await;
             
-            // let app = axum::Router::new()
-            //     .fallback(|uri: axum::http::Uri,| async move {
-            //         axum::response::Redirect::temporary(&format!("https://{}{}", https_addr, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/")))
-            //     });
-
-            let router = get_http_router(https_addr).await;
-            
-            axum_server::bind(addr)
-                .serve(router.into_make_service())
-                .await
-                .unwrap();
-        }
+        //     axum_server::bind(addr)
+        //         .serve(router.into_make_service())
+        //         .await
+        //         .unwrap();
+        // }
     }
 }
 

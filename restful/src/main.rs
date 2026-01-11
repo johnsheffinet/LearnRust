@@ -62,7 +62,7 @@ pub(crate) mod handlers {
         pub async fn get_http_router() -> axum::Router {
             axum::Router::new()
                 .fallback(|uri: axum::http::Uri| async move {
-                    axum::response::Redirect::temporary(&format!("https://{}{}", HTTPS_ADDR.to_string(), uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/")))
+                    axum::response::Redirect::temporary(&format!("https://{}{}", crate::HTTPS_ADDR.to_string(), uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/")))
                 })            
         }
     }
@@ -1056,4 +1056,3 @@ pub(crate) mod handlers {
 //                 .await
 //                 .unwrap();
 //         }
-}

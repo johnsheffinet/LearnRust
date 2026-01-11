@@ -39,33 +39,6 @@ pub(crate) mod handlers {
                 .expect(&format!("Failed to get '{}' environment variable!", key))
         }
 
-        pub async fn get_router_response(router: axum::Router, request: axum::http::Request<axum::body::Body>) -> axum::http::Response<axum::body::Body> {
-            use tower::ServiceExt;
-            
-            router
-                .oneshot(request)
-                .await
-                .expect(&format!("Failed to get response from request with '{}' method, '{}' uri, '{:?}' version, '{:?}' headers, '{:?}' body!", 
-                        request.method(), request.uri(), request.version(), request.headers(), request.body()))
-        }
-        
-        // use http::{Method, Request, Uri, Version, HeaderValue};
-        // use http::header::{CONTENT_TYPE, AUTHORIZATION};
-        
-        // fn create_internal_request() -> Request<String> {
-        //     // 1. Define the Method
-        //     let method = Method::POST;
-        
-        //     // 2. Define the URI
-        //     let uri: Uri = "/api/v1/data".parse().expect("Invalid URI");
-        
-        //     // 3. Define Headers
-        //     let mut headers = http::HeaderMap::new();
-        //     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        //     headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer test_token"));
-        
-        //     // 4. Define the Body
-        //     let body = r#"{"key": "value", "count": 42}"#.to_string();
     }
     pub mod tls {
         use axum::http::StatusCode;
@@ -96,37 +69,38 @@ pub(crate) mod handlers {
                     axum::response::Redirect::temporary(&format!("https://{}{}", HTTPS_ADDR.to_string(), uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/")))
                 })            
         }
-        
-        // pub async fn serve_app_over_https(https_addr: String, cert_path: String, key_path: String) {
-        //     let addr = get_socket_addr(https_addr).await;
-            
-        //     let config = get_rustls_config(cert_path.clone(), key_path.clone()).await;
-
-        //     let router = get_https_router().await;
-            
-        //     axum_server::bind_rustls(addr, config)
-        //         .serve(router.into_make_service())
-        //         .await
-        //         .unwrap();            
-        // }
-
-        // pub async fn redirect_req_to_https(http_addr: String, https_addr: String) {
-        //     let addr = get_socket_addr(http_addr).await;
-            
-        //     let router = get_http_router(https_addr).await;
-            
-        //     axum_server::bind(addr)
-        //         .serve(router.into_make_service())
-        //         .await
-        //         .unwrap();
-        // }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use once_cell::sync::Lazy;
-    const INVALID_VALUE: Lazy<String> = Lazy::new(|| {" ".to_string()});
+    pub async fn get_router_response(router: axum::Router, request: axum::http::Request<axum::body::Body>) -> axum::http::Response<axum::body::Body> {
+        use tower::ServiceExt;
+        
+        router
+            .oneshot(request)
+            .await
+            .expect(&format!("Failed to get response from request with '{}' method, '{}' uri, '{:?}' version, '{:?}' headers, '{:?}' body!", 
+                    request.method(), request.uri(), request.version(), request.headers(), request.body()))
+    }
+        
+        // use http::{Method, Request, Uri, Version, HeaderValue};
+        // use http::header::{CONTENT_TYPE, AUTHORIZATION};
+        
+        // fn create_internal_request() -> Request<String> {
+        //     // 1. Define the Method
+        //     let method = Method::POST;
+        
+        //     // 2. Define the URI
+        //     let uri: Uri = "/api/v1/data".parse().expect("Invalid URI");
+        
+        //     // 3. Define Headers
+        //     let mut headers = http::HeaderMap::new();
+        //     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        //     headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer test_token"));
+        
+        //     // 4. Define the Body
+        //     let body = r#"{"key": "value", "count": 42}"#.to_string();
 
     mod utils_tests {
         use super::*;

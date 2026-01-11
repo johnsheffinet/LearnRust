@@ -1,11 +1,10 @@
 use once_cell::sync::Lazy;
 use crate::handlers::utils::get_env_var;
 
-const HTTP_ADDR: Lazy<String> = Lazy::new(get_env_var("HTTP_ADDR".to_string()));
-// const HTTPS_ADDR: Lazy<String> = Lazy::new(|| {get_env_var("HTTPS_ADDR".to_string())});
-// const CERT_PATH: Lazy<String> = Lazy::new(|| {get_env_var("CERT_PATH".to_string())});
-// const KEY_PATH: Lazy<String> = Lazy::new(|| {get_env_var("KEY_PATH".to_string())});
-        
+const HTTP_ADDR: Lazy<String> = Lazy::<String>::new(|| {get_env_var("HTTP_ADDR".to_string())});
+const HTTPS_ADDR: Lazy<String> = Lazy::<String>::new(|| {get_env_var("HTTPS_ADDR".to_string())});
+const CERT_PATH: Lazy<String> = Lazy::<String>::new(|| {get_env_var("CERT_PATH".to_string())});
+const KEY_PATH: Lazy<String> = Lazy::<String>::new(|| {get_env_var("KEY_PATH".to_string())});
 
 // #[tokio::main]
 // async fn main() {

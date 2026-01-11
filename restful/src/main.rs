@@ -40,10 +40,6 @@ pub(crate) mod handlers {
 
     }
 //     pub mod tls {
-//         use axum::http::StatusCode;
-
-//         use crate::HTTPS_ADDR;
-
 //         pub async fn get_socket_addr(addr: String) -> std::net::SocketAddr {
 //             addr
 //                 .parse()
@@ -57,6 +53,8 @@ pub(crate) mod handlers {
 //         }
 
 //         pub async fn get_https_router() -> axum::Router {
+                use axum::http::StatusCode;
+    
 //             axum::Router::new()
 //                 .route("/healthz", axum::routing::get(|| async {(StatusCode::OK, "App is healthy.")}))
 //                 .fallback(|uri: axum::http::Uri| async move {(StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri.path()))})            
@@ -69,7 +67,7 @@ pub(crate) mod handlers {
 //                 })            
 //         }
 //     }
-// }
+}
 
 // #[cfg(test)]
 // mod tests {
@@ -1036,8 +1034,8 @@ pub(crate) mod handlers {
 //             // Define the timeout duration
 //             const TIMEOUT_DURATION: Duration = Duration::from_secs(1);
 
-//             // Build the middleware stack using ServiceBuilder
 //             let middleware_stack = ServiceBuilder::new()
+//             // Build the middleware stack using ServiceBuilder
 //                 // The HandleErrorLayer must be placed above the TimeoutLayer
 //                 // so it can catch the error produced when a timeout occurs
 //                 .layer(HandleErrorLayer::new(handle_timeout_error))

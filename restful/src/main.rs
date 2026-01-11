@@ -39,34 +39,34 @@ pub(crate) mod handlers {
         }
 
     }
-//     pub mod tls {
-//         pub async fn get_socket_addr(addr: String) -> std::net::SocketAddr {
-//             addr
-//                 .parse()
-//                 .expect(&format!("Failed to parse '{}' address!", addr))                    
-//         }
+    pub mod tls {
+        pub async fn get_socket_addr(addr: String) -> std::net::SocketAddr {
+            addr
+                .parse()
+                .expect(&format!("Failed to parse '{}' address!", addr))                    
+        }
 
-//         pub async fn get_rustls_config(cert_path: String, key_path: String) -> axum_server::tls_rustls::RustlsConfig {
-//             axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path.clone(), key_path.clone())
-//                 .await
-//                 .expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path))                
-//         }
+        pub async fn get_rustls_config(cert_path: String, key_path: String) -> axum_server::tls_rustls::RustlsConfig {
+            axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path.clone(), key_path.clone())
+                .await
+                .expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path))                
+        }
 
-//         pub async fn get_https_router() -> axum::Router {
-                use axum::http::StatusCode;
+        pub async fn get_https_router() -> axum::Router {
+            use axum::http::StatusCode;
     
-//             axum::Router::new()
-//                 .route("/healthz", axum::routing::get(|| async {(StatusCode::OK, "App is healthy.")}))
-//                 .fallback(|uri: axum::http::Uri| async move {(StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri.path()))})            
-//         }
+            axum::Router::new()
+                .route("/healthz", axum::routing::get(|| async {(StatusCode::OK, "App is healthy.")}))
+                .fallback(|uri: axum::http::Uri| async move {(StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri.path()))})            
+        }
         
-//         pub async fn get_http_router() -> axum::Router {
-//             axum::Router::new()
-//                 .fallback(|uri: axum::http::Uri| async move {
-//                     axum::response::Redirect::temporary(&format!("https://{}{}", HTTPS_ADDR.to_string(), uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/")))
-//                 })            
-//         }
-//     }
+        pub async fn get_http_router() -> axum::Router {
+            axum::Router::new()
+                .fallback(|uri: axum::http::Uri| async move {
+                    axum::response::Redirect::temporary(&format!("https://{}{}", HTTPS_ADDR.to_string(), uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/")))
+                })            
+        }
+    }
 }
 
 // #[cfg(test)]

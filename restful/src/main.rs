@@ -6,30 +6,29 @@ const HTTPS_ADDR: Lazy<String> = Lazy::<String>::new(|| {get_env_var("HTTPS_ADDR
 const CERT_PATH: Lazy<String> = Lazy::<String>::new(|| {get_env_var("CERT_PATH".to_string())});
 const KEY_PATH: Lazy<String> = Lazy::<String>::new(|| {get_env_var("KEY_PATH".to_string())});
 
-// #[tokio::main]
-// async fn main() {
-//     use crate::handlers::tls;
-
-//     let serve_app_over_https_task = tokio::spawn(async {
-//         let addr = tls::get_socket_addr(HTTPS_ADDR.to_string()).await;
-//         let config = tls::get_rustls_config(CERT_PATH.to_string(), KEY_PATH.to_string()).await;
-//         let router = tls::get_https_router().await;
-//         axum_server::bind_rustls(addr, config)
-//             .serve(router.into_make_service())
-//             .await
-//             .unwrap()
-//     });
-
-//     let redirect_req_to_https_task = tokio::spawn(async {
-//         let addr = tls::get_socket_addr(HTTP_ADDR.to_string()).await;
-//         let router = tls::get_http_router().await;
-//         axum_server::bind(addr)
-//             .serve(router.into_make_service())
-//             .await
-//             .unwrap()});
+#[tokio::main]
+async fn main() {
+    use crate::handlers::tls;
     
-//     let _ = tokio::join!(serve_app_over_https_task, redirect_req_to_https_task);
-// }
+    let serve_app_over_https_task = tokio::spawn(async {
+        let addr = tls::get_socket_addr(HTTPS_ADDR.to_string()).await;
+        let config = tls::get_rustls_config(CERT_PATH.to_string(), KEY_PATH.to_string()).await;
+        let router = tls::get_https_router().await;
+        axum_server::bind_rustls(addr, config)
+            .serve(router.into_make_service())
+            .await
+            .expect(&format!("Failed to serve app over '{}' https address!", addr))});
+
+    let redirect_req_to_https_task = tokio::spawn(async {
+        let addr = tls::get_socket_addr(HTTP_ADDR.to_string()).await;
+        let router = tls::get_http_router().await;
+        axum_server::bind(addr)
+            .serve(router.into_make_service())
+            .await
+            .expect(&format!("Failed to redirect from '{}' http address!", addr))});
+    
+    let _ = tokio::join!(serve_app_over_https_task, redirect_req_to_https_task);
+}
 
 pub(crate) mod handlers {
     pub mod utils {

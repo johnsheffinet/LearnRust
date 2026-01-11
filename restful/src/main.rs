@@ -68,143 +68,125 @@ pub(crate) mod handlers {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     pub async fn get_router_response(router: axum::Router, request: axum::http::Request<axum::body::Body>) -> axum::http::Response<axum::body::Body> {
-//         use tower::ServiceExt;
+#[cfg(test)]
+mod tests {
+    pub async fn get_router_response(router: axum::Router, request: axum::http::Request<axum::body::Body>) -> axum::http::Response<axum::body::Body> {
+        use tower::ServiceExt;
         
-//         router
-//             .oneshot(request)
-//             .await
-//             .expect(&format!("Failed to get response from request with '{}' method, '{}' uri, '{:?}' version, '{:?}' headers, '{:?}' body!", 
-//                     request.method(), request.uri(), request.version(), request.headers(), request.body()))
-//     }
+        router
+            .oneshot(request)
+            .await
+            .expect(&format!("Failed to get response from request with '{:?}' method, '{}' uri, '{:?}' version, '{:?}' headers, '{:?}' body!", 
+                    request.method(), request.uri(), request.version(), request.headers(), request.body()))
+    }
         
-//         // use http::{Method, Request, Uri, Version, HeaderValue};
-//         // use http::header::{CONTENT_TYPE, AUTHORIZATION};
+    mod utils {
+        use super::*;
+        use crate::{HTTP_ADDR, handlers::utils};
         
-//         // fn create_internal_request() -> Request<String> {
-//         //     // 1. Define the Method
-//         //     let method = Method::POST;
-        
-//         //     // 2. Define the URI
-//         //     let uri: Uri = "/api/v1/data".parse().expect("Invalid URI");
-        
-//         //     // 3. Define Headers
-//         //     let mut headers = http::HeaderMap::new();
-//         //     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-//         //     headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer test_token"));
-        
-//         //     // 4. Define the Body
-//         //     let body = r#"{"key": "value", "count": 42}"#.to_string();
-
-//     mod utils_tests {
-//         use super::*;
-//         use crate::{HTTP_ADDR, handlers::utils};
-        
-//         #[tokio::test]
-//         #[should_panic(expected = "Failed to get ' ' environment variable!")]
-//         async fn test_get_env_var_failed_to_get_environment_variable() {
-//             let _ = utils::get_env_var(" ".to_string());
-//         }
+        #[tokio::test]
+        #[should_panic(expected = "Failed to get ' ' environment variable!")]
+        async fn test_get_env_var_failed_to_get_environment_variable() {
+            let _ = utils::get_env_var(" ".to_string());
+        }
     
-//         #[tokio::test]
-//         async fn test_get_env_var_success() {
-//             let result = utils::get_env_var("HTTP_ADDR".to_string());
-//             assert_eq!(result, *HTTP_ADDR);
-//         }
-//     }
-//     mod tls_tests {
-//         use super::*;
-//         use crate::{HTTP_ADDR, HTTPS_ADDR, CERT_PATH, KEY_PATH, handlers::tls};
+        #[tokio::test]
+        async fn test_get_env_var_success() {
+            let result = utils::get_env_var("HTTP_ADDR".to_string());
+            assert_eq!(result, *HTTP_ADDR);
+        }
+    }
+    mod tls {
+        use super::*;
+        use crate::{HTTP_ADDR, HTTPS_ADDR, CERT_PATH, KEY_PATH, handlers::tls};
         
-//             #[tokio::test]
-//             #[should_panic(expected = "Failed to parse ' ' address!")]
-//             async fn test_get_socket_addr_failed_to_parse_address() {
-//                 let _ = tls::get_socket_addr(" ".to_string());    
-//             }
+            #[tokio::test]
+            #[should_panic(expected = "Failed to parse ' ' address!")]
+            async fn test_get_socket_addr_failed_to_parse_address() {
+                let _ = tls::get_socket_addr(" ".to_string());    
+            }
             
-//             #[tokio::test]
-//             async fn test_get_addr_success() {
-//                 let result = tls::get_socket_addr(HTTPS_ADDR.to_string()).await;
-//                 assert!(result.is_ipv4());    
-//             }    
+            #[tokio::test]
+            async fn test_get_addr_success() {
+                let result = tls::get_socket_addr(HTTPS_ADDR.to_string()).await;
+                assert!(result.is_ipv4());    
+            }    
 
-//             #[tokio::test]
-//             #[should_panic(expected = "Failed to load ' ' or '/workspaces/LearnRust/learnrust.key' pem files!")]
-//             async fn test_get_rustls_config_failed_to_load_cert_pem_file() {
-//                 let _ = axum_server::tls_rustls::RustlsConfig::from_pem_file(" ".to_string(), KEY_PATH.clone());
-//             }
+            #[tokio::test]
+            #[should_panic(expected = "Failed to load ' ' or '/workspaces/LearnRust/learnrust.key' pem files!")]
+            async fn test_get_rustls_config_failed_to_load_cert_pem_file() {
+                let _ = axum_server::tls_rustls::RustlsConfig::from_pem_file(" ".to_string(), KEY_PATH.to_string());
+            }
             
-//             #[tokio::test]
-//             #[should_panic(expected = "Failed to load '/workspaces/LearnRust/learnrust.crt' or ' ' pem files!")]
-//             async fn test_get_rustls_config_failed_to_load_key_pem_file() {
-//                 let _ = axum_server::tls_rustls::RustlsConfig::from_pem_file(CERT_PATH.clone(), " ".to_string());
-//             }
+            #[tokio::test]
+            #[should_panic(expected = "Failed to load '/workspaces/LearnRust/learnrust.crt' or ' ' pem files!")]
+            async fn test_get_rustls_config_failed_to_load_key_pem_file() {
+                let _ = axum_server::tls_rustls::RustlsConfig::from_pem_file(CERT_PATH.to_string(), " ".to_string());
+            }
             
-//             #[tokio::test]
-//             async fn test_get_rustls_config_success() {
-//                 let _ = axum_server::tls_rustls::RustlsConfig::from_pem_file(CERT_PATH.clone(), KEY_PATH.clone());
-//             }
+            #[tokio::test]
+            async fn test_get_rustls_config_success() {
+                let _ = axum_server::tls_rustls::RustlsConfig::from_pem_file(CERT_PATH.to_string(), KEY_PATH.to_string());
+            }
             
-//             #[tokio::test]
-//             async fn test_get_https_router_ok_app_is_healthy() {
-//                 let router = get_https_router();
+            #[tokio::test]
+            async fn test_get_https_router_ok_app_is_healthy() {
+                let router = get_https_router();
 
-//                 let request = axum::http::Request::builder()
-//                     .method(axum::http::Method::GET)
-//                     .uri(|| -> axum::http::Uri {
-//                         let path = "/healthz".to_string();
-//                         path.parse().expect(&format!("Failed to parse '{}' uri!", path))})
-//                     .version(axum::http::Version::HTTP_11)
-//                     .await
-//                     .expect("Failed to create request for 'app is healthy' test!");
+                let request = axum::http::Request::builder()
+                    .method(axum::http::Method::GET)
+                    .uri(|| -> axum::http::Uri {
+                        let path = "/healthz".to_string();
+                        path.parse().expect(&format!("Failed to parse '{}' uri!", path))})
+                    .version(axum::http::Version::HTTP_11)
+                    .await
+                    .expect("Failed to create request for 'app is healthy' test!");
 
-//                 let response = get_router_response(router, request);
+                let response = get_router_response(router, request);
                 
-//                 assert_eq!(response.status(), axum::http::StatusCode::OK);
-//                 assert_eq!(response.body(), "App is healthy.".to_string());
-//             }
+                assert_eq!(response.status(), axum::http::StatusCode::OK);
+                assert_eq!(response.body(), "App is healthy.".to_string());
+            }
             
-//             #[tokio::test]
-//             async fn test_get_https_router_not_found_route_is_invalid() {
-//                 let router = get_https_router();
+            #[tokio::test]
+            async fn test_get_https_router_not_found_route_is_invalid() {
+                let router = get_https_router();
 
-//                 let request = axum::http::Request::builder()
-//                     .method(axum::http::Method::GET)
-//                     .uri(|| -> axum::http::Uri {
-//                         let path = "/".to_string();
-//                         path.parse().expect(&format!("Failed to parse '{}' uri!", path))})
-//                     .version(axum::http::Version::HTTP_11)
-//                     .await
-//                     .expect("Failed to create request!");
+                let request = axum::http::Request::builder()
+                    .method(axum::http::Method::GET)
+                    .uri(|| -> axum::http::Uri {
+                        let path = "/".to_string();
+                        path.parse().expect(&format!("Failed to parse '{}' uri!", path))})
+                    .version(axum::http::Version::HTTP_11)
+                    .await
+                    .expect("Failed to create request!");
 
-//                 let response = get_router_response(router, request);
+                let response = get_router_response(router, request);
                 
-//                 assert_eq!(response.status(), StatusCode::NOT_FOUND);
-//                 assert_eq!(response.body(), "'/' route is invalid!".to_string());
-//             }
+                assert_eq!(response.status(), StatusCode::NOT_FOUND);
+                assert_eq!(response.body(), "'/' route is invalid!".to_string());
+            }
             
-//             #[tokio::test]
-//             async fn test_get_http_router_temporary_redirect() {
-//                 let router = get_https_router();
+            #[tokio::test]
+            async fn test_get_http_router_temporary_redirect() {
+                let router = get_https_router();
 
-//                 let request = axum::http::Request::builder()
-//                     .method(axum::http::Method::GET)
-//                     .uri(|| -> axum::http::Uri {
-//                         let path = "/".to_string();
-//                         path.parse().expect(&format!("Failed to parse '{}' uri!", path))})
-//                     .version(axum::http::Version::HTTP_11)
-//                     .await
-//                     .expect("Failed to create request!");
+                let request = axum::http::Request::builder()
+                    .method(axum::http::Method::GET)
+                    .uri(|| -> axum::http::Uri {
+                        let path = "/".to_string();
+                        path.parse().expect(&format!("Failed to parse '{}' uri!", path))})
+                    .version(axum::http::Version::HTTP_11)
+                    .await
+                    .expect("Failed to create request!");
 
-//                 let response = get_router_response(router, request);
+                let response = get_router_response(router, request);
                 
-//                 assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
-//                 // assert_eq!(response.headers(), "'/' route is invalid!".to_string());
-//             }
-//         }
-// }
+                assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+                // assert_eq!(response.headers(), "'/' route is invalid!".to_string());
+            }
+        }
+}
 //     mod trc {
 //         use axum::{
 //             body::{Body, Bytes},

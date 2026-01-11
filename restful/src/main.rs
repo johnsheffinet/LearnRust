@@ -11,15 +11,23 @@ const KEY_PATH: Lazy<String> = Lazy::new(|| {get_env_var("KEY_PATH".to_string())
 async fn main() {
     use crate::handlers::tls;
 
-    let serve_app_over_https_task = tokio::spawn(axum_server::bind_rustls(get_socket_addr(HTTPS_ADDR.to_string()), get_rustls_config(CERT_PATH.to_string(), KEY_PATH.to_string()))
-        .serve(get_https_router().into_make_service())
-        .await
-        .unwrap());
+    let serve_app_over_https_task = tokio::spawn(async {
+        let addr = tls::get_socket_addr(HTTPS_ADDR.to_string()).await;
+        let config = tls::get_rustls_config(CERT_PATH.to_string(), KEY_PATH.to_string()).await;
+        let router = tls::get_https_router().await;
+        axum_server::bind_rustls(addr, config)
+            .serve(router.into_make_service())
+            .await
+            .unwrap()
+    });
 
-    let redirect_req_to_https_task = tokio::spawn(axum_server::bind(get_socket_addr(HTTP_ADDR.to_string()))
-        .serve(get_http_router(HTTPS_ADDR.to_string()).into_make_service())
-        .await
-        .unwrap());
+    let redirect_req_to_https_task = tokio::spawn(async {
+        let addr = tls::get_socket_addr(HTTP_ADDR.to_string()).await;
+        let router = tls::get_http_router().await;
+        axum_server::bind(addr)
+            .serve(router.into_make_service())
+            .await
+            .unwrap()});
     
     let _ = tokio::join!(serve_app_over_https_task, redirect_req_to_https_task);
 }
@@ -31,12 +39,14 @@ pub(crate) mod handlers {
                 .expect(&format!("Failed to get '{}' environment variable!", key))
         }
 
-        pub fn get_router_response(router: axum::Router, request: axum::http::Request) -> axum::http::Response {
+        pub async fn get_router_response(router: axum::Router, request: axum::http::Request<axum::body::Body>) -> axum::http::Response<axum::body::Body> {
+            use tower::ServiceExt;
+            
             router
                 .oneshot(request)
                 .await
-                .expect("Failed to get response from request with '{}' method, '{}' uri, '{}' version, '{}' headers, '{}' body!", 
-                        request.method(), request.uri(), request.version(), request.headers(), request.body())
+                .expect(&format!("Failed to get response from request with '{}' method, '{}' uri, '{:?}' version, '{:?}' headers, '{:?}' body!", 
+                        request.method(), request.uri(), request.version(), request.headers(), request.body()))
         }
         
         // use http::{Method, Request, Uri, Version, HeaderValue};
@@ -60,6 +70,8 @@ pub(crate) mod handlers {
     pub mod tls {
         use axum::http::StatusCode;
 
+        use crate::HTTPS_ADDR;
+
         pub async fn get_socket_addr(addr: String) -> std::net::SocketAddr {
             addr
                 .parse()
@@ -78,10 +90,10 @@ pub(crate) mod handlers {
                 .fallback(|uri: axum::http::Uri| async move {(StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri.path()))})            
         }
         
-        pub async fn get_http_router(https_addr: String) -> axum::Router {
+        pub async fn get_http_router() -> axum::Router {
             axum::Router::new()
-                .fallback(|uri: axum::http::Uri,| async move {
-                    axum::response::Redirect::temporary(&format!("https://{}{}", https_addr, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/")))
+                .fallback(|uri: axum::http::Uri| async move {
+                    axum::response::Redirect::temporary(&format!("https://{}{}", HTTPS_ADDR.to_string(), uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/")))
                 })            
         }
         

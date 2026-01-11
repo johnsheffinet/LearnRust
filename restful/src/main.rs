@@ -1,7 +1,7 @@
-// use once_cell::sync::Lazy;
-// use crate::handlers::utils::get_env_var;
+use once_cell::sync::Lazy;
+use crate::handlers::utils::get_env_var;
 
-// const HTTP_ADDR: Lazy<String> = Lazy::new(|| {get_env_var("HTTP_ADDR".to_string())});
+const HTTP_ADDR: Lazy<String> = Lazy::new(get_env_var("HTTP_ADDR".to_string()));
 // const HTTPS_ADDR: Lazy<String> = Lazy::new(|| {get_env_var("HTTPS_ADDR".to_string())});
 // const CERT_PATH: Lazy<String> = Lazy::new(|| {get_env_var("CERT_PATH".to_string())});
 // const KEY_PATH: Lazy<String> = Lazy::new(|| {get_env_var("KEY_PATH".to_string())});
@@ -32,14 +32,14 @@
 //     let _ = tokio::join!(serve_app_over_https_task, redirect_req_to_https_task);
 // }
 
-// pub(crate) mod handlers {
-//     pub mod utils {
-//         pub fn get_env_var(key: String) -> String {
-//             std::env::var(key.clone())
-//                 .expect(&format!("Failed to get '{}' environment variable!", key))
-//         }
+pub(crate) mod handlers {
+    pub mod utils {
+        pub fn get_env_var(key: String) -> String {
+            std::env::var(key.clone())
+                .expect(&format!("Failed to get '{}' environment variable!", key))
+        }
 
-//     }
+    }
 //     pub mod tls {
 //         use axum::http::StatusCode;
 
@@ -1060,4 +1060,4 @@
 //                 .await
 //                 .unwrap();
 //         }
-// }
+}

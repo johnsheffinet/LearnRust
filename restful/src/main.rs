@@ -70,19 +70,40 @@ pub(crate) mod handlers {
 
 #[cfg(test)]
 mod tests {
-    pub async fn get_router_response(router: axum::Router, request: axum::http::Request<axum::body::Body>) -> axum::http::Response<axum::body::Body> {
-        use tower::ServiceExt;
+    use axum::{body::Body, http::{Request, Response}};
+
+    pub async fn get_router_response(
+        router: axum::Router,
+        request: Request<Body>,
+    ) -> Response<Body> {
+        use http_body_util::BodyExt; // for Body::collect()
+        use tower::ServiceExt; // for Router::oneshot()
         
-        router
-            .oneshot(request)
+        let (parts, body) = request.into_parts();
+
+        let body_collected = body
+            .collect()
             .await
-            .expect("Failed to get response from router!")
-            // .expect(&format!("Failed to get response from request with '{:?}' method, '{}' uri, '{:?}' version, '{:?}' headers, '{:?}' body!", 
-            //         request.method(), request.uri(), request.version(), request.headers(), request.body()))
-    }
+            .expect("Failed to collect request body!");
+
+        let body_buffered = body_collected.to_bytes().to_vec();
+
+        let body_stringed = String::from_utf8(body_buffered.clone())
+            .expect("Failed to convert request body to string");
         
+        let new_request = Request::from_parts(parts.clone(), Body::from(body_buffered));
+
+        // Run the request through the router using oneshot
+        let response = router
+            .oneshot(new_request)
+            .await
+            .expect(&format!("Failed to get router response from request with '{}' method, '{}' path, '{:?}' version, '{:?}' headers, '{}' body!",
+                parts.method, parts.uri.path(), parts.version, parts.headers, body_stringed));
+            
+        // Return the resulting response
+        response
+    }
     mod utils {
-        use super::*;
         use crate::{HTTP_ADDR, handlers::utils};
         
         #[tokio::test]
@@ -99,12 +120,12 @@ mod tests {
     }
     mod tls {
         use super::*;
-        use crate::{HTTP_ADDR, HTTPS_ADDR, CERT_PATH, KEY_PATH, handlers::tls};
+        use crate::{HTTPS_ADDR, CERT_PATH, KEY_PATH, handlers::tls};
         
             #[tokio::test]
             #[should_panic(expected = "Failed to parse ' ' address!")]
             async fn test_get_socket_addr_failed_to_parse_address() {
-                let _ = tls::get_socket_addr(" ".to_string());    
+                let _ = tls::get_socket_addr(" ".to_string()).await;    
             }
             
             #[tokio::test]
@@ -116,18 +137,18 @@ mod tests {
             #[tokio::test]
             #[should_panic(expected = "Failed to load ' ' or '/workspaces/LearnRust/learnrust.key' pem files!")]
             async fn test_get_rustls_config_failed_to_load_cert_pem_file() {
-                let _ = axum_server::tls_rustls::RustlsConfig::from_pem_file(" ".to_string(), KEY_PATH.to_string());
+                let _ = tls::get_rustls_config("learnrust.crt".to_string(), KEY_PATH.to_string());
             }
             
             #[tokio::test]
             #[should_panic(expected = "Failed to load '/workspaces/LearnRust/learnrust.crt' or ' ' pem files!")]
             async fn test_get_rustls_config_failed_to_load_key_pem_file() {
-                let _ = axum_server::tls_rustls::RustlsConfig::from_pem_file(CERT_PATH.to_string(), " ".to_string());
+                let _ = tls::get_rustls_config(CERT_PATH.to_string(), " ".to_string());
             }
             
             #[tokio::test]
             async fn test_get_rustls_config_success() {
-                let _ = axum_server::tls_rustls::RustlsConfig::from_pem_file(CERT_PATH.to_string(), KEY_PATH.to_string());
+                let _ = tls::get_rustls_config(CERT_PATH.to_string(), KEY_PATH.to_string());
             }
             
             #[tokio::test]
@@ -174,11 +195,15 @@ mod tests {
             async fn test_get_http_router_temporary_redirect() {
                 let router = tls::get_http_router().await;
 
+                
+
                 let request = axum::http::Request::builder()
                     .method(axum::http::Method::GET)
                     .uri({
                         let path = "/".to_string();
-                        let uri: axum::http::Uri = path.parse().expect(&format!("Failed to parse '{}' uri!", path));
+                        let uri: axum::http::Uri = path
+                            .parse()
+                            .expect(&format!("Failed to parse '{}' uri!", path));
                         uri})
                     .version(axum::http::Version::HTTP_11)
                     .body(axum::body::Body::empty())

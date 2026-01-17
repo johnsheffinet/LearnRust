@@ -21,6 +21,54 @@ async fn main() {
     println!("CERT_PATH: {}", *CERT_PATH);
     println!("KEY_PATH: {}", *KEY_PATH);
 }
+
+pub mod handlers {
+    use axum::{body::Body, http::{Request, Response};
+    
+    pub struct RequestParams {}
+    pub mod utils {
+        use super::*;
+        
+        pub async fn get_github_secrets() -> () {}
+        pub async fn create_request(request_params: RequestParams) -> Request<Body> {}
+        pub async fn recreate_request(request: Request<Body>) -> Request<Body> {}
+        pub async fn get_router_response(router: axum::Router, request: Request<Body>) -> Response<Body {}
+    }
+    pub mod tls {
+        use super::*;
+
+        pub async fn get_socket_addr(addr: &str) -> std::net::SocketAddr {}
+        pub async fn get_rustls_config(cert_path: &str, key_path: &str) -> axum_server::tls_rustls::RustlsConfig {}
+        pub async fn get_https_router() -> axum::Router {}
+        pub async fn get_http_router() -> axum::Router {}
+    }
+    pub mod trc {}
+    pub mod auth {}
+    pub mod cache {}
+    pub mod cors {}
+    pub mod csrf {}
+    pub mod xss {}
+    pub mod valid {}
+    pub mod rate {}
+    pub mod size {}
+    pub mod time {}
+}
+
+pub mod tests {
+    pub mod utils {}
+    pub mod tls {}
+    pub mod trc {}
+    pub mod auth {}
+    pub mod cache {}
+    pub mod cors {}
+    pub mod csrf {}
+    pub mod xss {}
+    pub mod valid {}
+    pub mod rate {}
+    pub mod size {}
+    pub mod time {}    
+}
+
 /*
 use std::sync::LazyLock;
 use crate::handlers::utils::get_env_var;

@@ -1,27 +1,3 @@
-use std::sync::LazyLock;
-use std::env::var;
-
-static HTTP_ADDR: LazyLock<String> = LazyLock::new(|| {
-    var("HTTP_ADDR")
-        .expect("Failed to get 'HTTP_ADDR' environment variable!")});
-static HTTPS_ADDR: LazyLock<String> = LazyLock::new(|| {
-    var("HTTPS_ADDR")
-        .expect("Failed to get 'HTTPS_ADDR' environment variable!")});
-static CERT_PATH: LazyLock<String> = LazyLock::new(|| {
-    var("CERT_PATH")
-        .expect("Failed to get 'CERT_PATH' environment variable!")});
-static KEY_PATH: LazyLock<String> = LazyLock::new(|| {
-    var("KEY_PATH")
-        .expect("Failed to get 'KEY_PATH' environment variable!")});
-
-#[tokio::main]
-async fn main() {
-    println!("HTTP_ADDR: {}", *HTTP_ADDR);
-    println!("HTTPS_ADDR: {}", *HTTPS_ADDR);
-    println!("CERT_PATH: {}", *CERT_PATH);
-    println!("KEY_PATH: {}", *KEY_PATH);
-}
-
 pub mod handlers {
     use axum::{body::Body, http::{Request, Response};
     

@@ -1,42 +1,56 @@
 pub mod handlers {
-    use axum::{body::Body, http::{Request, Response};
+    use axum::{body::Body, http::{Request, Response}};
     
     pub struct RequestParams {}
     pub mod utils {
         use super::*;
         
-        pub async fn get_github_secrets() {
-            use std::{env, sync::LazyLock};
-
-            static HTTP_ADDR: LazyLock<String> = LazyLock::new(|| {
-                env::var("HTTP_ADDR")
-                    .expect("Failed to get 'HTTP_ADDR' environment variable!");
-            });
-            static HTTPS_ADDR: LazyLock<String> = LazyLock::new(|| {
-                env::var("HTTPS_ADDR")
-                    .expect("Failed to get 'HTTPS_ADDR' environment variable!");
-            });
-            static CERT_PATH: LazyLock<String> = LazyLock::new(|| {
-                env::var("CERT_PATH")
-                    .expect("Failed to get 'CERT_PATH' environment variable!");
-            });
-            static KEY_PATH: LazyLock<String> = LazyLock::new(|| {
-                env::var("KEY_PATH")
-                    .expect("Failed to get 'KEY_PATH' environment variable!");
-            });
+        pub async fn create_request(request_params: RequestParams) -> Request<Body> {
+            Request::new(Body::empty())
         }
-
-        pub async fn create_request(request_params: RequestParams) -> Request<Body> {}
-        pub async fn recreate_request(request: Request<Body>) -> Request<Body> {}
-        pub async fn get_router_response(router: axum::Router, request: Request<Body>) -> Response<Body {}
+        pub async fn recreate_request(request: Request<Body>) -> Request<Body> {
+            Request::new(Body::empty())
+        }
+        pub async fn get_router_response(router: axum::Router, request: Request<Body>) -> Response<Body> {
+            Response::new(Body::empty())
+        }
     }
     pub mod tls {
+        use axum::routing::get;
+
         use super::*;
 
-        pub async fn get_socket_addr(addr: &str) -> std::net::SocketAddr {}
-        pub async fn get_rustls_config(cert_path: &str, key_path: &str) -> axum_server::tls_rustls::RustlsConfig {}
-        pub async fn get_https_router() -> axum::Router {}
-        pub async fn get_http_router() -> axum::Router {}
+        pub async fn get_socket_addr(addr: &str) -> std::net::SocketAddr {
+            addr
+                .parse()
+                .expect(&format!("Failed to parse '{}' address!", addr))
+        }
+        pub async fn get_rustls_config(cert_path: &str, key_path: &str) -> axum_server::tls_rustls::RustlsConfig {
+            axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path)
+                .await
+                .expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path))
+        }
+        pub async fn get_https_router() -> axum::Router {
+            use axum::{http::StatusCode, routing::get};
+
+            axum::Router::new()
+                .route("healthz", get(|| async {(StatusCode::OK, "App is healthy.")}))
+                .fallback(|uri: axum::http::Uri| async move{(StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri.path()))})
+        }
+        pub async fn get_http_router() -> axum::Router {
+            axum::Router::new()
+                .fallback(|uri: axum::http::Uri| async move {
+                    let path_and_query = uri.path_and_query()
+                        .map(|pq| pq.as_str())
+                        .expect(&format!("Failed to map path and query from '{}' uri!", uri));
+                    Response::builder()
+                        .status(axum::http::StatusCode::TEMPORARY_REDIRECT)
+                        .header(
+                            axum::http::header::LOCATION,
+                            format!("https://{}{}", crate::HTTPS_ADDR.as_str(), path_and_query))
+                        .body(Body::empty())
+                        .expect("Failed to build redirect response!")})
+        }
     }
     pub mod trc {}
     pub mod auth {}
@@ -65,32 +79,32 @@ pub mod tests {
     pub mod time {}    
 }
 
+use std::sync::LazyLock;
+
+static HTTP_ADDR: LazyLock<String> = LazyLock::new(|| {
+    std::env::var("HTTP_ADDR").expect("Failed to get 'HTTP_ADDR' environment variable!")
+});
+static HTTPS_ADDR: LazyLock<String> = LazyLock::new(|| {
+    std::env::var("HTTPS_ADDR").expect("Failed to get 'HTTPS_ADDR' environment variable!")
+});
+static CERT_PATH: LazyLock<String> = LazyLock::new(|| {
+    std::env::var("CERT_PATH").expect("Failed to get 'CERT_PATH' environment variable!")
+});
+static KEY_PATH: LazyLock<String> = LazyLock::new(|| {
+    std::env::var("KEY_PATH").expect("Failed to get 'KEY_PATH' environment variable!")
+});
+
 #[tokio::main]
 async fn main() {
-    use crate::handlers::utils;
-
-    utils::get_github_secrets();
-    println!("HTTP_ADDR is {}.", *HTTP_ADDR);
-    println!("HTTPS_ADDR is {}.", *HTTPS_ADDR);
-    println!("CERT_PATH is {}.", *CERT_PATH);
-    println!("KEY_PATH is {}.", *KEY_PATH);
+    println!("HTTP_ADDR is '{}'.", *HTTP_ADDR);
+    println!("HTTPS_ADDR is '{}'.", *HTTPS_ADDR);
+    println!("CERT_PATH is '{}'.", *CERT_PATH);
+    println!("KEY_PATH is '{}'.", *KEY_PATH);
 }
 
 /*
-use std::sync::LazyLock;
-use crate::handlers::utils::get_env_var;
-
-static HTTP_ADDR: LazyLock<String> = LazyLock::new(|| {get_env_var("HTTP_ADDR")});
-static HTTPS_ADDR: LazyLock<String> = LazyLock::new(|| {get_env_var("HTTPS_ADDR")});
-static CERT_PATH: LazyLock<String> = LazyLock::new(|| {get_env_var("CERT_PATH")});
-static KEY_PATH: LazyLock<String> = LazyLock::new(|| {get_env_var("KEY_PATH")});
-
 pub(crate) mod handlers {
     pub mod utils {
-        pub fn get_env_var(key: &str) -> String {
-            std::env::var(key)
-                .expect(&format!("Failed to get '{}' environment variable!", key))
-        }
     }
 }
     pub mod tls {
@@ -156,20 +170,6 @@ mod tests {
     }
 
     mod utils {
-        use super::*;
-        use crate::handlers::utils;
-
-        #[tokio::test]
-        #[should_panic(expected = "Failed to get ' ' environment variable!")]
-        async fn test_get_env_var_failed_to_get_env_var() {
-            let _ = utils::get_env_var(" ".to_string());
-        }
-
-        #[tokio::test]
-        async fn test_get_env_var_success() {
-            let result = utils::get_env_var("HTTPS_ADDR".to_string());
-            assert_eq!(result, *crate::HTTPS_ADDR);
-        }
     }
     mod tls {
         use super::*;
@@ -289,8 +289,6 @@ fn main() {
     }
 }
 
-#[tokio::main]
-async fn main() {}
  */
 // #[tokio::main]
 // async fn main() {

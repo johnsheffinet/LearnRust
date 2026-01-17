@@ -29,7 +29,27 @@ pub mod handlers {
     pub mod utils {
         use super::*;
         
-        pub async fn get_github_secrets() -> () {}
+        pub async fn get_github_secrets() {
+            use std::{env, sync::LazyLock};
+
+            static HTTP_ADDR: LazyLock<String> = LazyLock::new(|| {
+                env::var("HTTP_ADDR")
+                    .expect("Failed to get 'HTTP_ADDR' environment variable!");
+            });
+            static HTTPS_ADDR: LazyLock<String> = LazyLock::new(|| {
+                env::var("HTTPS_ADDR")
+                    .expect("Failed to get 'HTTPS_ADDR' environment variable!");
+            });
+            static CERT_PATH: LazyLock<String> = LazyLock::new(|| {
+                env::var("CERT_PATH")
+                    .expect("Failed to get 'CERT_PATH' environment variable!");
+            });
+            static KEY_PATH: LazyLock<String> = LazyLock::new(|| {
+                env::var("KEY_PATH")
+                    .expect("Failed to get 'KEY_PATH' environment variable!");
+            });
+        }
+
         pub async fn create_request(request_params: RequestParams) -> Request<Body> {}
         pub async fn recreate_request(request: Request<Body>) -> Request<Body> {}
         pub async fn get_router_response(router: axum::Router, request: Request<Body>) -> Response<Body {}
@@ -67,6 +87,17 @@ pub mod tests {
     pub mod rate {}
     pub mod size {}
     pub mod time {}    
+}
+
+#[tokio::main]
+async fn main() {
+    use crate::handlers::utils;
+
+    utils::get_github_secrets();
+    println!("HTTP_ADDR is {}.", *HTTP_ADDR);
+    println!("HTTPS_ADDR is {}.", *HTTPS_ADDR);
+    println!("CERT_PATH is {}.", *CERT_PATH);
+    println!("KEY_PATH is {}.", *KEY_PATH);
 }
 
 /*

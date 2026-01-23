@@ -1,17 +1,51 @@
 pub mod handlers {
     use axum::{body::Body, http::{Request, Response}};
     
-    pub struct RequestParams {}
+    pub struct RequestBuildParams {
+        method: String,
+        uri: String,
+        version: String,
+        headers: mut HeaderMap,
+        body: String
+    }
+    pub struct ResponseBuildParams {
+        version: String,
+        status: String,
+        headers: mut HeaderMap,
+        body: String
+    }
     pub mod utils {
         use super::*;
         
-        pub async fn create_request(request_params: RequestParams) -> Request<Body> {
+        pub async fn build_request(rbp: RequestBuildParams) -> Request<Body> {
+            // Request::new(Body::empty())
+            let req = Request<Body>::build()
+                .method(|| -> axum::http::Method {rbp.method
+                    .parse()
+                    .expect(&format!("Failed to parse '{}' method!", rbp.method))})
+                .uri(|| -> axum::http::Uri {rbp.uri
+                    .parse()
+                    .expect(&format!("Failed to parse '{} uri!", rbp.uri))})
+                .version(|| -> axum::http::Version {rbp.version
+                    .parse()
+                    .expect(&format!("Failed to parse '{}' version!", rbp.version))})
+                .headers(|| -> mut HeaderMap {
+                    let mut headers = HeaderMap::new();
+                    headers.insert(key, val);
+                    headers})
+                .body(|| -> Body {rbp.body
+                    .parse()
+                    .expect(&format!("Failed to parse '{}' body!", rbp.body))})
+                .expect(&format!("Failed to build request with '{}' method, '{}' uri, '{}' version, '{:?}' headers, '{}' body!", 
+                    rbp.method, rbp.uri, rbp.version, rbp.headers, rbp.body));
+        }
+        pub async fn recreate_request(req: Request<Body>) -> Request<Body> {
             Request::new(Body::empty())
         }
-        pub async fn recreate_request(request: Request<Body>) -> Request<Body> {
-            Request::new(Body::empty())
+        pub async build_response(rbp: ResponseBuildParams) -> Response<Body> {
+            Response::new(Body::empty)
         }
-        pub async fn get_router_response(router: axum::Router, request: Request<Body>) -> Response<Body> {
+        pub async fn get_router_response(rtr: axum::Router, req: Request<Body>) -> Response<Body> {
             Response::new(Body::empty())
         }
     }

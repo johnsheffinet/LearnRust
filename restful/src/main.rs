@@ -29,7 +29,11 @@ pub mod handlers {
                 .version(|| -> axum::http::Version {rbp.version
                     .parse()
                     .expect(&format!("Failed to parse '{}' version!", rbp.version))})
-                .headers(|| -> mut HeaderMap {
+                .headers_mut()
+                    .extend(rbp.headers)
+                    (|| -> mut HeaderMap {
+                    req.headers_mut().extend(rbp.headers)
+                    req.headers_mut().extend(headers_to_add);
                     let mut headers = HeaderMap::new();
                     headers.insert(key, val);
                     headers})

@@ -2,52 +2,85 @@ pub mod handlers {
     use axum::{body::Body, http::{Request, Response}};
     
     pub struct RequestBuildParams {
-        method: String,
-        uri: String,
-        version: String,
-        headers: mut HeaderMap,
-        body: String
+        method: &'static str,
+        uri: &'static str,
+        version: &'static str,
+        headers: axum::http::HeaderMap,
+        body: &'static str ,
     }
     pub struct ResponseBuildParams {
-        version: String,
-        status: String,
-        headers: mut HeaderMap,
-        body: String
+        version: &'static str,
+        status: &'static str,
+        headers: axum::http::HeaderMap,
+        body: &'static str,
     }
     pub mod utils {
         use super::*;
-        
-        pub async fn build_request(rbp: RequestBuildParams) -> Request<Body> {
+
+        pub async fn build_request(rbp: RequestBuildParams) -> Request<Body> {   
+            use std::str::FromStr;
+         
             // Request::new(Body::empty())
-            let req = Request<Body>::build()
-                .method(|| -> axum::http::Method {rbp.method
-                    .parse()
-                    .expect(&format!("Failed to parse '{}' method!", rbp.method))})
-                .uri(|| -> axum::http::Uri {rbp.uri
-                    .parse()
-                    .expect(&format!("Failed to parse '{} uri!", rbp.uri))})
-                .version(|| -> axum::http::Version {rbp.version
-                    .parse()
-                    .expect(&format!("Failed to parse '{}' version!", rbp.version))})
-                .headers_mut()
-                    .extend(rbp.headers)
-                    (|| -> mut HeaderMap {
-                    req.headers_mut().extend(rbp.headers)
-                    req.headers_mut().extend(headers_to_add);
-                    let mut headers = HeaderMap::new();
-                    headers.insert(key, val);
-                    headers})
-                .body(|| -> Body {rbp.body
-                    .parse()
-                    .expect(&format!("Failed to parse '{}' body!", rbp.body))})
-                .expect(&format!("Failed to build request with '{}' method, '{}' uri, '{}' version, '{:?}' headers, '{}' body!", 
-                    rbp.method, rbp.uri, rbp.version, rbp.headers, rbp.body));
+            let mut builder = Request::builder()
+                .method(
+                    rbp.method
+                        .parse::<axum::http::Method>()
+                        .expect(&format!("Failed to parse '{}' method!", rbp.method)),
+                )
+                .uri(
+                    rbp.uri
+                        .parse::<axum::http::Uri>()
+                        .expect(&format!("Failed to parse '{}' uri!", rbp.uri)))
+                .version(
+                    rbp.version
+                        .parse::<axum::http::Version>()
+                        .expect(&format!("Failed to parse '{}' version!", rbp.version)));
+
+                let headers = 
+                    builder
+                        .headers_mut()
+                        .expect("Failed to get headers from request builder!");
+                headers
+                    .extend(rbp.headers.clone());
+
+            let request = 
+                builder
+                    .body(Body::from(rbp.body.to_string()))
+                    .expect(&format!("Failed to build request with '{}' method, '{}' uri, '{}' version, '{:?}' headers, '{}' body!",
+                        rbp.method, rbp.uri, rbp.version, rbp.headers, rbp.body)
+                );
+            
+            request
         }
         pub async fn recreate_request(req: Request<Body>) -> Request<Body> {
             Request::new(Body::empty())
         }
-        pub async build_response(rbp: ResponseBuildParams) -> Response<Body> {
-            Response::new(Body::empty)
+        pub async fn build_response(rbp: ResponseBuildParams) -> Response<Body> {
+            // Response::new(Body::empty)
+            let mut builder = Response::builder()
+                .version(
+                    rbp.version
+                        .parse::<axum::http::Version>()
+                        .expect(&format!("Failed to parse '{}' version!", rbp.version)))
+                .status(rbp.status
+                        .parse::<axum::http::StatusCode>()
+                        .expect(&format!("Failed to parse '{}' status!", rbp.status))
+                );
+            
+            let headers =
+                builder
+                    .headers_mut()
+                    .expect("Failed to get headers from response builder!");
+            headers
+                .extend(rbp.headers);            
+
+            let response = 
+                builder
+                    .body(Body::from(rbp.body.to_string()))
+                    .expect(&format!("Failed to build response with '{}' version, '{}' status, '{:?}' headers, '{}' body!",
+                        rbp.version, rbp.status, rbp.headers, rbp.body));
+                
+            response
         }
         pub async fn get_router_response(rtr: axum::Router, req: Request<Body>) -> Response<Body> {
             Response::new(Body::empty())

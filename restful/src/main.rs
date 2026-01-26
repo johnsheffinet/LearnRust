@@ -29,7 +29,24 @@ pub mod handlers {
         }
 
         pub async fn recreate_request(req: Request<Body>) -> Request<Body> {
-            Request::new(Body::empty())
+            // Request::new(Body::empty())
+            let (parts, body) = req.into_parts();
+
+            let body_collected = 
+                body
+                    .collect()
+                    .await.expect(&format!("Failed to collect request body!", ));
+
+            let body_buffered =
+                body_collected
+                    .to_bytes();
+
+            // let body_stringified =
+            //     String::from_utf8(body_buffered.to_vec())
+            //         .expect("Failed to stringify request body!");
+
+            req
+                .from_parts(parts, body_buffered).expect("Failed to recreate request!")
         }
 
         pub struct ResponseBuildParams {
@@ -179,7 +196,8 @@ async fn main() {
         headers: axum::http::HeaderMap::new(),
         body: "".to_string()
     }).await;
-    println!("Built '{:?}' request successfully.", req);
+    let request = utils::recreate_request(req);
+    println!("Built '{:?}' request successfully.", request);
 
     let res = utils::build_response(utils::ResponseBuildParams {
         version: axum::http::Version::HTTP_11,

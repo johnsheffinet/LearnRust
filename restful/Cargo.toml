@@ -13,9 +13,9 @@ axum-server = { version = "0.8.0", features = ["tls-rustls"] } # cargo add axum-
 axum-valid = "0.24.0" # cargo add axum-valid
 chrono = { version = "0.4.43", features = ["serde"] } # cargo add chrono --features serde
 jsonwebtoken = { version = "10.2.0", features = ["aws_lc_rs"] } # cargo add jsonwebtoken --features aws_lc_rs
-http = { version = "1.4.0", features = ["std"] } # cargo add http --features std
+# http = { version = "1.4.0", features = ["std"] } # cargo add http --features std
 http-body-util = "0.1.3" # cargo add http-body-util
-hyper = { version = "1.8.1", features = ["full"] } # cargo add hyper --features full
+# hyper = { version = "1.8.1", features = ["full"] } # cargo add hyper --features full
 serde = { version = "1.0.228", features = ["derive"] } # cargo add serde --features derive
 tokio = { version = "1.49.0", features = ["full"] } # cargo add tokio --features full
 tower = { version = "0.5.3", features = ["limit", "buffer"] } # cargo add tower --features limit,buffer

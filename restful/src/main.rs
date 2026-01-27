@@ -27,7 +27,7 @@ pub mod handlers {
                 .extend(rbp.headers.clone());
 
             request
-                .body(Body::from(rbp.body.to_string())).await
+                .body(Body::from(rbp.body.to_string()))
                 .expect(&format!("Failed to build '{:?}' request!", rbp))
         }
 
@@ -66,7 +66,7 @@ pub mod handlers {
                 .extend(rbp.headers.clone());
 
             response
-                .body(Body::from(rbp.body.to_string())).await
+                .body(Body::from(rbp.body.to_string()))
                 .expect(&format!("Failed to build response with '{:?}'", rbp))
         }
 
@@ -132,7 +132,7 @@ pub mod handlers {
             };
             let headers = {
                 let mut hdrs = HeaderMap::new();
-                hdrs.insert(headers::LOCATION, location);
+                hdrs.insert(header::LOCATION, location);
                 hdrs
             };
             utils::build_response(utils::ResponseBuildParams {

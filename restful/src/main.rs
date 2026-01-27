@@ -162,8 +162,23 @@ pub mod handlers {
     pub mod time {}
 }
 
+#[cfg(test)]
 pub mod tests {
-    pub mod utils {}
+    use super::*;
+    
+        #[tokio::test]
+        #[should_panic(expected = "Failed to !")]
+        async fn test_build_request_failed_to_parse_uri() {}
+
+    pub mod utils {
+        use super::*;
+
+        #[tokio::test]
+        #[should_panic(expected = "Failed to !")]
+        async fn test_build_request_failed_to_parse_uri() {}
+
+        
+    }
     pub mod tls {}
     pub mod trc {}
     pub mod auth {}

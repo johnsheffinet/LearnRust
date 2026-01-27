@@ -1,5 +1,7 @@
+use axum::{body::Body, http::{HeaderMap, Method, Request, Response, StatusCode, Version, Uri}};
+    
 pub mod handlers {
-    use axum::{body::Body, http::{HeaderMap, Method, Request, Response, StatusCode, Version, Uri}};
+    use super::*;
     
     pub mod utils {
         use super::*;
@@ -13,10 +15,11 @@ pub mod handlers {
         }
 
         pub async fn build_request(rbp: RequestBuildParams) -> Request<Body> {
-                let mut request = Request::builder()
-                    .method(rbp.method.clone())
-                    .uri(rbp.uri.parse::<Uri>().expect(&format!("Failed to parse '{}' uri!", rbp.uri)))
-                    .version(rbp.version.clone());
+                let mut request = 
+                    Request::builder()
+                        .method(rbp.method.clone())
+                        .uri(rbp.uri.parse::<Uri>().expect(&format!("Failed to parse '{}' uri!", rbp.uri)))
+                        .version(rbp.version.clone());
 
                 request
                     .headers_mut().expect("Failed to get headers from request builder!")
@@ -29,24 +32,28 @@ pub mod handlers {
         }
 
         pub async fn recreate_request(req: Request<Body>) -> Request<Body> {
-            // Request::new(Body::empty())
-            let (parts, body) = req.into_parts();
+            let (parts, body) = 
+                req
+                    .into_parts();
 
-            let body_collected = 
+            // let body_collected = 
+            //     body
+            //         .http_body_util::BodyExt::collect()
+            //         .await.expect(&format!("Failed to collect request body!", ));
+
+            // let body_buffered = 
+            //     body_collected
+            //         .to_bytes();
+
+            let body_buffered = 
                 body
-                    .collect()
-                    .await.expect(&format!("Failed to collect request body!", ));
-
-            let body_buffered =
-                body_collected
+                    .http_body_util::BodyExt::collect()
+                    .await.expect("Failed to collect request body!");
                     .to_bytes();
 
-            // let body_stringified =
-            //     String::from_utf8(body_buffered.to_vec())
-            //         .expect("Failed to stringify request body!");
-
-            req
-                .from_parts(parts, body_buffered).expect("Failed to recreate request!")
+            Request::from_parts(parts.clone(), Body::from(body_buffered.clone()))
+                .expect(&format!("Failed to recreate request with '{}' method, '{}' uri, '{:?}' version, '{:?}' headers, '{}' body!",
+                parts.method, parts.uri, parts.version, parts.headers, String::from_utf8(body_buffered.to_vec()))
         }
 
         pub struct ResponseBuildParams {
@@ -66,12 +73,19 @@ pub mod handlers {
                 .extend(rbp.headers.clone());
 
             response
-                .body(Body::from(rbp.body.to_string())).expect(&format!("Failed to build response with '{:?}' version, '{}' status, '{:?}' headers, '{}' body!",
+                .body(Body::from(rbp.body.to_string()))
+                .expect(&format!("Failed to build response with '{:?}' version, '{}' status, '{:?}' headers, '{}' body!",
                     rbp.version, rbp.status, rbp.headers, rbp.body))
         }
 
-        pub async fn get_router_response(rtr: axum::Router, req: Request<Body>) -> Response<Body> {
+        pub async fn get_router_response(router: axum::Router, request: Request<Body>) -> Response<Body> {
             Response::new(Body::empty())
+            router
+                .tower::ServiceExt::oneshot(request.clone()).await
+                .expect(&format!("Failed to get router response with '{}' method, '{}' path, '{:?}' version, '{:?}' headers, '{}' body!",
+                    request.method, request.uri, request.version, request.headers, request.body)            
+
+            
         }
     }
     pub mod tls {
@@ -79,14 +93,12 @@ pub mod handlers {
 
         pub async fn get_socket_addr(addr: &str) -> std::net::SocketAddr {
             addr
-                .parse()
-                .expect(&format!("Failed to parse '{}' address!", addr))
+                .parse().expect(&format!("Failed to parse '{}' address!", addr))
         }
 
         pub async fn get_rustls_config(cert_path: &str, key_path: &str) -> axum_server::tls_rustls::RustlsConfig {
             axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path)
-                .await
-                .expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path))
+                .await.expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path))
         }
 
         pub async fn get_https_router() -> axum::Router {

@@ -16,19 +16,19 @@ pub mod handlers {
         }
 
         pub async fn build_request(rbp: RequestBuildParams) -> Request<Body> {
-                let mut request = 
-                    Request::builder()
-                        .method(rbp.method.clone())
-                        .uri(rbp.uri.parse::<Uri>().expect(&format!("Failed to parse '{}' uri!", rbp.uri)))
-                        .version(rbp.version.clone());
+            let mut request = 
+                Request::builder()
+                    .method(rbp.method.clone())
+                    .uri(rbp.uri.parse::<Uri>().expect(&format!("Failed to parse '{}' uri!", rbp.uri)))
+                    .version(rbp.version.clone());
 
-                request
-                    .headers_mut().expect("Failed to get headers from request builder!")
-                    .extend(rbp.headers.clone());
+            request
+                .headers_mut().expect("Failed to get headers from request builder!")
+                .extend(rbp.headers.clone());
 
-                request
-                    .body(
-                        Body::from(rbp.body.to_string())).expect(&format!("Failed to build '{:?}' request!", rbp))
+            request
+                .body(Body::from(rbp.body.to_string())).await
+                .expect(&format!("Failed to build '{:?}' request!", rbp))
         }
 
         pub async fn clone_request(request: Request<Body>) -> Request<Body> {
@@ -40,11 +40,11 @@ pub mod handlers {
 
             let body_buffered = 
                 body
-                    .collect()
-                    .await.expect("Failed to collect request body!")
+                    .collect().await
+                    .expect("Failed to collect request body!")
                     .to_bytes();
 
-            Request::from_parts(parts.clone(), Body::from(body_buffered.clone()))
+            Request::from_parts(parts, Body::from(body_buffered))
         }
 
         #[derive(Debug)]
@@ -56,16 +56,17 @@ pub mod handlers {
         }
 
         pub async fn build_response(rbp: ResponseBuildParams) -> Response<Body> {
-            let mut response = Response::builder()
-                .version(rbp.version.clone())
-                .status(rbp.status.clone());
+            let mut response = 
+                Response::builder()
+                    .version(rbp.version.clone())
+                    .status(rbp.status.clone());
 
             response
                 .headers_mut().expect("Failed to get headers from response builder!")
                 .extend(rbp.headers.clone());
 
             response
-                .body(Body::from(rbp.body.to_string()))
+                .body(Body::from(rbp.body.to_string())).await
                 .expect(&format!("Failed to build response with '{:?}'", rbp))
         }
 
@@ -73,8 +74,8 @@ pub mod handlers {
             use tower::ServiceExt; // for Router::oneshot()
             
             router
-                .oneshot(request)
-                .await.expect("Failed to get router response!")
+                .oneshot(request).await
+                .expect("Failed to get router response!")
         }
     }
     
@@ -87,8 +88,8 @@ pub mod handlers {
         }
 
         pub async fn get_rustls_config(cert_path: &str, key_path: &str) -> axum_server::tls_rustls::RustlsConfig {
-            axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path)
-                .await.expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path))
+            axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path).await
+                .expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path))
         }
 
         pub async fn get_https_router() -> axum::Router {
@@ -104,8 +105,7 @@ pub mod handlers {
                 version: Version::HTTP_11,
                 status: StatusCode::OK,
                 headers: HeaderMap::new(),
-                body: "App is healthy.".to_string()})
-                .await
+                body: "App is healthy.".to_string()}).await
         }
 
         pub async fn route_is_invalid(uri: Uri) -> Response<Body> {
@@ -113,8 +113,7 @@ pub mod handlers {
                 version: Version::HTTP_11,
                 status: StatusCode::NOT_FOUND,
                 headers: HeaderMap::new(),
-                body: format!("'{}' route is invalid!", uri.path())})
-                .await
+                body: format!("'{}' route is invalid!", uri.path())}).await
         }
 
         pub async fn get_http_router() -> axum::Router {
@@ -129,16 +128,18 @@ pub mod handlers {
             let location = {
                 let loc = format!("https://{}{}", HTTPS_ADDR.as_str(), path_and_query);
                 loc
-                    .parse().expect(&format!("Failed to parse '{}' location header value!", loc))};
+                    .parse().expect(&format!("Failed to parse '{}' location header!", loc))
+            };
+            let headers = {
+                let mut hdrs = HeaderMap::new();
+                hdrs.insert(headers::LOCATION, location);
+                hdrs
+            };
             utils::build_response(utils::ResponseBuildParams {
                 version: Version::HTTP_11,
                 status: StatusCode::TEMPORARY_REDIRECT,
-                headers: {
-                    let mut headers = HeaderMap::new();
-                    headers.insert(header::LOCATION,location);
-                    headers},
-                body: "".to_string()})
-                .await
+                headers: headers,
+                body: "".to_string()}).await
         }
     }
     pub mod trc {}

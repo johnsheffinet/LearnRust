@@ -31,9 +31,9 @@ pub mod handlers {
                             rbp.method, rbp.uri, rbp.version, rbp.headers, rbp.body))
         }
 
-        pub async fn recreate_request(req: Request<Body>) -> Request<Body> {
+        pub async fn clone_request(request: Request<Body>) -> Request<Body> {
             let (parts, body) = 
-                req
+                request
                     .into_parts();
 
             // let body_collected = 
@@ -52,7 +52,7 @@ pub mod handlers {
                     .to_bytes();
 
             Request::from_parts(parts.clone(), Body::from(body_buffered.clone()))
-                .expect(&format!("Failed to recreate request with '{}' method, '{}' uri, '{:?}' version, '{:?}' headers, '{}' body!",
+                .expect(&format!("Failed to clone request with '{}' method, '{}' uri, '{:?}' version, '{:?}' headers, '{}' body!",
                 parts.method, parts.uri, parts.version, parts.headers, String::from_utf8(body_buffered.to_vec()))
         }
 
@@ -84,10 +84,9 @@ pub mod handlers {
                 .tower::ServiceExt::oneshot(request.clone()).await
                 .expect(&format!("Failed to get router response with '{}' method, '{}' path, '{:?}' version, '{:?}' headers, '{}' body!",
                     request.method, request.uri, request.version, request.headers, request.body)            
-
-            
         }
     }
+    
     pub mod tls {
         use super::*;
 
@@ -166,18 +165,70 @@ pub mod handlers {
 pub mod tests {
     use super::*;
     
-        #[tokio::test]
-        #[should_panic(expected = "Failed to !")]
-        async fn test_build_request_failed_to_parse_uri() {}
+        // #[tokio::test]
+        // #[should_panic(expected = "Failed to !")]
+        // async fn test_#_failed_to_#() {}
+
+        // #[tokio::test]
+        // async fn test_#_success() {}
 
     pub mod utils {
         use super::*;
+        use crate::handlers::utils;
+        
+        #[tokio::test]
+        #[should_panic(expected = "Failed to parse ' ' uri!")]
+        async fn test_build_request_failed_to_parse_uri() {
+            let _ = utils::build_request();
+        }
 
         #[tokio::test]
-        #[should_panic(expected = "Failed to !")]
-        async fn test_build_request_failed_to_parse_uri() {}
+        #[should_panic(expected = "Failed to get headers from request builder!")]
+        async fn test_build_request_failed_to_get_headers_from_request_builder() {
+            let _ = utils::build_request();
+        }
 
-        
+        #[tokio::test]
+        #[should_panic(expected = "Failed to build request!")]
+        async fn test_build_request_failed_to_build_request() {
+            let _ = utils::build_request();
+        }
+
+        #[tokio::test]
+        async fn test_build_request_success() {
+            let result = utils::build_request();
+
+            assert_eq!(result, _);
+        }
+
+        // #[tokio::test]
+        // #[should_panic(expected = "Failed to collect request body!")]
+        // async fn test_clone_request_failed_to_collect_request_body() {}
+
+        // #[tokio::test]
+        // #[should_panic(expected = "Failed to clone request!")]
+        // async fn test_clone_request_failed_to_clone_request() {}
+
+        // #[tokio::test]
+        // async fn test_clone_request_success() {}
+
+        // #[tokio::test]
+        // #[should_panic(expected = "Failed to get headers from response builder!")]
+        // async fn test_build_response_failed_to_get_headers_from_response_builder() {}
+
+        // #[tokio::test]
+        // #[should_panic(expected = "Failed to build response!")]
+        // async fn test_build_response_failed_to_build_response() {}
+
+        // #[tokio::test]
+        // async fn test_build_response_success() {}
+
+        // #[tokio::test]
+        // #[should_panic(expected = "Failed to get router response!")]
+        // async fn test_get_router_response_failed_to_get_router_response() {}
+
+        // #[tokio::test]
+        // async fn test_get_router_response_success() {}
     }
     pub mod tls {}
     pub mod trc {}

@@ -1,4 +1,4 @@
-use axum::{body::Body, http::{HeaderMap, Method, Request, Response, StatusCode, Version, Uri}};
+use axum::{body::Body, http::{header, HeaderMap, Method, Request, Response, StatusCode, Version, Uri}};
     
 pub mod handlers {
     use super::*;
@@ -6,6 +6,7 @@ pub mod handlers {
     pub mod utils {
         use super::*;
 
+        #[derive(Debug)]
         pub struct RequestBuildParams {
             pub method: Method,
             pub uri: String,
@@ -27,35 +28,26 @@ pub mod handlers {
 
                 request
                     .body(
-                        Body::from(rbp.body.to_string())).expect(&format!("Failed to build request with '{}' method, '{}' uri, '{:?}' version, '{:?}' headers, '{}' body!",
-                            rbp.method, rbp.uri, rbp.version, rbp.headers, rbp.body))
+                        Body::from(rbp.body.to_string())).expect(&format!("Failed to build '{:?}' request!", rbp))
         }
 
         pub async fn clone_request(request: Request<Body>) -> Request<Body> {
+            use http_body_util::BodyExt; // for Body::collect()
+
             let (parts, body) = 
                 request
                     .into_parts();
 
-            // let body_collected = 
-            //     body
-            //         .http_body_util::BodyExt::collect()
-            //         .await.expect(&format!("Failed to collect request body!", ));
-
-            // let body_buffered = 
-            //     body_collected
-            //         .to_bytes();
-
             let body_buffered = 
                 body
-                    .http_body_util::BodyExt::collect()
-                    .await.expect("Failed to collect request body!");
+                    .collect()
+                    .await.expect("Failed to collect request body!")
                     .to_bytes();
 
             Request::from_parts(parts.clone(), Body::from(body_buffered.clone()))
-                .expect(&format!("Failed to clone request with '{}' method, '{}' uri, '{:?}' version, '{:?}' headers, '{}' body!",
-                parts.method, parts.uri, parts.version, parts.headers, String::from_utf8(body_buffered.to_vec()))
         }
 
+        #[derive(Debug)]
         pub struct ResponseBuildParams {
             pub version: Version,
             pub status: StatusCode,
@@ -74,16 +66,15 @@ pub mod handlers {
 
             response
                 .body(Body::from(rbp.body.to_string()))
-                .expect(&format!("Failed to build response with '{:?}' version, '{}' status, '{:?}' headers, '{}' body!",
-                    rbp.version, rbp.status, rbp.headers, rbp.body))
+                .expect(&format!("Failed to build response with '{:?}'", rbp))
         }
 
         pub async fn get_router_response(router: axum::Router, request: Request<Body>) -> Response<Body> {
-            Response::new(Body::empty())
+            use tower::ServiceExt; // for Router::oneshot()
+            
             router
-                .tower::ServiceExt::oneshot(request.clone()).await
-                .expect(&format!("Failed to get router response with '{}' method, '{}' path, '{:?}' version, '{:?}' headers, '{}' body!",
-                    request.method, request.uri, request.version, request.headers, request.body)            
+                .oneshot(request)
+                .await.expect("Failed to get router response!")
         }
     }
     
@@ -113,8 +104,8 @@ pub mod handlers {
                 version: Version::HTTP_11,
                 status: StatusCode::OK,
                 headers: HeaderMap::new(),
-                body: "App is healthy.".to_string()
-            }).await
+                body: "App is healthy.".to_string()})
+                .await
         }
 
         pub async fn route_is_invalid(uri: Uri) -> Response<Body> {
@@ -122,8 +113,8 @@ pub mod handlers {
                 version: Version::HTTP_11,
                 status: StatusCode::NOT_FOUND,
                 headers: HeaderMap::new(),
-                body: format!("'{}' route is invalid!", uri.path())
-            }).await
+                body: format!("'{}' route is invalid!", uri.path())})
+                .await
         }
 
         pub async fn get_http_router() -> axum::Router {
@@ -135,18 +126,19 @@ pub mod handlers {
             let path_and_query = 
                 uri.path_and_query()
                     .map(|pq| pq.as_str()).expect(&format!("Failed to map path and query from '{}' uri!", uri));
+            let location = {
+                let loc = format!("https://{}{}", HTTPS_ADDR.as_str(), path_and_query);
+                loc
+                    .parse().expect(&format!("Failed to parse '{}' location header value!", loc))};
             utils::build_response(utils::ResponseBuildParams {
                 version: Version::HTTP_11,
                 status: StatusCode::TEMPORARY_REDIRECT,
                 headers: {
                     let mut headers = HeaderMap::new();
-                    headers.insert(
-                        axum::http::header::LOCATION,
-                        format!("https://{}{}", crate::HTTPS_ADDR.as_str(), path_and_query)
-                            .parse().expect("Failed to parse 'LOCATION' header value!"));
+                    headers.insert(header::LOCATION,location);
                     headers},
-                body: "".to_string()
-            }).await
+                body: "".to_string()})
+                .await
         }
     }
     pub mod trc {}
@@ -179,26 +171,63 @@ pub mod tests {
         #[tokio::test]
         #[should_panic(expected = "Failed to parse ' ' uri!")]
         async fn test_build_request_failed_to_parse_uri() {
-            let _ = utils::build_request();
+            let _ = 
+                utils::build_request(
+                    utils::RequestBuildParams {
+                        method: Method::GET,
+                        uri: " ".to_string(),
+                        version: Version::HTTP_11,
+                        headers: HeaderMap::new(),
+                        body: "".to_string()})
+                    .await;
         }
 
         #[tokio::test]
         #[should_panic(expected = "Failed to get headers from request builder!")]
         async fn test_build_request_failed_to_get_headers_from_request_builder() {
-            let _ = utils::build_request();
+            let _ = 
+                utils::build_request(
+                    utils::RequestBuildParams {
+                        method: Method::GET,
+                        uri: "/healthz".to_string(),
+                        version: Version::HTTP_11,
+                        headers: {
+                            let mut headers = HeaderMap::new();
+                            headers.insert(
+                                axum::http::header::HOST,
+                                "invalid header value with newline\n".parse().unwrap());
+                            headers},
+                        body: "".to_string()})
+                    .await;
         }
 
         #[tokio::test]
         #[should_panic(expected = "Failed to build request!")]
         async fn test_build_request_failed_to_build_request() {
-            let _ = utils::build_request();
+            let _ = 
+                utils::build_request(
+                    utils::RequestBuildParams {
+                        method: Method::GET,
+                        uri: "/healthz".to_string(),
+                        version: Version::HTTP_11,
+                        headers: HeaderMap::new(),
+                        body: "".to_string()})
+                    .await;
         }
 
         #[tokio::test]
         async fn test_build_request_success() {
-            let result = utils::build_request();
+            let _ = 
+                utils::build_request(
+                    utils::RequestBuildParams {
+                        method: Method::GET,
+                        uri: "/healthz".to_string(),
+                        version: Version::HTTP_11,
+                        headers: HeaderMap::new(),
+                        body: "".to_string()})
+                    .await;
 
-            assert_eq!(result, _);
+            // assert_eq!(result, _);
         }
 
         // #[tokio::test]
@@ -274,7 +303,7 @@ async fn main() {
         headers: axum::http::HeaderMap::new(),
         body: "".to_string()
     }).await;
-    let request = utils::recreate_request(req);
+    let request = utils::clone_request(req).await;
     println!("Built '{:?}' request successfully.", request);
 
     let res = utils::build_response(utils::ResponseBuildParams {

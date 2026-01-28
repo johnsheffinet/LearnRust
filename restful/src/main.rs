@@ -9,7 +9,7 @@ pub mod handlers {
         #[derive(Debug)]
         pub struct RequestBuildParams {
             pub method: Method,
-            pub uri: String,
+            pub path: String,
             pub version: Version,
             pub headers: HeaderMap,
             pub body: String
@@ -19,11 +19,15 @@ pub mod handlers {
             let mut request = 
                 Request::builder()
                     .method(rbp.method.clone())
-                    .uri(rbp.uri.parse::<Uri>().expect(&format!("Failed to parse '{}' uri!", rbp.uri)))
+                    .uri(
+                        format!("https://{}{}", HTTPS_ADDR.as_str, rbp.path)
+                            .parse::<Uri>()
+                            .expect(&format!("Failed to parse '{}' uri!", rbp.path)))
                     .version(rbp.version.clone());
 
             request
-                .headers_mut().expect("Failed to get headers from request builder!")
+                .headers_mut()
+                .expect("Failed to get headers from request builder!")
                 .extend(rbp.headers.clone());
 
             request
@@ -35,8 +39,7 @@ pub mod handlers {
             use http_body_util::BodyExt; // for Body::collect()
 
             let (parts, body) = 
-                request
-                    .into_parts();
+                request.into_parts();
 
             let body_buffered = 
                 body
@@ -60,9 +63,10 @@ pub mod handlers {
                 Response::builder()
                     .version(rbp.version.clone())
                     .status(rbp.status.clone());
-
+            
             response
-                .headers_mut().expect("Failed to get headers from response builder!")
+                .headers_mut()
+                .expect("Failed to get headers from response builder!")
                 .extend(rbp.headers.clone());
 
             response
@@ -84,7 +88,8 @@ pub mod handlers {
 
         pub async fn get_socket_addr(addr: &str) -> std::net::SocketAddr {
             addr
-                .parse().expect(&format!("Failed to parse '{}' address!", addr))
+                .parse()
+                .expect(&format!("Failed to parse '{}' address!", addr))
         }
 
         pub async fn get_rustls_config(cert_path: &str, key_path: &str) -> axum_server::tls_rustls::RustlsConfig {
@@ -122,19 +127,26 @@ pub mod handlers {
         }
 
         pub async fn redirect_to_https(uri: Uri) -> Response<Body> {
-            let path_and_query = 
-                uri.path_and_query()
-                    .map(|pq| pq.as_str()).expect(&format!("Failed to map path and query from '{}' uri!", uri));
-            let location = {
-                let loc = format!("https://{}{}", HTTPS_ADDR.as_str(), path_and_query);
-                loc
-                    .parse().expect(&format!("Failed to parse '{}' location header!", loc))
+            let path_query = {
+                uri
+                    .path_and_query()
+                    .map(|pq| pq.as_str())
+                    .expect(&format!("Failed to map path and query from '{}' uri!", uri))                
             };
+            
+            let location = {
+                let loc = format!("https://{}{}", HTTPS_ADDR.as_str(), path_query);
+                loc
+                    .parse()
+                    .expect(&format!("Failed to parse '{}' location header!", loc))
+            };
+
             let headers = {
                 let mut hdrs = HeaderMap::new();
                 hdrs.insert(header::LOCATION, location);
                 hdrs
             };
+
             utils::build_response(utils::ResponseBuildParams {
                 version: Version::HTTP_11,
                 status: StatusCode::TEMPORARY_REDIRECT,
@@ -176,11 +188,10 @@ pub mod tests {
                 utils::build_request(
                     utils::RequestBuildParams {
                         method: Method::GET,
-                        uri: " ".to_string(),
+                        uri: "\n".to_string(),
                         version: Version::HTTP_11,
                         headers: HeaderMap::new(),
-                        body: "".to_string()})
-                    .await;
+                        body: "".to_string()}).await;
         }
 
         #[tokio::test]
@@ -194,12 +205,12 @@ pub mod tests {
                         version: Version::HTTP_11,
                         headers: {
                             let mut headers = HeaderMap::new();
-                            headers.insert(
-                                axum::http::header::HOST,
-                                "invalid header value with newline\n".parse().unwrap());
-                            headers},
-                        body: "".to_string()})
-                    .await;
+                            
+                            headers.insert(header::HOST, "\n"/*.parse().unwrap()*/);
+                        
+                            headers
+                        },
+                        body: "".to_string()}).await;
         }
 
         #[tokio::test]
@@ -212,8 +223,7 @@ pub mod tests {
                         uri: "/healthz".to_string(),
                         version: Version::HTTP_11,
                         headers: HeaderMap::new(),
-                        body: "".to_string()})
-                    .await;
+                        body: "\n".to_string()}).await;
         }
 
         #[tokio::test]
@@ -225,10 +235,7 @@ pub mod tests {
                         uri: "/healthz".to_string(),
                         version: Version::HTTP_11,
                         headers: HeaderMap::new(),
-                        body: "".to_string()})
-                    .await;
-
-            // assert_eq!(result, _);
+                        body: "".to_string()}).await;
         }
 
         // #[tokio::test]

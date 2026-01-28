@@ -75,11 +75,24 @@ pub mod handlers {
         }
 
         pub async fn get_router_response(router: axum::Router, request: Request<Body>) -> Response<Body> {
+            use http_body_util::BodyExt; // for Body::collect()
             use tower::ServiceExt; // for Router::oneshot()
             
+            let (parts, body) = request.into_parts();
+
+            let body_buffered = 
+                body
+                    .collect().await
+                    .expect("Failed to collect request body!")
+                    .to_bytes();
+
+            let request_cloned = Request::from_parts(parts, Body::from(body_buffered));
+
+            let request_failed = Request::from_parts(parts, Body::from(body_buffered));
+            
             router
-                .oneshot(request).await
-                .expect("Failed to get router response!")
+                .oneshot(request_cloned).await
+                .expect("Failed to get router response with '{:?}' request!", request_failed)
         }
     }
     

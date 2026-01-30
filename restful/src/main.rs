@@ -80,19 +80,33 @@ pub mod handlers {
         }
 
         pub async fn app_is_healthy() -> Response<Body> {
-            utils::build_response(utils::ResponseBuildParams {
-                version: Version::HTTP_11,
-                status: StatusCode::OK,
-                headers: HeaderMap::new(),
-                body: "App is healthy.".to_string()}).await
+            // utils::build_response(utils::ResponseBuildParams {
+            //     version: Version::HTTP_11,
+            //     status: StatusCode::OK,
+            //     headers: HeaderMap::new(),
+            //     body: "App is healthy.".to_string()}).await
+            (Version::HTTP_11,
+             StatusCode::OK,
+             HeaderMap::new(),
+             "App is healthy.".to_string()
+            ).into_response()
         }
 
         pub async fn route_is_invalid(uri: Uri) -> Response<Body> {
-            utils::build_response(utils::ResponseBuildParams {
-                version: Version::HTTP_11,
-                status: StatusCode::NOT_FOUND,
-                headers: HeaderMap::new(),
-                body: format!("'{}' route is invalid!", uri.path())}).await
+            // utils::build_response(utils::ResponseBuildParams {
+            //     version: Version::HTTP_11,
+            //     status: StatusCode::NOT_FOUND,
+            //     headers: HeaderMap::new(),
+            //     body: format!("'{}' route is invalid!", uri.path())}).await
+            let headers = HeaderMap::new();
+
+            let body: String = format!("'{}' route is invalid!", uri.path())
+            (
+                Version::HTTP_11,
+                StatusCode::OK,
+                headers,
+                body
+            ).into_response()
         }
 
         pub async fn get_http_router() -> axum::Router {

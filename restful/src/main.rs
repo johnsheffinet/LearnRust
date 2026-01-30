@@ -41,6 +41,11 @@ pub mod handlers {
             pub body: String
         }
 
+        Impl axum::response::IntoResponse for ResponseBuildParams {
+            fn into_response(self) -> axum::response::Response {
+                (self.version, self.status, self.headers, self.body,).into_response()
+            }
+        }
         pub async fn build_response(rbp: ResponseBuildParams) -> Response<Body> {
             let mut response = Response::builder()
                 .version(rbp.version.clone())
@@ -85,11 +90,12 @@ pub mod handlers {
             //     status: StatusCode::OK,
             //     headers: HeaderMap::new(),
             //     body: "App is healthy.".to_string()}).await
-            (Version::HTTP_11,
-             StatusCode::OK,
-             HeaderMap::new(),
-             "App is healthy.".to_string()
-            ).into_response()
+            // (Version::HTTP_11,
+            //  StatusCode::OK,
+            //  HeaderMap::new(),
+            //  "App is healthy.".to_string()
+            // ).into_response()
+            (StatusCode::OK, "App is healthy.".to_string()).into_response()
         }
 
         pub async fn route_is_invalid(uri: Uri) -> Response<Body> {
@@ -98,15 +104,16 @@ pub mod handlers {
             //     status: StatusCode::NOT_FOUND,
             //     headers: HeaderMap::new(),
             //     body: format!("'{}' route is invalid!", uri.path())}).await
-            let headers = HeaderMap::new();
+            // let headers = HeaderMap::new();
 
-            let body: String = format!("'{}' route is invalid!", uri.path())
-            (
-                Version::HTTP_11,
-                StatusCode::OK,
-                headers,
-                body
-            ).into_response()
+            // let body: String = format!("'{}' route is invalid!", uri.path())
+            // (
+            //     Version::HTTP_11,
+            //     StatusCode::OK,
+            //     headers,
+            //     body
+            // ).into_response()
+            (StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri).into_response()
         }
 
         pub async fn get_http_router() -> axum::Router {

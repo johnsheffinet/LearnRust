@@ -1,5 +1,17 @@
 use axum::{body::Body, http::{header, HeaderMap, HeaderValue, Method, Request, Response, StatusCode, Version, Uri}};
-    
+use axum-thiserror::ErrorStatus;
+use thiserror::Error;
+
+#[derive(Debug, Error, ErrorStatus)]
+pub enum AppErr {
+    #[status(StatusCode::BADREQUEST)]
+    #[error("Failed to parse uri: '{0}'")]
+    FailedUriParse(String)
+
+    #[error("Failed to build request: '{0}'")]
+    FailedRequestBuild(String)
+}
+
 pub mod handlers {
     use super::*;
     
@@ -15,22 +27,21 @@ pub mod handlers {
             pub body: String
         }
 
-        pub async fn build_request(rbp: RequestBuildParams) -> Request<Body> {
+        pub async fn build_request(rbp: &RequestBuildParams) -> Request<Body> {
             let mut request = Request::builder()
-                .method(rbp.method.clone())
-                .uri(rbp.uri.clone()
+                .method(rbp.method)
+                .uri(rbp.path
                     .parse::<Uri>()
-                    .expect(&format!("Failed to parse '{}' uri!", rbp.uri)))
-                .version(rbp.version.clone());
+                    .map_err(|e| AppErr::InvalidUri(e.to_string()))?
+                .version(rbp.version);
 
             request
                 .headers_mut()
-                .expect("Failed to get headers from request builder!")
-                .extend(rbp.headers.clone());
-
+                .extend(rbp.headers);
+            
             request
                 .body(Body::from(rbp.body.to_string()))
-                .expect(&format!("Failed to build '{:?}' request!", rbp))
+                .map_err(|e| AppErr::FailedRequestBuild(e.to_string())?
         }
 
         #[derive(Debug)]
@@ -41,7 +52,7 @@ pub mod handlers {
             pub body: String
         }
 
-        Impl axum::response::IntoResponse for ResponseBuildParams {
+        impl axum::response::IntoResponse for ResponseBuildParams {
             fn into_response(self) -> axum::response::Response {
                 (self.version, self.status, self.headers, self.body,).into_response()
             }

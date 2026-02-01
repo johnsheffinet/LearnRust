@@ -319,30 +319,26 @@ static KEY_PATH: LazyLock<String> = LazyLock::new(|| {
 
 #[tokio::main]
 async fn main() {
-    use handlers::utils;
+    use crate::handlers::tls;
+    
+    let serve_app_over_https_task = tokio::spawn(async {
+        let addr = tls::get_socket_addr(HTTPS_ADDR.to_string()).await;
+        let config = tls::get_rustls_config(CERT_PATH.to_string(), KEY_PATH.to_string()).await;
+        let router = tls::get_https_router().await;
+        axum_server::bind_rustls(addr, config)
+            .serve(router.into_make_service())
+            .await
+            .expect(&format!("Failed to serve app over '{}' https address!", addr))});
 
-    println!("HTTP_ADDR is '{}'.", *HTTP_ADDR);
-    println!("HTTPS_ADDR is '{}'.", *HTTPS_ADDR);
-    println!("CERT_PATH is '{}'.", *CERT_PATH);
-    println!("KEY_PATH is '{}'.", *KEY_PATH);
-
-    let req = utils::build_request(utils::RequestBuildParams {
-        method: axum::http::Method::GET,
-        uri: "/healthz".to_string(),
-        version: axum::http::Version::HTTP_11,
-        headers: axum::http::HeaderMap::new(),
-        body: "".to_string()
-    }).await;
-    let request = utils::clone_request(req).await;
-    println!("Built '{:?}' request successfully.", request);
-
-    let res = utils::build_response(utils::ResponseBuildParams {
-        version: axum::http::Version::HTTP_11,
-        status: axum::http::StatusCode::OK,
-        headers: axum::http::HeaderMap::new(),
-        body: "App is healthy.".to_string()
-    }).await;
-    println!("Built '{:?}' response successfully.", res);
+    let redirect_req_to_https_task = tokio::spawn(async {
+        let addr = tls::get_socket_addr(HTTP_ADDR.to_string()).await;
+        let router = tls::get_http_router().await;
+        axum_server::bind(addr)
+            .serve(router.into_make_service())
+            .await
+            .expect(&format!("Failed to redirect from '{}' http address!", addr))});
+    
+    let _ = tokio::join!(serve_app_over_https_task, redirect_req_to_https_task);
 }
 
 /*

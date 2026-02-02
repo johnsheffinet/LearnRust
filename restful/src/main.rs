@@ -1,17 +1,30 @@
-use axum::{body::Body, http::{header, HeaderMap, HeaderValue, Method, Request, Response, StatusCode, Version, Uri}};
-use axum-thiserror::ErrorStatus;
-use thiserror::Error;
+use axum::{body::Body, http::{header, response::IntoResponse, HeaderMap, HeaderValue, Json, Method, Request, Response, StatusCode, Version, Uri}};
+use serde_json::{json, Value};
+// use axum-thiserror::ErrorStatus;
+// use thiserror::Error;
 
-#[derive(Debug, Error, ErrorStatus)]
-pub enum AppErr {
-    #[status(StatusCode::BADREQUEST)]
-    #[error("Failed to parse uri: '{0}'")]
-    FailedUriParse(String)
+#[dervive(std::fmt::Debug, thiserror::Error, axum-thiserror::ErrorStatus)]
+enum AppErrors {
+    #[status(StatusCode::BAD_REQUEST)]
+    #[error("Failed to parse uri! {0}")]
+    FailedParseUri(#[from] axum::http::uri::InvalidUri),
 
-    #[error("Failed to build request: '{0}'")]
-    FailedRequestBuild(String)
+    #[status(StatusCode::INTERNAL_SERVER_ERROR)]
+    #[error("Failed to build request! {0}")]
+    FailedBuildRequest(#[from] axum::http::Error),
+
+    
 }
 
+impl IntoResponse for AppErrors {
+    fn into_response(self) -> Response {
+        (self.status, self.error).into_response()
+    }
+}
+
+type AppResult = Result<T, AppErrors>;
+
+********
 pub mod handlers {
     use super::*;
     

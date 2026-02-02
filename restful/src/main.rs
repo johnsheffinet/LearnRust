@@ -40,21 +40,24 @@ pub mod handlers {
             pub body: String
         }
 
-        pub async fn build_request(rbp: &RequestBuildParams) -> Request<Body> {
-            let mut request = Request::builder()
-                .method(rbp.method)
-                .uri(rbp.path
+        impl RequestBuildParams {
+            pub fn build_request(&self) -> Result<Request<Body>, AppErr> {
+                let uri = self.path
                     .parse::<Uri>()
-                    .map_err(|e| AppErr::InvalidUri(e.to_string()))?
-                .version(rbp.version);
+                    .map_err(|e| AppErr::FailedUriParse(e.to_string()))?;
 
-            request
-                .headers_mut()
-                .extend(rbp.headers);
-            
-            request
-                .body(Body::from(rbp.body.to_string()))
-                .map_err(|e| AppErr::FailedRequestBuild(e.to_string())?
+                let mut request = Request::builder()
+                    .method(self.method.clone())
+                    .uri(uri)
+                    .version(self.version)
+                    .body(Body::from(self.body.clone()))
+                    .map_err(|e| AppErr::FailedRequestBuild(e.to_string()))?;
+
+                // Merge headers
+                *request.headers_mut() = self.headers.clone();
+                
+                Ok(request)
+            }
         }
 
         #[derive(Debug)]
@@ -65,213 +68,208 @@ pub mod handlers {
             pub body: String
         }
 
-        impl axum::response::IntoResponse for ResponseBuildParams {
-            fn into_response(self) -> axum::response::Response {
-                (self.version, self.status, self.headers, self.body,).into_response()
+        pub fn build_response(rbp: ResponseBuildParams) -> Result<Response<Body>, AppErr> {
+            let mut builder = Response::builder()
+                .version(rbp.version)
+                .status(rbp.status);
+
+            if let Some(h) = builder.headers_mut() {
+                *h = rbp.headers;
             }
-        }
-        pub async fn build_response(rbp: ResponseBuildParams) -> Response<Body> {
-            let mut response = Response::builder()
-                .version(rbp.version.clone())
-                .status(rbp.status.clone());
-            
-            response
-                .headers_mut()
-                .expect("Failed to get headers from response builder!")
-                .extend(rbp.headers.clone());
 
-            response
-                .body(Body::from(rbp.body.to_string()))
-                .expect(&format!("Failed to build response with '{:?}'", rbp))
+            builder
+                .body(Body::from(rbp.body))
+                .map_err(|e| AppErr::FailedRequestBuild(e.to_string()))
         }
     }
-    
-    pub mod tls {
-        use super::*;
-
-        pub async fn get_socket_addr(addr: &str) -> std::net::SocketAddr {
-            addr
-                .parse()
-                .expect(&format!("Failed to parse '{}' address!", addr))
-        }
-
-        pub async fn get_rustls_config(cert_path: &str, key_path: &str) -> axum_server::tls_rustls::RustlsConfig {
-            axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path).await
-                .expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path))
-        }
-
-        pub async fn get_https_router() -> axum::Router {
-            use axum::routing::get;
-
-            axum::Router::new()
-                .route("healthz", get(app_is_healthy))
-                .fallback(route_is_invalid)
-        }
-
-        pub async fn app_is_healthy() -> Response<Body> {
-            // utils::build_response(utils::ResponseBuildParams {
-            //     version: Version::HTTP_11,
-            //     status: StatusCode::OK,
-            //     headers: HeaderMap::new(),
-            //     body: "App is healthy.".to_string()}).await
-            // (Version::HTTP_11,
-            //  StatusCode::OK,
-            //  HeaderMap::new(),
-            //  "App is healthy.".to_string()
-            // ).into_response()
-            (StatusCode::OK, "App is healthy.".to_string()).into_response()
-        }
-
-        pub async fn route_is_invalid(uri: Uri) -> Response<Body> {
-            // utils::build_response(utils::ResponseBuildParams {
-            //     version: Version::HTTP_11,
-            //     status: StatusCode::NOT_FOUND,
-            //     headers: HeaderMap::new(),
-            //     body: format!("'{}' route is invalid!", uri.path())}).await
-            // let headers = HeaderMap::new();
-
-            // let body: String = format!("'{}' route is invalid!", uri.path())
-            // (
-            //     Version::HTTP_11,
-            //     StatusCode::OK,
-            //     headers,
-            //     body
-            // ).into_response()
-            (StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri).into_response()
-        }
-
-        pub async fn get_http_router() -> axum::Router {
-            axum::Router::new()
-                .fallback(redirect_to_https)
-        }
-
-        pub async fn redirect_to_https(uri: Uri) -> Response<Body> {
-            let path_query = {uri
-                .path_and_query()
-                .map(|pq| pq.as_str())
-                .expect(&format!("Failed to map path and query from '{}' uri!", uri))                
-            };
-            
-            let location = {
-                let loc = format!("https://{}{}", HTTPS_ADDR.as_str(), path_query);
-                loc
-                    .parse()
-                    .expect(&format!("Failed to parse '{}' location header!", loc))
-            };
-
-            let headers = {
-                let mut headers = HeaderMap::new();
-                headers.insert(header::LOCATION, location);
-                headers
-            };
-
-            utils::build_response(utils::ResponseBuildParams {
-                version: Version::HTTP_11,
-                status: StatusCode::TEMPORARY_REDIRECT,
-                headers: headers,
-                body: "".to_string()}).await
-        }
-    }
-    pub mod trc {}
-    pub mod auth {}
-    pub mod cache {}
-    pub mod cors {}
-    pub mod csrf {}
-    pub mod xss {}
-    pub mod valid {}
-    pub mod rate {}
-    pub mod size {}
-    pub mod time {}
 }
+    
+//     pub mod tls {
+//         use super::*;
 
-#[cfg(test)]
-pub mod tests {
-    use super::*;
+//         pub async fn get_socket_addr(addr: &str) -> std::net::SocketAddr {
+//             addr
+//                 .parse()
+//                 .expect(&format!("Failed to parse '{}' address!", addr))
+//         }
 
-    pub async fn get_router_response(router: axum::Router, request: Request<Body>) -> Response<Body> {
-        use http_body_util::BodyExt; // for Body::collect()
-        use tower::ServiceExt; // for Router::oneshot()
+//         pub async fn get_rustls_config(cert_path: &str, key_path: &str) -> axum_server::tls_rustls::RustlsConfig {
+//             axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path).await
+//                 .expect(&format!("Failed to load '{}' or '{}' pem files!", cert_path, key_path))
+//         }
 
-        let (parts, body) = request
-            .into_parts();
+//         pub async fn get_https_router() -> axum::Router {
+//             use axum::routing::get;
 
-        let body_buffered = body
-            .collect().await
-            .expect("Failed to collect request body!")
-            .to_bytes();
+//             axum::Router::new()
+//                 .route("healthz", get(app_is_healthy))
+//                 .fallback(route_is_invalid)
+//         }
 
-        let request_cloned = Request::from_parts(parts, Body::from(body_buffered));
+//         pub async fn app_is_healthy() -> Response<Body> {
+//             // utils::build_response(utils::ResponseBuildParams {
+//             //     version: Version::HTTP_11,
+//             //     status: StatusCode::OK,
+//             //     headers: HeaderMap::new(),
+//             //     body: "App is healthy.".to_string()}).await
+//             // (Version::HTTP_11,
+//             //  StatusCode::OK,
+//             //  HeaderMap::new(),
+//             //  "App is healthy.".to_string()
+//             // ).into_response()
+//             (StatusCode::OK, "App is healthy.".to_string()).into_response()
+//         }
 
-        let request_failed = Request::from_parts(parts, Body::from(body_buffered));
+//         pub async fn route_is_invalid(uri: Uri) -> Response<Body> {
+//             // utils::build_response(utils::ResponseBuildParams {
+//             //     version: Version::HTTP_11,
+//             //     status: StatusCode::NOT_FOUND,
+//             //     headers: HeaderMap::new(),
+//             //     body: format!("'{}' route is invalid!", uri.path())}).await
+//             // let headers = HeaderMap::new();
 
-        router
-            .oneshot(request_cloned).await
-            .expect("Failed to get router response with '{:?}' request!", request_failed)
-    }
+//             // let body: String = format!("'{}' route is invalid!", uri.path())
+//             // (
+//             //     Version::HTTP_11,
+//             //     StatusCode::OK,
+//             //     headers,
+//             //     body
+//             // ).into_response()
+//             (StatusCode::NOT_FOUND, format!("'{}' route is invalid!", uri).into_response()
+//         }
 
-        #[tokio::test]
-        #[should_panic]
-        async fn test_#_failed_to_#() {}
+//         pub async fn get_http_router() -> axum::Router {
+//             axum::Router::new()
+//                 .fallback(redirect_to_https)
+//         }
 
-        #[tokio::test]
-        async fn test_#_success() {}
+//         pub async fn redirect_to_https(uri: Uri) -> Response<Body> {
+//             let path_query = {uri
+//                 .path_and_query()
+//                 .map(|pq| pq.as_str())
+//                 .expect(&format!("Failed to map path and query from '{}' uri!", uri))                
+//             };
+            
+//             let location = {
+//                 let loc = format!("https://{}{}", HTTPS_ADDR.as_str(), path_query);
+//                 loc
+//                     .parse()
+//                     .expect(&format!("Failed to parse '{}' location header!", loc))
+//             };
 
-    pub mod utils {
-        use super::*;
-        use crate::handlers::utils;
+//             let headers = {
+//                 let mut headers = HeaderMap::new();
+//                 headers.insert(header::LOCATION, location);
+//                 headers
+//             };
+
+//             utils::build_response(utils::ResponseBuildParams {
+//                 version: Version::HTTP_11,
+//                 status: StatusCode::TEMPORARY_REDIRECT,
+//                 headers: headers,
+//                 body: "".to_string()}).await
+//         }
+//     }
+//     pub mod trc {}
+//     pub mod auth {}
+//     pub mod cache {}
+//     pub mod cors {}
+//     pub mod csrf {}
+//     pub mod xss {}
+//     pub mod valid {}
+//     pub mod rate {}
+//     pub mod size {}
+//     pub mod time {}
+// }
+
+// #[cfg(test)]
+// pub mod tests {
+//     use super::*;
+
+//     pub async fn get_router_response(router: axum::Router, request: Request<Body>) -> Response<Body> {
+//         use http_body_util::BodyExt; // for Body::collect()
+//         use tower::ServiceExt; // for Router::oneshot()
+
+//         let (parts, body) = request
+//             .into_parts();
+
+//         let body_buffered = body
+//             .collect().await
+//             .expect("Failed to collect request body!")
+//             .to_bytes();
+
+//         let request_cloned = Request::from_parts(parts, Body::from(body_buffered));
+
+//         let request_failed = Request::from_parts(parts, Body::from(body_buffered));
+
+//         router
+//             .oneshot(request_cloned).await
+//             .expect("Failed to get router response with '{:?}' request!", request_failed)
+//     }
+
+//         #[tokio::test]
+//         #[should_panic]
+//         async fn test_#_failed_to_#() {}
+
+//         #[tokio::test]
+//         async fn test_#_success() {}
+
+//     pub mod utils {
+//         use super::*;
+//         use crate::handlers::utils;
         
-        #[tokio::test]
-        #[should_panic]
-        async fn test_build_request_failed_to_parse_uri() {
-            let _ = utils::build_request(
-                utils::RequestBuildParams {
-                    method: Method::GET,
-                    uri: "\n".to_string(),
-                    version: Version::HTTP_11,
-                    headers: HeaderMap::new(),
-                    body: "".to_string()}).await;
-        }
+//         #[tokio::test]
+//         #[should_panic]
+//         async fn test_build_request_failed_to_parse_uri() {
+//             let _ = utils::build_request(
+//                 utils::RequestBuildParams {
+//                     method: Method::GET,
+//                     uri: "\n".to_string(),
+//                     version: Version::HTTP_11,
+//                     headers: HeaderMap::new(),
+//                     body: "".to_string()}).await;
+//         }
 
-        #[tokio::test]
-        #[should_panic]
-        async fn test_build_request_failed_to_get_headers_from_request_builder() {
-            let _ = utils::build_request(
-                utils::RequestBuildParams {
-                    method: Method::GET,
-                    uri: "/healthz".to_string(),
-                    version: Version::HTTP_11,
-                    headers: {
-                        let mut headers = HeaderMap::new();
-                        headers.insert(header::HOST, ""
-                            .parse::<HeaderValue>()
-                            .expect("Failed to parse '' header value!"));
-                        headers
-                    },
-                    body: "".to_string()}).await;
-        }
+//         #[tokio::test]
+//         #[should_panic]
+//         async fn test_build_request_failed_to_get_headers_from_request_builder() {
+//             let _ = utils::build_request(
+//                 utils::RequestBuildParams {
+//                     method: Method::GET,
+//                     uri: "/healthz".to_string(),
+//                     version: Version::HTTP_11,
+//                     headers: {
+//                         let mut headers = HeaderMap::new();
+//                         headers.insert(header::HOST, ""
+//                             .parse::<HeaderValue>()
+//                             .expect("Failed to parse '' header value!"));
+//                         headers
+//                     },
+//                     body: "".to_string()}).await;
+//         }
 
-        #[tokio::test]
-        #[should_panic]
-        async fn test_build_request_failed_to_build_request() {
-            let _ = utils::build_request(
-                utils::RequestBuildParams {
-                    method: Method::GET,
-                    uri: "/healthz".to_string(),
-                    version: Version::HTTP_11,
-                    headers: HeaderMap::new(),
-                    body: "\n".to_string()}).await;
-        }
+//         #[tokio::test]
+//         #[should_panic]
+//         async fn test_build_request_failed_to_build_request() {
+//             let _ = utils::build_request(
+//                 utils::RequestBuildParams {
+//                     method: Method::GET,
+//                     uri: "/healthz".to_string(),
+//                     version: Version::HTTP_11,
+//                     headers: HeaderMap::new(),
+//                     body: "\n".to_string()}).await;
+//         }
 
-        #[tokio::test]
-        async fn test_build_request_success() {
-            let _ = utils::build_request(
-                utils::RequestBuildParams {
-                    method: Method::GET,
-                    uri: "/healthz".to_string(),
-                    version: Version::HTTP_11,
-                    headers: HeaderMap::new(),
-                    body: "".to_string()}).await;
-        }
+//         #[tokio::test]
+//         async fn test_build_request_success() {
+//             let _ = utils::build_request(
+//                 utils::RequestBuildParams {
+//                     method: Method::GET,
+//                     uri: "/healthz".to_string(),
+//                     version: Version::HTTP_11,
+//                     headers: HeaderMap::new(),
+//                     body: "".to_string()}).await;
+//         }
 
         // #[tokio::test]
         // #[should_panic(expected = "Failed to collect request body!")]
@@ -301,19 +299,19 @@ pub mod tests {
 
         // #[tokio::test]
         // async fn test_get_router_response_success() {}
-    }
-    pub mod tls {}
-    pub mod trc {}
-    pub mod auth {}
-    pub mod cache {}
-    pub mod cors {}
-    pub mod csrf {}
-    pub mod xss {}
-    pub mod valid {}
-    pub mod rate {}
-    pub mod size {}
-    pub mod time {}    
-}
+//     }
+//     pub mod tls {}
+//     pub mod trc {}
+//     pub mod auth {}
+//     pub mod cache {}
+//     pub mod cors {}
+//     pub mod csrf {}
+//     pub mod xss {}
+//     pub mod valid {}
+//     pub mod rate {}
+//     pub mod size {}
+//     pub mod time {}    
+// }
 
 use std::sync::LazyLock;
 
@@ -332,26 +330,26 @@ static KEY_PATH: LazyLock<String> = LazyLock::new(|| {
 
 #[tokio::main]
 async fn main() {
-    use crate::handlers::tls;
+    // use crate::handlers::tls;
     
-    let serve_app_over_https_task = tokio::spawn(async {
-        let addr = tls::get_socket_addr(HTTPS_ADDR.to_string()).await;
-        let config = tls::get_rustls_config(CERT_PATH.to_string(), KEY_PATH.to_string()).await;
-        let router = tls::get_https_router().await;
-        axum_server::bind_rustls(addr, config)
-            .serve(router.into_make_service())
-            .await
-            .expect(&format!("Failed to serve app over '{}' https address!", addr))});
+    // let serve_app_over_https_task = tokio::spawn(async {
+    //     let addr = tls::get_socket_addr(HTTPS_ADDR.to_string()).await;
+    //     let config = tls::get_rustls_config(CERT_PATH.to_string(), KEY_PATH.to_string()).await;
+    //     let router = tls::get_https_router().await;
+    //     axum_server::bind_rustls(addr, config)
+    //         .serve(router.into_make_service())
+    //         .await
+    //         .expect(&format!("Failed to serve app over '{}' https address!", addr))});
 
-    let redirect_req_to_https_task = tokio::spawn(async {
-        let addr = tls::get_socket_addr(HTTP_ADDR.to_string()).await;
-        let router = tls::get_http_router().await;
-        axum_server::bind(addr)
-            .serve(router.into_make_service())
-            .await
-            .expect(&format!("Failed to redirect from '{}' http address!", addr))});
+    // let redirect_req_to_https_task = tokio::spawn(async {
+    //     let addr = tls::get_socket_addr(HTTP_ADDR.to_string()).await;
+    //     let router = tls::get_http_router().await;
+    //     axum_server::bind(addr)
+    //         .serve(router.into_make_service())
+    //         .await
+    //         .expect(&format!("Failed to redirect from '{}' http address!", addr))});
     
-    let _ = tokio::join!(serve_app_over_https_task, redirect_req_to_https_task);
+    // let _ = tokio::join!(serve_app_over_https_task, redirect_req_to_https_task);
 }
 
 /*

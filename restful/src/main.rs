@@ -23,6 +23,12 @@ enum SvcErrors {
 
     #[error("Failed to build request! {0}")]
     FailedRequestBuild(#[from] axum::http::Error),
+
+    // lazylock
+    // addr
+    // config
+    // router?
+    // server
 }
 
 type SvcResult<T> = Result<T, SvcErrors>;
@@ -311,43 +317,60 @@ pub mod handlers {
 //     pub mod time {}    
 // }
 
+use figment::{providers::Env, Figment};
 use std::sync::LazyLock;
 
-static HTTP_ADDR: LazyLock<String> = LazyLock::new(|| {
-    std::env::var("HTTP_ADDR").expect("Failed to get 'HTTP_ADDR' environment variable!")
+#[derive(Debug, serde::Deserialize)]
+struct AppConfig {
+    http_addr: String,
+    https_addr: String,
+    cert_path: String,
+    key_path: String,    
+}
+
+#[tracing::instrument(err)]
+static CONFIG: LazyLock<AppConfig> = LazyLock::new({
+    let env_vars = ["HTTP_ADDR", "HTTPS_ADDR", "CERT_PATH", "KEY_PATH",];
+
+    Figment::new()
+        .merge(Env::raw().only(&env_vars)
+        .extract()?
+        // .expect(&format!("Failed to load '{}' environment variables!", &env_vars))
 });
-static HTTPS_ADDR: LazyLock<String> = LazyLock::new(|| {
-    std::env::var("HTTPS_ADDR").expect("Failed to get 'HTTPS_ADDR' environment variable!")
-});
-static CERT_PATH: LazyLock<String> = LazyLock::new(|| {
-    std::env::var("CERT_PATH").expect("Failed to get 'CERT_PATH' environment variable!")
-});
-static KEY_PATH: LazyLock<String> = LazyLock::new(|| {
-    std::env::var("KEY_PATH").expect("Failed to get 'KEY_PATH' environment variable!")
-});
+
+// static HTTP_ADDR: LazyLock<String> = LazyLock::new(|| {
+//     std::env::var("HTTP_ADDR").expect("Failed to get 'HTTP_ADDR' environment variable!")
+// });
+// static HTTPS_ADDR: LazyLock<String> = LazyLock::new(|| {
+//     std::env::var("HTTPS_ADDR").expect("Failed to get 'HTTPS_ADDR' environment variable!")
+// });
+// static CERT_PATH: LazyLock<String> = LazyLock::new(|| {
+//     std::env::var("CERT_PATH").expect("Failed to get 'CERT_PATH' environment variable!")
+// });
+// static KEY_PATH: LazyLock<String> = LazyLock::new(|| {
+//     std::env::var("KEY_PATH").expect("Failed to get 'KEY_PATH' environment variable!")
+// });
 
 #[tokio::main]
 async fn main() {
-    // use crate::handlers::tls;
+    use crate::handlers::tls;
     
-    // let serve_app_over_https_task = tokio::spawn(async {
-    //     let addr = tls::get_socket_addr(HTTPS_ADDR.to_string()).await;
-    //     let config = tls::get_rustls_config(CERT_PATH.to_string(), KEY_PATH.to_string()).await;
-    //     let router = tls::get_https_router().await;
-    //     axum_server::bind_rustls(addr, config)
-    //         .serve(router.into_make_service())
-    //         .await
-    //         .expect(&format!("Failed to serve app over '{}' https address!", addr))});
+    #[tracing::instrument(err)]
+    let serve_app_over_https_task = tokio::spawn(async {
+        let addr = tls::get_socket_addr(&CONFIG.https_addr).await?;
+        let config = tls::get_rustls_config(&CONFIG.cert_path, &CONFIG.key_path).await?;
+        let router = tls::get_https_router().await?;
+        axum_server::bind_rustls(addr, config).serve(router.into_make_service()).await?;
+            // .expect(&format!("Failed to serve app over '{}' https address!", addr))});
 
-    // let redirect_req_to_https_task = tokio::spawn(async {
-    //     let addr = tls::get_socket_addr(HTTP_ADDR.to_string()).await;
-    //     let router = tls::get_http_router().await;
-    //     axum_server::bind(addr)
-    //         .serve(router.into_make_service())
-    //         .await
-    //         .expect(&format!("Failed to redirect from '{}' http address!", addr))});
+    #[tracing::instrument(err)]
+    let redirect_req_to_https_task = tokio::spawn(async {
+        let addr = tls::get_socket_addr(&CONFIG.http_addr).await?;
+        let router = tls::get_http_router().await?;
+        axum_server::bind(addr).serve(router.into_make_service()).await?
+            // .expect(&format!("Failed to redirect from '{}' http address!", addr))});
     
-    // let _ = tokio::join!(serve_app_over_https_task, redirect_req_to_https_task);
+    let _ = tokio::join!(serve_app_over_https_task, redirect_req_to_https_task);
 }
 
 /*

@@ -1,9 +1,9 @@
-use axum::{body::Body, http::{header, response::IntoResponse, HeaderMap, HeaderValue, Json, Method, Request, Response, StatusCode, Version, Uri}};
+use axum::{Json, body::Body, http::{header, HeaderMap, HeaderValue, Method, Request, Response, StatusCode, Version, Uri}, response::IntoResponse};
 use serde_json::{json, Value};
 // use axum-thiserror::ErrorStatus;
 // use thiserror::Error;
 
-#[dervive(std::fmt::Debug, thiserror::Error, axum-thiserror::ErrorStatus)]
+#[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
 enum AppErrors {
     #[status(StatusCode::BAD_REQUEST)]
     #[error("Failed to parse uri! {0}")]
@@ -12,19 +12,21 @@ enum AppErrors {
     #[status(StatusCode::INTERNAL_SERVER_ERROR)]
     #[error("Failed to build request! {0}")]
     FailedBuildRequest(#[from] axum::http::Error),
-
-    
 }
 
-impl IntoResponse for AppErrors {
-    fn into_response(self) -> Response {
-        (self.status, self.error).into_response()
-    }
+type AppResult<T> = Result<T, AppErrors>;
+
+#[derive(Debug, thiserror::Error)]
+enum SvcErrors {
+    #[error("Failed to parse uri! {0}")]
+    FailedUriParse(#[from] axum::http::uri::InvalidUri),
+
+    #[error("Failed to build request! {0}")]
+    FailedRequestBuild(#[from] axum::http::Error),
 }
 
-type AppResult = Result<T, AppErrors>;
+type SvcResult<T> = Result<T, SvcErrors>;
 
-********
 pub mod handlers {
     use super::*;
     
@@ -41,19 +43,15 @@ pub mod handlers {
         }
 
         impl RequestBuildParams {
-            pub fn build_request(&self) -> Result<Request<Body>, AppErr> {
-                let uri = self.path
-                    .parse::<Uri>()
-                    .map_err(|e| AppErr::FailedUriParse(e.to_string()))?;
-
-                let mut request = Request::builder()
+            pub fn build_request(&self) -> SvcResult<Request<Body>> {
+                let uri = self.path.parse::<Uri>()?;
+ 
+                let mut request: Request<Body> = Request::builder()
                     .method(self.method.clone())
                     .uri(uri)
-                    .version(self.version)
-                    .body(Body::from(self.body.clone()))
-                    .map_err(|e| AppErr::FailedRequestBuild(e.to_string()))?;
+                    .version(self.version.clone())
+                    .body(Body::from(self.body.clone()))?;
 
-                // Merge headers
                 *request.headers_mut() = self.headers.clone();
                 
                 Ok(request)
@@ -68,7 +66,7 @@ pub mod handlers {
             pub body: String
         }
 
-        pub fn build_response(rbp: ResponseBuildParams) -> Result<Response<Body>, AppErr> {
+        pub fn build_response(rbp: ResponseBuildParams) -> Result<Response<Body>, AppErrors> {
             let mut builder = Response::builder()
                 .version(rbp.version)
                 .status(rbp.status);
@@ -79,7 +77,7 @@ pub mod handlers {
 
             builder
                 .body(Body::from(rbp.body))
-                .map_err(|e| AppErr::FailedRequestBuild(e.to_string()))
+                .map_err(AppErrors::from)
         }
     }
 }

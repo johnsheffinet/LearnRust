@@ -26,7 +26,7 @@ tower-http = { version = "0.6.8", features = ["cors", "limit", "timeout", "trace
 tracing = "0.1.44" # cargo add tracing
 tracing-subscriber = "0.3.22" # cargo add tracing-subscriber
 validator = { version = "0.20.0", features = ["derive"] } # cargo add validator --features derive
-figment = { version = "0.10.19", features = ["env"] }
+figment = { version = "0.10.19", features = ["env", "json", "serde_json"] }
 
 # trc
 # bytes = "1"

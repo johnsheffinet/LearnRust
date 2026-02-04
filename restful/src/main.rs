@@ -1,14 +1,14 @@
 use figment::{Figment, providers::Env};
-use serde::Deserialize;
+use serde::{Deserialize};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum SvcError {
-    #[error("Failed to load application configuration: '{0}'")]
-    FailedLoadAppConfig(#[from] figment::Error)
+    #[error("Failed to load application configuration! {0}")]
+    FailedLoadAppConfig(#[from] figment::Error),
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct AppConfig {
     pub http_addr: String,
     pub https_addr: String,
@@ -16,21 +16,23 @@ pub struct AppConfig {
     pub key_path: String,
 }
 
-type SvcResult<T> = Result<T, SvcError>
+type SvcResult<T> = Result<T, SvcError>;
 
 impl AppConfig {
-    fn load(self) -> SvcResult<Self> {
+    fn load() -> SvcResult<Self> {
         let env_vars = ["HTTP_ADDR", "HTTPS_ADDR", "CERT_PATH", "KEY_PATH",];
 
         let app_config = Figment::new()
             .merge(Env::raw().only(&env_vars))
             .extract()?;
 
-        OK(app_config)
+        Ok(app_config)
     }
 }
 
-pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(AppConfig.load());
+use std::sync::LazyLock;
+
+pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| {AppConfig::load().unwrap()});
 
 #[tokio::main]
 async fn main() {

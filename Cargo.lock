@@ -672,6 +672,7 @@ dependencies = [
  "atomic",
  "pear",
  "serde",
+ "serde_json",
  "uncased",
  "version_check",
 ]

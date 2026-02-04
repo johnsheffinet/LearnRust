@@ -1,23 +1,43 @@
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum SvcErrors {
-    #[error("Failed to get environment variables!")]
-    FailedGetEnvVars(#[from] figment::Error),
-    
+use figment::{Figment, providers::Env};
+use serde::Deserialize;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum SvcError {
+    #[error("Failed to load application configuration: '{0}'")]
+    FailedLoadAppConfig(#[from] figment::Error)
 }
+
+#[derive(Deserialize)]
+pub struct AppConfig {
+    pub http_addr: String,
+    pub https_addr: String,
+    pub cert_path: String,
+    pub key_path: String,
+}
+
+type SvcResult<T> = Result<T, SvcError>
+
+impl AppConfig {
+    fn load(self) -> SvcResult<Self> {
+        let env_vars = ["HTTP_ADDR", "HTTPS_ADDR", "CERT_PATH", "KEY_PATH",];
+
+        let app_config = Figment::new()
+            .merge(Env::raw().only(&env_vars))
+            .extract()?;
+
+        OK(app_config)
+    }
+}
+
+pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(AppConfig.load());
+
+#[tokio::main]
+async fn main() {
+    println!("CONFIG.http_addr = '{}'", CONFIG.http_addr);
+}
+
 /*
-pub enum SvcErrors {
-    #[error("Failed to get environment variables!")]
-    FailedGetEnvVars(#[from] figment::Error),
-
-    // lazylock
-    // addr
-    // config
-    // router?
-    // server
-}
- */
-// type SvcResult<T> = Result<T, SvcErrors>;
-
 pub mod handlers {
     use super::*;
     pub mod utils {
@@ -1587,3 +1607,4 @@ fn build_http_request_with_headers(
 //                 .await
 //                 .unwrap();
 //         }
+ */

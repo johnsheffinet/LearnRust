@@ -1,28 +1,13 @@
-use axum::{Json, body::Body, http::{header, HeaderMap, HeaderValue, Method, Request, Response, StatusCode, Version, Uri}, response::IntoResponse};
-use serde_json::{json, Value};
-// use axum-thiserror::ErrorStatus;
-// use thiserror::Error;
-
-#[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
-enum AppErrors {
-    #[status(StatusCode::BAD_REQUEST)]
-    #[error("Failed to parse uri! {0}")]
-    FailedParseUri(#[from] axum::http::uri::InvalidUri),
-
-    #[status(StatusCode::INTERNAL_SERVER_ERROR)]
-    #[error("Failed to build request! {0}")]
-    FailedBuildRequest(#[from] axum::http::Error),
-}
-
-type AppResult<T> = Result<T, AppErrors>;
-
 #[derive(Debug, thiserror::Error)]
-enum SvcErrors {
-    #[error("Failed to parse uri! {0}")]
-    FailedUriParse(#[from] axum::http::uri::InvalidUri),
-
-    #[error("Failed to build request! {0}")]
-    FailedRequestBuild(#[from] axum::http::Error),
+pub(crate) enum SvcErrors {
+    #[error("Failed to get environment variables!")]
+    FailedGetEnvVars(#[from] figment::Error),
+    
+}
+/*
+pub enum SvcErrors {
+    #[error("Failed to get environment variables!")]
+    FailedGetEnvVars(#[from] figment::Error),
 
     // lazylock
     // addr
@@ -30,12 +15,11 @@ enum SvcErrors {
     // router?
     // server
 }
-
-type SvcResult<T> = Result<T, SvcErrors>;
+ */
+// type SvcResult<T> = Result<T, SvcErrors>;
 
 pub mod handlers {
     use super::*;
-    
     pub mod utils {
         use super::*;
 
@@ -50,13 +34,15 @@ pub mod handlers {
 
         impl RequestBuildParams {
             pub fn build_request(&self) -> SvcResult<Request<Body>> {
-                let uri = self.path.parse::<Uri>()?;
+                let uri = self.path.parse::<Uri>()
+                    .map_err(AppErrors::from);
  
                 let mut request: Request<Body> = Request::builder()
                     .method(self.method.clone())
                     .uri(uri)
                     .version(self.version.clone())
-                    .body(Body::from(self.body.clone()))?;
+                    .body(Body::from(self.body.clone()))
+                    .map_err(AppErrors::from);
 
                 *request.headers_mut() = self.headers.clone();
                 
@@ -87,7 +73,7 @@ pub mod handlers {
         }
     }
 }
-    
+   
 //     pub mod tls {
 //         use super::*;
 
@@ -329,13 +315,23 @@ struct AppConfig {
 }
 
 #[tracing::instrument(err)]
-static CONFIG: LazyLock<AppConfig> = LazyLock::new({
-    let env_vars = ["HTTP_ADDR", "HTTPS_ADDR", "CERT_PATH", "KEY_PATH",];
-
+fn get_env_vars(env_vars: &[&str]) -> Result<AppConfig, SvcErrors> {
     Figment::new()
-        .merge(Env::raw().only(&env_vars)
-        .extract()?
-        // .expect(&format!("Failed to load '{}' environment variables!", &env_vars))
+        .merge(Env::raw().only(env_vars))
+        .extract()
+        .map_err(SvcErrors::FailedGetEnvVars)
+}
+
+pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| {
+    let env_vars = ["HTTP1_ADDR", "HTTPS_ADDR", "CERT_PATH", "KEY_PATH",];
+
+    get_env_vars(&env_vars)
+        .expect("Failed to load environment variables!")
+
+//     Figment::new()
+//         .merge(Env::raw().only(&env_vars))
+//         .extract()
+//         .expect(&format!("Failed to load environment variables!"))
 });
 
 // static HTTP_ADDR: LazyLock<String> = LazyLock::new(|| {
@@ -353,24 +349,26 @@ static CONFIG: LazyLock<AppConfig> = LazyLock::new({
 
 #[tokio::main]
 async fn main() {
+    println!("CONFIG: {:?}", &*CONFIG);
+/*
     use crate::handlers::tls;
     
-    #[tracing::instrument(err)]
     let serve_app_over_https_task = tokio::spawn(async {
         let addr = tls::get_socket_addr(&CONFIG.https_addr).await?;
         let config = tls::get_rustls_config(&CONFIG.cert_path, &CONFIG.key_path).await?;
         let router = tls::get_https_router().await?;
-        axum_server::bind_rustls(addr, config).serve(router.into_make_service()).await?;
+        axum_server::bind_rustls(addr, config).serve(router.into_make_service()).await?});
             // .expect(&format!("Failed to serve app over '{}' https address!", addr))});
 
-    #[tracing::instrument(err)]
     let redirect_req_to_https_task = tokio::spawn(async {
         let addr = tls::get_socket_addr(&CONFIG.http_addr).await?;
         let router = tls::get_http_router().await?;
-        axum_server::bind(addr).serve(router.into_make_service()).await?
+        axum_server::bind(addr).serve(router.into_make_service()).await?});
             // .expect(&format!("Failed to redirect from '{}' http address!", addr))});
     
     let _ = tokio::join!(serve_app_over_https_task, redirect_req_to_https_task);
+ */
+
 }
 
 /*
@@ -511,39 +509,6 @@ fn build_http_request_with_headers(
     let request = builder.body(body_str.to_string())?;
 
     Ok(request)
-}
-
-fn main() {
-    let method = "POST";
-    let uri = "https://api.example.com/items";
-    let version = "HTTP/1.1";
-    let body = r#"{"data": "sample"}"#;
-
-    // Create a HeaderMap to inject
-    let mut custom_headers = HeaderMap::new();
-    custom_headers.insert(http::header::HOST, http::HeaderValue::from_static()
-     "Authorization", http::HeaderValue::from_static("Bearer XYZ"));
-    custom_headers.insert("Content-Type", http::HeaderValue::from_static("application/json"));
-    
-    match build_http_request_with_headers(
-        method, 
-        uri, 
-        version, 
-        body, 
-        Some(custom_headers) // Pass the Option here
-    ) {
-        Ok(request) => {
-            println!("--- Successfully built request ---");
-            println!("Method: {}", request.method());
-            println!("URI: {}", request.uri());
-            println!("Version: {:?}", request.version());
-            println!("Headers: {:#?}", request.headers());
-            println!("Body: {}", request.body());
-        }
-        Err(e) => {
-            eprintln!("Error building request: {}", e);
-        }
-    }
 }
 
             let response = get_router_response(router, request).await;

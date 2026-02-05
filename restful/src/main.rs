@@ -1,39 +1,45 @@
-use figment::{Figment, providers::Env};
-
-#[derive(Debug, thiserror::Error)]
-pub enum SvcError {
-    #[error("Failed to load application configuration!")]
-    FailedLoadAppConfig(#[from] figment::Error),
-}
-
-#[derive(Debug, serde::Deserialize, get_fields::GetFields)]
-#[get_fields(rename_all = "UPPERCASE")]
-pub struct AppConfig {
-    pub http_addr: String,
-    pub https_addr: String,
-    pub cert_path: String,
-    pub key_path: String,
-}
-
-pub type SvcResult<T> = Result<T, SvcError>;
-
-impl AppConfig {
-    #[tracing::instrument(err)]
-    fn load() -> SvcResult<Self> {
-        let env_vars = Self::get_fields;
-
-        let app_config = Figment::new()
-            .merge(Env::raw().only(&env_vars))
-            .extract()?;
-
-        Ok(app_config)
+pub mod handlers {
+    pub mod cfg {
+        use figment::{Figment, providers::Env};
+        
+        #[derive(Debug, thiserror::Error)]
+        pub enum SvcError {
+            #[error("Failed to load application configuration!")]
+            FailedLoadAppConfig(#[from] figment::Error),
+        }
+        
+        pub type SvcResult<T> = Result<T, SvcError>;
+        
+        #[derive(Debug, serde::Deserialize, get_fields::GetFields)]
+        #[get_fields(rename_all = "UPPERCASE")]
+        pub struct AppConfig {
+            pub http_addr: String,
+            pub https_addr: String,
+            pub cert_path: String,
+            pub key_path: String,
+        }
+        
+        impl AppConfig {
+            #[tracing::instrument(err)]
+            fn load() -> SvcResult<Self> {
+                let env_vars = Self::get_fields;
+        
+                let app_config = Figment::new()
+                    .merge(Env::raw().only(&env_vars))
+                    .extract()?;
+        
+                Ok(app_config)
+            }
+        }
+        
+        pub static CONFIG: std::sync::LazyLock<AppConfig> = std::sync::LazyLock::new(|| -> AppConfig { AppConfig::load().unwrap() });
     }
 }
 
-pub static CONFIG: std::sync::LazyLock<AppConfig> = std::sync::LazyLock::new(|| -> AppConfig { AppConfig::load().unwrap() });
-
 #[tokio::main]
 async fn main() {
+    use handlers::cfg::CONFIG;
+    
     tracing_subscriber::fmt::init();
     
     println!("CONFIG.http_addr = '{}'", CONFIG.http_addr);

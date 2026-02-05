@@ -10,7 +10,7 @@ pub enum SvcError {
 #[get_fields(rename_all = "UPPERCASE")]
 pub struct AppConfig {
     pub http_addr: String,
-    pub httpz_addr: String,
+    pub https_addr: String,
     pub cert_path: String,
     pub key_path: String,
 }
@@ -18,6 +18,7 @@ pub struct AppConfig {
 pub type SvcResult<T> = Result<T, SvcError>;
 
 impl AppConfig {
+    #[tracing::instrument(err)]
     fn load() -> SvcResult<Self> {
         let env_vars = Self::get_fields;
 
@@ -33,8 +34,10 @@ pub static CONFIG: std::sync::LazyLock<AppConfig> = std::sync::LazyLock::new(|| 
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::registry().init();
+    
     println!("CONFIG.http_addr = '{}'", CONFIG.http_addr);
-    println!("CONFIG.httpz_addr = '{}'", CONFIG.httpz_addr);
+    println!("CONFIG.https_addr = '{}'", CONFIG.https_addr);
     println!("CONFIG.cert_path = '{}'", CONFIG.cert_path);
     println!("CONFIG.key_path = '{}'", CONFIG.key_path);
 }

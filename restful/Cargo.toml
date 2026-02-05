@@ -27,6 +27,7 @@ tracing = "0.1.44" # cargo add tracing
 tracing-subscriber = "0.3.22" # cargo add tracing-subscriber
 validator = { version = "0.20.0", features = ["derive"] } # cargo add validator --features derive
 figment = { version = "0.10.19", features = ["env", "json", "serde_json"] }
+get_fields = "0.1.0"
 
 # trc
 # bytes = "1"

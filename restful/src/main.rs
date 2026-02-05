@@ -34,7 +34,7 @@ pub static CONFIG: std::sync::LazyLock<AppConfig> = std::sync::LazyLock::new(|| 
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::registry().init();
+    tracing_subscriber::fmt::init();
     
     println!("CONFIG.http_addr = '{}'", CONFIG.http_addr);
     println!("CONFIG.https_addr = '{}'", CONFIG.https_addr);

@@ -21,7 +21,7 @@ pub mod handlers {
         
         impl AppConfig {
             #[tracing::instrument(err)]
-            fn load() -> SvcResult<Self> {
+            pub fn load() -> SvcResult<Self> {
                 let env_vars = Self::get_fields;
         
                 let app_config = Figment::new()
@@ -33,6 +33,39 @@ pub mod handlers {
         }
         
         pub static CONFIG: std::sync::LazyLock<AppConfig> = std::sync::LazyLock::new(|| -> AppConfig { AppConfig::load().unwrap() });
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+
+    pub mod cfg {
+        use super::*;
+        use crate::handlers::cfg;
+
+        #[tokio::test]
+        #[serial_test::serial]
+        async fn test_load_app_config_success() {
+            let result = cfg::AppConfig::load()
+                .expect("Failed to load application configuration!");
+
+            assert!(!result.http_addr.is_empty());
+            assert!(!result.https_addr.is_empty());
+            assert!(!result.cert_path.is_empty());
+            assert!(!result.key_path.is_empty());
+        }
+
+        #[tokio::test]
+        #[serial_test::serial]
+        async fn test_load_app_config_failed_to_get_env_var() {
+            let test = || {
+                let result = cfg::AppConfig::load();
+                assert!(result.is_err());
+            };
+
+            temp_env::with_var_unset("HTTP_ADDR", test);
+        }
     }
 }
 

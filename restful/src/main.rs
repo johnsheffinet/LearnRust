@@ -30,7 +30,7 @@ pub mod handlers {
         
         impl AppConfig {
             #[tracing::instrument(err)]
-            pub fn load() -> SvcResult<Self> {
+            pub fn load(self) -> SvcResult<Self> {
                 let env_vars = Self::get_fields;
         
                 let app_config = Figment::new()
@@ -148,6 +148,47 @@ pub mod tests {
             };
 
             temp_env::with_var_unset("HTTP_ADDR", test);
+        }
+    }
+    pub mod utils {
+        use super::*;
+        use handlers::utils;
+
+        #[tokio::test]
+        async fn test_into_request_success() {
+            let params = utils::RequestParams {
+                method: Method::GET,
+                path: "healthz",
+                version: Version::HTTP_1_1,
+                headers: HeaderMap::new(),
+                payload: Body::empty(),
+            };
+            
+            let result = params.into_request();
+
+            assert_eq!(result.method(), params.method);
+            assert_eq!(result.uri.path(), params.path);
+            assert_eq!(result.version(), params.version);
+            assert_eq!(result.headers(), params.headers);
+            assert_eq!(result.body(), params.payload);            
+        }
+
+        #[tokio::test]
+        async fn test_into_response_success() {
+            let params = utils::ResponseParams {
+                version: Version::HTTP_1_1,
+                status: StatusCode::OK
+                headers: HeaderMap::new(),
+                payload: Body::empty(),
+            };
+            
+            let result = params.into_response();
+
+            assert_eq!(result.version(), params.version);
+            assert_eq!(result.status, params.status);
+            assert_eq!(result.headers(), params.headers);
+            assert_eq!(result.body(), params.payload);
+            
         }
     }
 }

@@ -1,3 +1,12 @@
+use axum::{
+    body::Body,
+    extract::Request,
+    http::{HeaderMap, Method, StatusCode, Version},
+    response::{IntoResponse, Response},
+    Json, Router,
+};
+use serde_json::Value;
+
 pub mod handlers {
     pub mod cfg {
         use figment::{Figment, providers::Env};
@@ -33,6 +42,80 @@ pub mod handlers {
         }
         
         pub static CONFIG: std::sync::LazyLock<AppConfig> = std::sync::LazyLock::new(|| -> AppConfig { AppConfig::load().unwrap() });
+    }
+    pub mod utils {
+        use super::*;
+        
+        #[derive(Debug, thiserror::Error)]
+        pub enum SvcError {
+            #[error("Failed to parse request path!")]
+            FailedParseRequestPath(#[from] axum::http::uri::InvalidUri),
+            
+            #[error("Failed to parse request payload!")]
+            FailedParseRequestPayload(#[from] serde_json::Error),
+            
+            #[error("Failed to build request!")]
+            FailedBuildRequest(#[from] axum::http::Error),
+        }
+        
+        type SvcResult<T> = Result<T, SvcError>;
+        
+        #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
+        pub enum AppError {
+            #[error("Failed to build response!")]
+            #[status(StatusCode::INTERNAL_SERVER_ERROR)]
+            FailedBuildResponse(#[from] Result::Err),    
+        }
+        
+        type AppResult<T> = Result<T, AppError>;
+        
+        pub struct RequestParams {
+            pub method: Method,
+            pub path: String,
+            pub version: Version,
+            pub headers: HeaderMap,
+            pub payload: Json<Value>,
+        }
+        
+        impl RequestParams {
+            #[tracing::instrument(err)]
+            pub async fn into_request(self) -> SvcResult<Request> {
+                let uri = self.path.parse::<Uri>()?;
+                    
+                let body = Body::from(serde_json::to_vec(&self.payload.0)?;
+    
+                let mut request = Request::builder()
+                    .method(self.method)
+                    .uri(uri)
+                    .version(self.version)
+                    .body(body)?;
+    
+                *request.headers_mut() = self.headers;
+                
+                Ok(request)
+            }
+        }
+    
+        pub struct ResponseParams {
+            pub version: Version,
+            pub status: StatusCode,
+            pub headers: HeaderMap,
+            pub payload: Json<Value>,
+        }
+    
+        impl IntoResponse for ResponseParams {
+            fn into_response(self) -> Response {
+                (self.version, self.status, self.headers, Json(self.payload)).into_response()
+            }
+        }
+        
+        pub async fn get_router_response(router: Router, request_params: RequestParams) -> impl IntoResponse {
+            use tower::ServiceExt;
+                        
+            let request = request_params.into_request().await?;
+            
+            router.oneshot(request).await
+        }
     }
 }
 

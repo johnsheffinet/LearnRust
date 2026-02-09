@@ -45,29 +45,28 @@ pub mod handlers {
     }
     pub mod utils {
         use super::*;
+        use axum::{
+            body::Body,
+            extract::Request,
+            http::{header::HeaderMap, Method, StatusCode, Uri, Version},
+            response::{IntoResponse, Response},
+            Json, Router,
+        };
+        use serde_json::Value;
         
         #[derive(Debug, thiserror::Error)]
         pub enum SvcError {
-            #[error("Failed to parse request path!")]
+            #[error("Failed to parse request path: {0}")]
             FailedParseRequestPath(#[from] axum::http::uri::InvalidUri),
             
-            #[error("Failed to parse request payload!")]
+            #[error("Failed to parse request payload: {0}")]
             FailedParseRequestPayload(#[from] serde_json::Error),
             
-            #[error("Failed to build request!")]
+            #[error("Failed to build request: {0}")]
             FailedBuildRequest(#[from] axum::http::Error),
         }
         
-        type SvcResult<T> = Result<T, SvcError>;
-        
-        #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
-        pub enum AppError {
-            #[error("Failed to build response!")]
-            #[status(StatusCode::INTERNAL_SERVER_ERROR)]
-            FailedBuildResponse(#[from] Result::Err),    
-        }
-        
-        type AppResult<T> = Result<T, AppError>;
+        pub type SvcResult<T> = Result<T, SvcError>;
         
         pub struct RequestParams {
             pub method: Method,
@@ -79,43 +78,48 @@ pub mod handlers {
         
         impl RequestParams {
             #[tracing::instrument(err)]
-            pub async fn into_request(self) -> SvcResult<Request> {
+            pub fn try_into_request(self) -> SvcResult<Request> {
                 let uri = self.path.parse::<Uri>()?;
-                    
-                let body = Body::from(serde_json::to_vec(&self.payload.0)?;
-    
+                
+                let body = Body::from(serde_json::to_vec(&self.payload.0)?);
+                
                 let mut request = Request::builder()
                     .method(self.method)
                     .uri(uri)
                     .version(self.version)
                     .body(body)?;
-    
+                
                 *request.headers_mut() = self.headers;
                 
                 Ok(request)
             }
         }
-    
+        
         pub struct ResponseParams {
             pub version: Version,
             pub status: StatusCode,
             pub headers: HeaderMap,
             pub payload: Json<Value>,
         }
-    
+        
         impl IntoResponse for ResponseParams {
             fn into_response(self) -> Response {
-                (self.version, self.status, self.headers, Json(self.payload)).into_response()
+                (self.version, self.status, self.headers, self.payload).into_response()
             }
         }
         
-        pub async fn get_router_response(router: Router, request_params: RequestParams) -> impl IntoResponse {
+        pub async fn get_router_response(
+            router: Router, 
+            request_params: RequestParams
+        ) -> SvcResult<Response> {
             use tower::ServiceExt;
-                        
-            let request = request_params.into_request().await?;
+        
+            let request = request_params.try_into_request()?;
+        
+            let response = router.oneshot(request).await.unwrap();
             
-            router.oneshot(request).await
-        }
+            Ok(response)
+        }        
     }
 }
 
@@ -155,22 +159,24 @@ pub mod tests {
         use handlers::utils;
 
         #[tokio::test]
-        async fn test_into_request_success() {
+        async fn test_try_into_request_success() {
             let params = utils::RequestParams {
                 method: Method::GET,
-                path: "healthz",
+                path: "/healthz",
                 version: Version::HTTP_1_1,
                 headers: HeaderMap::new(),
-                payload: Body::empty(),
+                payload: Json(json!({})),
             };
             
-            let result = params.into_request();
-
+            let result = params.try_into_request();
+            
+            let params_body = Body::from(serde_json::to_vec(&params.payload.0));
+            
             assert_eq!(result.method(), params.method);
             assert_eq!(result.uri.path(), params.path);
             assert_eq!(result.version(), params.version);
             assert_eq!(result.headers(), params.headers);
-            assert_eq!(result.body(), params.payload);            
+            assert_eq!(result.body(), params_body);            
         }
 
         #[tokio::test]
@@ -179,15 +185,17 @@ pub mod tests {
                 version: Version::HTTP_1_1,
                 status: StatusCode::OK
                 headers: HeaderMap::new(),
-                payload: Body::empty(),
+                payload: Json()json!({}),
             };
             
             let result = params.into_response();
 
+            let params_body = Body::from(serde_json::to_vec(&params.payload.0));
+            
             assert_eq!(result.version(), params.version);
             assert_eq!(result.status, params.status);
             assert_eq!(result.headers(), params.headers);
-            assert_eq!(result.body(), params.payload);
+            assert_eq!(result.body(), params_body);
             
         }
     }

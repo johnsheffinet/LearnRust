@@ -46,7 +46,7 @@ pub mod handlers {
     pub mod utils {
         use super::*;
         use axum::{
-            body::Body,
+            body::Body, to_bytes,
             extract::Request,
             http::{header::HeaderMap, Method, StatusCode, Uri, Version},
             response::{IntoResponse, Response},
@@ -79,15 +79,15 @@ pub mod handlers {
         impl RequestParams {
             #[tracing::instrument(err)]
             pub fn try_into_request(self) -> SvcResult<Request> {
-                let uri = self.path.parse::<Uri>()?;
+                let self_uri = self.path.parse::<Uri>()?;
                 
-                let body = Body::from(serde_json::to_vec(&self.payload.0)?);
+                let self_body = Body::from(serde_json::to_vec(&self.payload.0)?);
                 
                 let mut request = Request::builder()
                     .method(self.method)
-                    .uri(uri)
+                    .uri(self_uri)
                     .version(self.version)
-                    .body(body)?;
+                    .body(self_body)?;
                 
                 *request.headers_mut() = self.headers;
                 
@@ -103,10 +103,22 @@ pub mod handlers {
         }
         
         impl IntoResponse for ResponseParams {
-            fn into_response(self) -> Response {
+            pub async fn into_response(self) -> Response {
                 (self.version, self.status, self.headers, self.payload).into_response()
             }
         }
+        impl ResponseParams {        
+            pub async fn assert_body_eq(&self, response: Response) {
+                use assert_json_diff::assert_json_include;
+
+                let body = response.into_body().await?; //AppError => Failed to collect response body!
+    
+                let body_bytes = axum::body::to_bytes(body, 2 * 1024 * 1024);
+    
+                let body_json: Json<Value> = serde_json::from_slice(&body_bytes)?; //AppError => Failed to parse response payoad!
+    
+                assert_json_include!(actual: body_json, expected: self.payload.0);
+    }        
         
         pub async fn get_router_response(
             router: Router, 
@@ -191,6 +203,11 @@ pub mod tests {
             let result = params.into_response();
 
             let params_body = Body::from(serde_json::to_vec(&params.payload.0));
+            let result_payload = // Use this for your tests
+let body_bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+    .await
+    .expect("Failed to buffer body");
+
             
             assert_eq!(result.version(), params.version);
             assert_eq!(result.status, params.status);

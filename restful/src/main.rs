@@ -1,14 +1,17 @@
 use axum::{
     body::Body,
     extract::Request,
-    http::{HeaderMap, Method, StatusCode, Version},
+    http::{header::HeaderMap, Method, StatusCode, Uri, Version},
     response::{IntoResponse, Response},
     Json, Router,
 };
 use serde_json::Value;
 
 pub mod handlers {
+    use super::*;
+    
     pub mod cfg {
+        use super::*;
         use figment::{Figment, providers::Env};
         
         #[derive(Debug, thiserror::Error)]
@@ -41,28 +44,20 @@ pub mod handlers {
             }
         }
         
-        pub static CONFIG: std::sync::LazyLock<AppConfig> = std::sync::LazyLock::new(|| -> AppConfig { AppConfig::load().unwrap() });
+        pub static CONFIG = std::sync::LazyLock::<AppConfig>::new(|| { AppConfig::load().unwrap() });
     }
     pub mod utils {
         use super::*;
-        use axum::{
-            body::Body, to_bytes,
-            extract::Request,
-            http::{header::HeaderMap, Method, StatusCode, Uri, Version},
-            response::{IntoResponse, Response},
-            Json, Router,
-        };
-        use serde_json::Value;
         
         #[derive(Debug, thiserror::Error)]
         pub enum SvcError {
-            #[error("Failed to parse request path: {0}")]
+            #[error("Failed to parse request path! {0}")]
             FailedParseRequestPath(#[from] axum::http::uri::InvalidUri),
             
-            #[error("Failed to parse request payload: {0}")]
+            #[error("Failed to parse request payload! {0}")]
             FailedParseRequestPayload(#[from] serde_json::Error),
             
-            #[error("Failed to build request: {0}")]
+            #[error("Failed to build request! {0}")]
             FailedBuildRequest(#[from] axum::http::Error),
         }
         
@@ -81,7 +76,7 @@ pub mod handlers {
             pub fn try_into_request(self) -> SvcResult<Request> {
                 let self_uri = self.path.parse::<Uri>()?;
                 
-                let self_body = Body::from(serde_json::to_vec(&self.payload.0)?);
+                let self_body = get_request_body(self)?;
                 
                 let mut request = Request::builder()
                     .method(self.method)
@@ -93,6 +88,12 @@ pub mod handlers {
                 
                 Ok(request)
             }
+        }
+        
+        pub async fn get_request_body(request_params: RequestParams) -> Result<Body, SvcError> {
+            let body = Body::from(serde_json::to_vec(&request_params.payload.0)?); //SvcError: Failed to parse request body!
+
+            Ok(body)
         }
         
         pub struct ResponseParams {
@@ -107,18 +108,20 @@ pub mod handlers {
                 (self.version, self.status, self.headers, self.payload).into_response()
             }
         }
-        impl ResponseParams {        
-            pub async fn assert_body_eq(&self, response: Response) {
-                use assert_json_diff::assert_json_include;
+        
+        #[tracing::instrument(err)]
+        pub async fn get_response_payload(response: Response) -> Result<Json<Value>, SvcError> {
+            let body = response.into_body().await?; //SvcError => Failed to collect response body!
 
-                let body = response.into_body().await?; //AppError => Failed to collect response body!
-    
-                let body_bytes = axum::body::to_bytes(body, 2 * 1024 * 1024);
-    
-                let body_json: Json<Value> = serde_json::from_slice(&body_bytes)?; //AppError => Failed to parse response payoad!
-    
-                assert_json_include!(actual: body_json, expected: self.payload.0);
-    }        
+            let buffer = axum::body::to_bytes(body, 2 * 1024 * 1024);
+
+            let payload: Json<Value> = serde_json::from_slice(&buffer)?; //SvcError => Failed to parse response payload!
+            
+            Ok(payload)
+            // use assert_json_diff::assert_json_include;
+
+            // assert_json_include!(actual: body_json, expected: self.payload.0);
+        }    
         
         pub async fn get_router_response(
             router: Router, 

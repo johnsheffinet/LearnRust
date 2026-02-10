@@ -104,12 +104,14 @@ pub mod handlers {
                 
                 Ok(request)
             }
-            
-            pub async fn get_request_body(&self) -> SvcResult<Self> {
-                Body::from(serde_json::to_vec(self.payload)?)
+
+            pub async fn get_request_body(&self) -> Result<Body, SvcError> {
+                let body = Body::from(serde_json::to_vec(self.payload)?);
+    
+                Ok(body)
             }
         }
-        
+                    
         pub struct ResponseParams {
             version: Version,
             status: StatusCode,
@@ -118,37 +120,15 @@ pub mod handlers {
         }
         
         pub impl IntoResponse for ResponseParams {
-            pub async fn into_response(&self) -> AppResult<Response> {}
+            pub async fn into_response(&self) -> Response {
+                let self_body = get_bodyself.payload
+                (self.version, self.status, self.headers, self_body).into_response() 
+            }
         }
         
         pub async fn get_response_payload(response: Response) -> AppResult<Response> {}
         
         pub async fn get_router_response(router: Router, params: RequestParams) -> SvcResult<RequestParams> {}
-        
-        impl RequestParams {
-            #[tracing::instrument(err)]
-            pub fn try_into_request(self) -> SvcResult<Request> {
-                let self_uri = self.path.parse::<Uri>()?;
-                
-                let self_body = get_request_body(self)?;
-                
-                let mut request = Request::builder()
-                    .method(self.method)
-                    .uri(self_uri)
-                    .version(self.version)
-                    .body(self_body)?;
-                
-                *request.headers_mut() = self.headers;
-                
-                Ok(request)
-            }
-        }
-        
-        pub async fn get_request_body(request_params: RequestParams) -> Result<Body, SvcError> {
-            let body = Body::from(serde_json::to_vec(&request_params.payload.0)?); //SvcError: Failed to parse request body!
-
-            Ok(body)
-        }
         
         pub struct ResponseParams {
             pub version: Version,

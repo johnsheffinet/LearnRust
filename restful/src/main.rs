@@ -92,7 +92,7 @@ pub mod handlers {
             pub async fn try_into_request(&self) -> SvcResult<Self> {
                 let self_uri = self.path.parse::<Uri>()?;
                 
-                let self_body = get_request_body(self)?;
+                let self_body = Body::from(serde_json::to_vec(self.payload)?);
                 
                 let mut request = Request.builder()
                     .method(self.method)
@@ -121,12 +121,17 @@ pub mod handlers {
         
         pub impl IntoResponse for ResponseParams {
             pub async fn into_response(&self) -> Response {
-                let self_body = get_bodyself.payload
-                (self.version, self.status, self.headers, self_body).into_response() 
+                (self.version, self.status, self.headers, self.payload).into_response() 
             }
         }
         
-        pub async fn get_response_payload(response: Response) -> AppResult<Response> {}
+        pub async fn get_response_payload(response: Response) -> AppResult<Response> {
+            let body = response.into_body?;
+
+            let buffer = ;
+
+            let payload = ?;
+        }
         
         pub async fn get_router_response(router: Router, params: RequestParams) -> SvcResult<RequestParams> {}
         

@@ -48,7 +48,32 @@ pub mod handlers {
     }
     pub mod utils {
         use super::*;
-        
+
+        pub enum SvcError {}
+
+        pub type SvcResult<t> = Result<T, SvcError>;
+
+        pub enum AppError {}
+
+        pub type AppResult<t> = Result<T, AppError>;
+
+        pub struct RequestParams {}
+
+        pub impl RequestParams {
+            pub async fn try_into_request(&self) -> SvcResult<Self> {}
+            pub async fn get_request_body(&self) -> SvcResult<Self> {}
+        }
+
+        pub struct ResponseParams {}
+
+        pub impl IntoResponse for ResponseParams {
+            pub async fn into_response(&self) -> AppResult<Response> {}
+        }
+
+        pub async fn get_response_payload(response: Response) -> AppResult<Response> {}
+
+        pub async fn get_router_response(router: Router, params: RequestParams) -> SvcResult<RequestParams> {}
+
         #[derive(Debug, thiserror::Error)]
         pub enum SvcError {
             #[error("Failed to parse request path! {0}")]

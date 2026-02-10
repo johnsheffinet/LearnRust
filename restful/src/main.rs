@@ -58,7 +58,13 @@ pub mod handlers {
             FailedParseRequestPayload(#[from] serde_json::Error),
             
             #[error("Failed to build request! {0}")]
-            FailedBuildRequest(#[from] axum::http::Error)
+            FailedBuildRequest(#[from] axum::http::Error),
+            
+            #[error("Failed to collect response body!! {0}")]
+            FailedCollectResponseBody(#[from] axum::Error),
+            
+            #[error("Failed to parse response payload! {0}")]
+            FailedParseResponsePayload(#[from] serde::Error),
         }
         
         pub type SvcResult<T> = Result<T, SvcError>;
@@ -104,12 +110,6 @@ pub mod handlers {
                 
                 Ok(request)
             }
-
-            pub async fn get_request_body(&self) -> Result<Body, SvcError> {
-                let body = Body::from(serde_json::to_vec(self.payload)?);
-    
-                Ok(body)
-            }
         }
                     
         pub struct ResponseParams {
@@ -119,34 +119,23 @@ pub mod handlers {
             payload: Json<Value>
         }
         
-        pub impl IntoResponse for ResponseParams {
+        pub impl ResponseParams {
             pub async fn into_response(&self) -> Response {
                 (self.version, self.status, self.headers, self.payload).into_response() 
             }
         }
         
         pub async fn get_response_payload(response: Response) -> AppResult<Response> {
-            let body = response.into_body?;
+            let body = response.into_body()?;
 
-            let buffer = ;
+            let buffer = axum::body::to_bytes(&body);
 
-            let payload = ?;
+            let payload = serde_json::from_slice(&buffer)?;
+
+            Ok(payload)
         }
         
         pub async fn get_router_response(router: Router, params: RequestParams) -> SvcResult<RequestParams> {}
-        
-        pub struct ResponseParams {
-            pub version: Version,
-            pub status: StatusCode,
-            pub headers: HeaderMap,
-            pub payload: Json<Value>,
-        }
-        
-        impl IntoResponse for ResponseParams {
-            pub async fn into_response(self) -> Response {
-                (self.version, self.status, self.headers, self.payload).into_response()
-            }
-        }
         
         #[tracing::instrument(err)]
         pub async fn get_response_payload(response: Response) -> Result<Json<Value>, SvcError> {

@@ -48,32 +48,7 @@ pub mod handlers {
     }
     pub mod utils {
         use super::*;
-
-        pub enum SvcError {}
-
-        pub type SvcResult<t> = Result<T, SvcError>;
-
-        pub enum AppError {}
-
-        pub type AppResult<t> = Result<T, AppError>;
-
-        pub struct RequestParams {}
-
-        pub impl RequestParams {
-            pub async fn try_into_request(&self) -> SvcResult<Self> {}
-            pub async fn get_request_body(&self) -> SvcResult<Self> {}
-        }
-
-        pub struct ResponseParams {}
-
-        pub impl IntoResponse for ResponseParams {
-            pub async fn into_response(&self) -> AppResult<Response> {}
-        }
-
-        pub async fn get_response_payload(response: Response) -> AppResult<Response> {}
-
-        pub async fn get_router_response(router: Router, params: RequestParams) -> SvcResult<RequestParams> {}
-
+        
         #[derive(Debug, thiserror::Error)]
         pub enum SvcError {
             #[error("Failed to parse request path! {0}")]
@@ -83,18 +58,72 @@ pub mod handlers {
             FailedParseRequestPayload(#[from] serde_json::Error),
             
             #[error("Failed to build request! {0}")]
-            FailedBuildRequest(#[from] axum::http::Error),
+            FailedBuildRequest(#[from] axum::http::Error)
         }
         
         pub type SvcResult<T> = Result<T, SvcError>;
         
-        pub struct RequestParams {
-            pub method: Method,
-            pub path: String,
-            pub version: Version,
-            pub headers: HeaderMap,
-            pub payload: Json<Value>,
+        #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
+        pub enum AppError {
+            #[error("Failed to ...! {0}")]
+            #[status(StatusCode::...)]
+            Failed...(#[from] ...),
+            
+            #[error("Failed to ...! {0}")]
+            #[status(StatusCode::...)]
+            Failed...(#[from] ...),
+            
+            #[error("Failed to ...! {0}")]
+            #[status(StatusCode::...)]
+            Failed...(#[from] ...),
         }
+        
+        pub type AppResult<T> = Result<T, AppError>;
+        
+        pub struct RequestParams {
+            method: Method,
+            path: String,
+            version: Version,
+            headers: HeaderMap,
+            payload: Json<Value>
+        }
+        
+        pub impl RequestParams {
+            pub async fn try_into_request(&self) -> SvcResult<Self> {
+                let self_uri = self.path.parse::<Uri>()?;
+                
+                let self_body = get_request_body(self)?;
+                
+                let mut request = Request.builder()
+                    .method(self.method)
+                    .uri(self_uri)
+                    .version(self.version)
+                    .body(self_body)?;
+                
+                *request.headers_mut() = self.headers;
+                
+                Ok(request)
+            }
+            
+            pub async fn get_request_body(&self) -> SvcResult<Self> {
+                Body::from(serde_json::to_vec(self.payload)?)
+            }
+        }
+        
+        pub struct ResponseParams {
+            version: Version,
+            status: StatusCode,
+            headers: HeaderMap,
+            payload: Json<Value>
+        }
+        
+        pub impl IntoResponse for ResponseParams {
+            pub async fn into_response(&self) -> AppResult<Response> {}
+        }
+        
+        pub async fn get_response_payload(response: Response) -> AppResult<Response> {}
+        
+        pub async fn get_router_response(router: Router, params: RequestParams) -> SvcResult<RequestParams> {}
         
         impl RequestParams {
             #[tracing::instrument(err)]

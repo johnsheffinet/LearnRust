@@ -55,7 +55,7 @@ pub mod handlers {
             FailedParseRequestPath(#[from] axum::http::uri::InvalidUri),
             
             #[error("Failed to parse request payload! {0}")]
-            FailedParseRequestPayload(#[from] serde_json::Error),
+            FailedParseRequestPayload(serde_json::Error),
             
             #[error("Failed to build request! {0}")]
             FailedBuildRequest(#[from] axum::http::Error),
@@ -64,27 +64,27 @@ pub mod handlers {
             FailedCollectResponseBody(#[from] axum::Error),
             
             #[error("Failed to parse response payload! {0}")]
-            FailedParseResponsePayload(#[from] serde::Error),
+            FailedParseResponsePayload(serde_json::Error),
         }
         
         pub type SvcResult<T> = Result<T, SvcError>;
         
-        #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
-        pub enum AppError {
-            #[error("Failed to ...! {0}")]
-            #[status(StatusCode::...)]
-            Failed...(#[from] ...),
+        // #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
+        // pub enum AppError {
+        //     #[error("Failed to ...! {0}")]
+        //     #[status(StatusCode::...)]
+        //     Failed...(#[from] ...),
             
-            #[error("Failed to ...! {0}")]
-            #[status(StatusCode::...)]
-            Failed...(#[from] ...),
+        //     #[error("Failed to ...! {0}")]
+        //     #[status(StatusCode::...)]
+        //     Failed...(#[from] ...),
             
-            #[error("Failed to ...! {0}")]
-            #[status(StatusCode::...)]
-            Failed...(#[from] ...),
-        }
+        //     #[error("Failed to ...! {0}")]
+        //     #[status(StatusCode::...)]
+        //     Failed...(#[from] ...),
+        // }
         
-        pub type AppResult<T> = Result<T, AppError>;
+        // pub type AppResult<T> = Result<T, AppError>;
         
         pub struct RequestParams {
             method: Method,
@@ -98,7 +98,8 @@ pub mod handlers {
             pub async fn try_into_request(&self) -> SvcResult<Self> {
                 let self_uri = self.path.parse::<Uri>()?;
                 
-                let self_body = Body::from(serde_json::to_vec(self.payload)?);
+                let self_body = Body::from(serde_json::to_vec(self.payload)?)
+                    .map_err(SvcError::FailedParseRequestPayload)?;
                 
                 let mut request = Request.builder()
                     .method(self.method)
@@ -120,7 +121,7 @@ pub mod handlers {
         }
         
         pub impl ResponseParams {
-            pub async fn into_response(&self) -> Response {
+            pub async fn into_response(self) -> Response {
                 (self.version, self.status, self.headers, self.payload).into_response() 
             }
         }
@@ -130,26 +131,11 @@ pub mod handlers {
 
             let buffer = axum::body::to_bytes(&body);
 
-            let payload = serde_json::from_slice(&buffer)?;
+            let payload = serde_json::from_slice(&buffer)
+                .map_err(SvcError::FailedParseResponsePayload)?;
 
             Ok(payload)
         }
-        
-        pub async fn get_router_response(router: Router, params: RequestParams) -> SvcResult<RequestParams> {}
-        
-        #[tracing::instrument(err)]
-        pub async fn get_response_payload(response: Response) -> Result<Json<Value>, SvcError> {
-            let body = response.into_body().await?; //SvcError => Failed to collect response body!
-
-            let buffer = axum::body::to_bytes(body, 2 * 1024 * 1024);
-
-            let payload: Json<Value> = serde_json::from_slice(&buffer)?; //SvcError => Failed to parse response payload!
-            
-            Ok(payload)
-            // use assert_json_diff::assert_json_include;
-
-            // assert_json_include!(actual: body_json, expected: self.payload.0);
-        }    
         
         pub async fn get_router_response(
             router: Router, 

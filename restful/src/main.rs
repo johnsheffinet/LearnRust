@@ -94,14 +94,14 @@ pub mod handlers {
             payload: Json<Value>
         }
         
-        pub impl RequestParams {
-            pub async fn try_into_request(&self) -> SvcResult<Self> {
+        impl RequestParams {
+            pub async fn try_into_request(self) -> SvcResult<Request> {
                 let self_uri = self.path.parse::<Uri>()?;
                 
-                let self_body = Body::from(serde_json::to_vec(self.payload)?)
-                    .map_err(SvcError::FailedParseRequestPayload)?;
+                let self_body = Body::from(serde_json::to_vec(self.payload.0)
+                    .map_err(SvcError::FailedParseRequestPayload)?);
                 
-                let mut request = Request.builder()
+                let mut request = Request::builder()
                     .method(self.method)
                     .uri(self_uri)
                     .version(self.version)
@@ -120,7 +120,7 @@ pub mod handlers {
             payload: Json<Value>
         }
         
-        pub impl ResponseParams {
+        impl ResponseParams {
             pub async fn into_response(self) -> Response {
                 (self.version, self.status, self.headers, self.payload).into_response() 
             }

@@ -94,25 +94,30 @@ pub mod handlers {
             payload: Json<Value>
         }
         
-        impl RequestParams {
-            pub async fn try_into_request(self) -> SvcResult<Request> {
-                let self_uri = self.path.parse::<Uri>()?;
+        impl TryFrom<RequestParams> for Request {
+            type Error = SvcError;
+            
+            fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
+                let params_uri = params.path
+                    .parse::<Uri>()
+                    .map_err(SvcError::FailedParseRequestPath)?;
                 
-                let self_body = Body::from(serde_json::to_vec(self.payload.0)
-                    .map_err(SvcError::FailedParseRequestPayload)?);
+                let params_body = serde_json::to_vec(&params.payload.0)
+                    .map_err(SvcError::FailedParseRequestPayload)?;
                 
                 let mut request = Request::builder()
-                    .method(self.method)
-                    .uri(self_uri)
-                    .version(self.version)
-                    .body(self_body)?;
+                    .method(params.method)
+                    .uri(params_uri)
+                    .version(params.version)
+                    .body(Body::from(params_body))
+                    .map_err(SvcError::FailedBuildRequest)?;
                 
-                *request.headers_mut() = self.headers;
+                *request.headers_mut() = params.headers;
                 
                 Ok(request)
             }
         }
-                    
+        
         pub struct ResponseParams {
             version: Version,
             status: StatusCode,
@@ -120,35 +125,31 @@ pub mod handlers {
             payload: Json<Value>
         }
         
-        impl ResponseParams {
-            pub async fn into_response(self) -> Response {
-                (self.version, self.status, self.headers, self.payload).into_response() 
+        impl TryFrom<ResponseParams> for Response {
+            type Error = SvcError;
+            
+            fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
+                let response = (
+                    params.version,
+                    params.status,
+                    params.headers,
+                    params.payload
+                ).into_response();
+
+                Ok(response)
             }
-        }
-        
-        pub async fn get_response_payload(response: Response) -> AppResult<Response> {
-            let body = response.into_body()?;
-
-            let buffer = axum::body::to_bytes(&body);
-
-            let payload = serde_json::from_slice(&buffer)
-                .map_err(SvcError::FailedParseResponsePayload)?;
-
-            Ok(payload)
         }
         
         pub async fn get_router_response(
             router: Router, 
-            request_params: RequestParams
+            params: RequestParams
         ) -> SvcResult<Response> {
             use tower::ServiceExt;
         
-            let request = request_params.try_into_request()?;
+            let request = Request::try_from(params)?;
         
-            let response = router.oneshot(request).await.unwrap();
-            
-            Ok(response)
-        }        
+            Ok(router.oneshot(request).await.unwrap())
+        }
     }
 }
 
@@ -248,62 +249,6 @@ async fn main() {
 }
 
 /*
-pub mod handlers {
-    use super::*;
-    pub mod utils {
-        use super::*;
-
-        #[derive(Debug)]
-        pub struct RequestBuildParams {
-            pub method: Method,
-            pub path: String,
-            pub version: Version,
-            pub headers: HeaderMap,
-            pub body: String
-        }
-
-        impl RequestBuildParams {
-            pub fn build_request(&self) -> SvcResult<Request<Body>> {
-                let uri = self.path.parse::<Uri>()
-                    .map_err(AppErrors::from);
- 
-                let mut request: Request<Body> = Request::builder()
-                    .method(self.method.clone())
-                    .uri(uri)
-                    .version(self.version.clone())
-                    .body(Body::from(self.body.clone()))
-                    .map_err(AppErrors::from);
-
-                *request.headers_mut() = self.headers.clone();
-                
-                Ok(request)
-            }
-        }
-
-        #[derive(Debug)]
-        pub struct ResponseBuildParams {
-            pub version: Version,
-            pub status: StatusCode,
-            pub headers: HeaderMap,
-            pub body: String
-        }
-
-        pub fn build_response(rbp: ResponseBuildParams) -> Result<Response<Body>, AppErrors> {
-            let mut builder = Response::builder()
-                .version(rbp.version)
-                .status(rbp.status);
-
-            if let Some(h) = builder.headers_mut() {
-                *h = rbp.headers;
-            }
-
-            builder
-                .body(Body::from(rbp.body))
-                .map_err(AppErrors::from)
-        }
-    }
-}
-   
 //     pub mod tls {
 //         use super::*;
 
@@ -533,54 +478,12 @@ pub mod handlers {
 //     pub mod time {}    
 // }
 
-use figment::{providers::Env, Figment};
-use std::sync::LazyLock;
 
-#[derive(Debug, serde::Deserialize)]
-struct AppConfig {
-    http_addr: String,
-    https_addr: String,
-    cert_path: String,
-    key_path: String,    
-}
-
-#[tracing::instrument(err)]
-fn get_env_vars(env_vars: &[&str]) -> Result<AppConfig, SvcErrors> {
-    Figment::new()
-        .merge(Env::raw().only(env_vars))
-        .extract()
-        .map_err(SvcErrors::FailedGetEnvVars)
-}
-
-pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| {
-    let env_vars = ["HTTP1_ADDR", "HTTPS_ADDR", "CERT_PATH", "KEY_PATH",];
-
-    get_env_vars(&env_vars)
-        .expect("Failed to load environment variables!")
-
-//     Figment::new()
-//         .merge(Env::raw().only(&env_vars))
-//         .extract()
-//         .expect(&format!("Failed to load environment variables!"))
-});
-
-// static HTTP_ADDR: LazyLock<String> = LazyLock::new(|| {
-//     std::env::var("HTTP_ADDR").expect("Failed to get 'HTTP_ADDR' environment variable!")
-// });
-// static HTTPS_ADDR: LazyLock<String> = LazyLock::new(|| {
-//     std::env::var("HTTPS_ADDR").expect("Failed to get 'HTTPS_ADDR' environment variable!")
-// });
-// static CERT_PATH: LazyLock<String> = LazyLock::new(|| {
-//     std::env::var("CERT_PATH").expect("Failed to get 'CERT_PATH' environment variable!")
-// });
-// static KEY_PATH: LazyLock<String> = LazyLock::new(|| {
-//     std::env::var("KEY_PATH").expect("Failed to get 'KEY_PATH' environment variable!")
-// });
-
+/*
 #[tokio::main]
 async fn main() {
     println!("CONFIG: {:?}", &*CONFIG);
-/*
+
     use crate::handlers::tls;
     
     let serve_app_over_https_task = tokio::spawn(async {
@@ -598,8 +501,6 @@ async fn main() {
     
     let _ = tokio::join!(serve_app_over_https_task, redirect_req_to_https_task);
  */
-
-}
 
 /*
 pub(crate) mod handlers {

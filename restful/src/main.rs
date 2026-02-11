@@ -187,9 +187,9 @@ pub mod tests {
     pub mod utils {
         use super::*;
         use handlers::utils;
-
+        
         #[tokio::test]
-        async fn test_try_into_request_success() {
+        async fn test_request_try_from_success() {
             let params = utils::RequestParams {
                 method: Method::GET,
                 path: "/healthz",
@@ -198,9 +198,9 @@ pub mod tests {
                 payload: Json(json!({})),
             };
             
-            let result = params.try_into_request();
+            let params_body = Body::from(serde_json::to_vec(&params.payload.0)?);
             
-            let params_body = Body::from(serde_json::to_vec(&params.payload.0));
+            let result = Request::try_from(params)?;
             
             assert_eq!(result.method(), params.method);
             assert_eq!(result.uri.path(), params.path);
@@ -210,7 +210,7 @@ pub mod tests {
         }
 
         #[tokio::test]
-        async fn test_into_response_success() {
+        async fn test_response_try_intosuccess() {
             let params = utils::ResponseParams {
                 version: Version::HTTP_1_1,
                 status: StatusCode::OK
@@ -218,20 +218,14 @@ pub mod tests {
                 payload: Json()json!({}),
             };
             
-            let result = params.into_response();
-
-            let params_body = Body::from(serde_json::to_vec(&params.payload.0));
-            let result_payload = // Use this for your tests
-let body_bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
-    .await
-    .expect("Failed to buffer body");
-
+            let params_body = Body::from(serde_json::to_vec(&params.payload.0)?);
+            
+            let result = params.try_into()?;
             
             assert_eq!(result.version(), params.version);
             assert_eq!(result.status, params.status);
             assert_eq!(result.headers(), params.headers);
             assert_eq!(result.body(), params_body);
-            
         }
     }
 }

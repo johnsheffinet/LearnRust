@@ -13,11 +13,12 @@ pub mod handlers {
     pub mod cfg {
         use super::*;
         use figment::{Figment, providers::Env};
+        use std::sync::LazyLock;
         
         #[derive(Debug, thiserror::Error)]
         pub enum SvcError {
-            #[error("Failed to load application configuration!")]
-            FailedLoadAppConfig(#[from] figment::Error),
+            #[error("Failed to extract environment variables! {0}")]
+            FailedExtractEnvVars(#[from] figment::Error),
         }
         
         pub type SvcResult<T> = Result<T, SvcError>;
@@ -33,18 +34,19 @@ pub mod handlers {
         
         impl AppConfig {
             #[tracing::instrument(err)]
-            pub fn load(self) -> SvcResult<Self> {
-                let env_vars = Self::get_fields;
+            pub fn load() -> SvcResult<Self> {
+                let env_vars = Self::get_fields();
         
                 let app_config = Figment::new()
                     .merge(Env::raw().only(&env_vars))
-                    .extract()?;
+                    .extract::<Self>()
+                    .map_err(SvcError::FailedExtractEnvVars)?;
         
                 Ok(app_config)
             }
         }
         
-        pub static CONFIG = std::sync::LazyLock::<AppConfig>::new(|| { AppConfig::load().unwrap() });
+        pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| { AppConfig::load().unwrap() });
     }
     pub mod utils {
         use super::*;
@@ -175,7 +177,7 @@ pub mod tests {
 
         #[tokio::test]
         #[serial_test::serial]
-        async fn test_load_app_config_failed_to_get_env_var() {
+        async fn test_load_app_config_failure() {
             let test = || {
                 let result = cfg::AppConfig::load();
                 assert!(result.is_err());
@@ -232,9 +234,12 @@ pub mod tests {
 
 #[tokio::main]
 async fn main() {
+    use super::*;
     use handlers::cfg::CONFIG;
     
     tracing_subscriber::fmt::init();
+
+    LazyLock::force(&CONFIG);
     
     println!("CONFIG.http_addr = '{}'", CONFIG.http_addr);
     println!("CONFIG.https_addr = '{}'", CONFIG.https_addr);

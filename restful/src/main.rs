@@ -234,17 +234,9 @@ pub mod tests {
 
 #[tokio::main]
 async fn main() {
-    use super::*;
-    use handlers::cfg::CONFIG;
-    
     tracing_subscriber::fmt::init();
 
-    LazyLock::force(&CONFIG);
-    
-    println!("CONFIG.http_addr = '{}'", CONFIG.http_addr);
-    println!("CONFIG.https_addr = '{}'", CONFIG.https_addr);
-    println!("CONFIG.cert_path = '{}'", CONFIG.cert_path);
-    println!("CONFIG.key_path = '{}'", CONFIG.key_path);
+    std::sync::LazyLock::force(&handlers::cfg::CONFIG);
 }
 
 /*

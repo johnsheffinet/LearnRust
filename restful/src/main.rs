@@ -61,32 +61,9 @@ pub mod handlers {
             
             #[error("Failed to build request! {0}")]
             FailedBuildRequest(#[from] axum::http::Error),
-            
-            #[error("Failed to collect response body!! {0}")]
-            FailedCollectResponseBody(#[from] axum::Error),
-            
-            #[error("Failed to parse response payload! {0}")]
-            FailedParseResponsePayload(serde_json::Error),
         }
         
         pub type SvcResult<T> = Result<T, SvcError>;
-        
-        // #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
-        // pub enum AppError {
-        //     #[error("Failed to ...! {0}")]
-        //     #[status(StatusCode::...)]
-        //     Failed...(#[from] ...),
-            
-        //     #[error("Failed to ...! {0}")]
-        //     #[status(StatusCode::...)]
-        //     Failed...(#[from] ...),
-            
-        //     #[error("Failed to ...! {0}")]
-        //     #[status(StatusCode::...)]
-        //     Failed...(#[from] ...),
-        // }
-        
-        // pub type AppResult<T> = Result<T, AppError>;
         
         pub struct RequestParams {
             method: Method,
@@ -97,9 +74,9 @@ pub mod handlers {
         }
         
         impl TryFrom<RequestParams> for Request {
-            type Error = SvcError;
+            // type Error = SvcError;
             
-            fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
+            fn try_from(params: RequestParams) -> SvcResult<Self> {
                 let params_uri = params.path
                     .parse::<Uri>()
                     .map_err(SvcError::FailedParseRequestPath)?;
@@ -128,9 +105,9 @@ pub mod handlers {
         }
         
         impl TryFrom<ResponseParams> for Response {
-            type Error = SvcError;
+            // type Error = SvcError;
             
-            fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
+            fn try_from(params: ResponseParams) -> SvcResult<Self> {
                 let response = (
                     params.version,
                     params.status,
@@ -141,6 +118,16 @@ pub mod handlers {
                 Ok(response)
             }
         }
+        
+        pub async fn assert_requests_eq(actual: Request, expected: Request) -> Result<()> {
+            assert_eq!(actual.method, expected.method);
+            assert_eq!(actual.uri, expected.uri);
+            assert_eq!(actual.method, expected.method);
+            assert_eq!(actual.method, expected.method);
+            assert_eq!(actual.method, expected.method);
+        }
+
+        pub async fn assert_responses_eq(response: Response, response_expected: Response) -> Result<()> {}
         
         pub async fn get_router_response(
             router: Router, 

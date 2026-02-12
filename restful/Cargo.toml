@@ -31,6 +31,9 @@ validator = { version = "0.20.0", features = ["derive"] } # cargo add validator 
 temp-env = "0.3.6"
 serial_test = "3.3.1"
 
+[dev-dependencies]
+test-log = { version = "0.2.19", features = ["trace"] } # cargo add --dev test-log
+
 # trc
 # bytes = "1"
 # log = "0.4"

@@ -119,12 +119,31 @@ pub mod handlers {
             }
         }
         
-        pub async fn assert_requests_eq(actual: Request, expected: Request) -> Result<()> {
+        pub async fn assert_requests_eq(actual: Request, expected: RequestParams) -> Result<()> {
+            let actual_path = actual.uri.path();
+
+            fn is_subset(subset: &HeaderMap, superset: &HeaderMap) -> bool {
+                subset.iter().all(|(key, value)| {
+                    superset.get(key) == Some(value)
+                })
+            }
+            let actual_headers = {
+                let headers = HeaderMap::new();
+                for(key, value) in expected.headers {
+                    actual.headers.get_name(key)
+                }
+            };
+            
+            let actual_body = request.into_body();
+            let actual_buffer = body::into_bytes(&actual_body);
+            let actual_payload = serde_json::from_slice(&actual_buffer);
+
+            let expected
             assert_eq!(actual.method, expected.method);
-            assert_eq!(actual.uri, expected.uri);
-            assert_eq!(actual.method, expected.method);
-            assert_eq!(actual.method, expected.method);
-            assert_eq!(actual.method, expected.method);
+            assert_eq!(actual_path, expected.path);
+            assert_eq!(actual.version, expected.version);
+            assert_eq!(actual.headers, expected.headers);
+            assert_eq!(actual_paylod, expected.payload);
         }
 
         pub async fn assert_responses_eq(response: Response, response_expected: Response) -> Result<()> {}

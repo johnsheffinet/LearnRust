@@ -18,7 +18,7 @@ pub mod handlers {
         #[derive(Debug, thiserror::Error)]
         pub enum SvcError {
             #[error("Failed to extract environment variables! {0}")]
-            FailedExtractEnvVars(#[from] figment::Error),
+            FailedExtractEnvVars(figment::Error),
         }
         
         pub type SvcResult<T> = Result<T, SvcError>;

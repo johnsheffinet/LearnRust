@@ -54,13 +54,19 @@ pub mod handlers {
         #[derive(Debug, thiserror::Error)]
         pub enum SvcError {
             #[error("Failed to parse request path! {0}")]
-            FailedParseRequestPath(#[from] axum::http::uri::InvalidUri),
+            FailedParseRequestPath(axum::http::uri::InvalidUri),
             
             #[error("Failed to parse request payload! {0}")]
             FailedParseRequestPayload(serde_json::Error),
             
             #[error("Failed to build request! {0}")]
-            FailedBuildRequest(#[from] axum::http::Error),
+            FailedBuildRequest(axum::http::Error),
+            
+            #[error("Failed to parse response payload! {0}")]
+            FailedParseResponsePayload(serde_json::Error),
+            
+            #[error("Failed to build response! {0}")]
+            FailedBuildResponse(axum::http::Error),
         }
         
         pub type SvcResult<T> = Result<T, SvcError>;
@@ -108,24 +114,56 @@ pub mod handlers {
             type Error = SvcError;
             
             fn try_from(params: ResponseParams) -> Result<Self, Self::error> {
-                let response = (
-                    params.version,
-                    params.status,
-                    params.headers,
-                    params.payload
-                ).into_response();
-
+                // let response = (
+                //     params.version,
+                //     params.status,
+                //     params.headers,
+                //     params.payload
+                // ).into_response();
+            fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
+                let params_body = serde_json::to_vec(&params.payload.0)
+                    .map_err(SvcError::FailedParseResponsePayload)?;
+                
+                let mut response = Response::builder()
+                    .version(params.version)
+                    .status(params.status)
+                    .body(Body::from(params_body))
+                    .map_err(SvcError::FailedBuildResponse)?;
+                
+                *response.headers_mut() = params.headers;
+                
                 Ok(response)
             }
         }
         
-        pub async fn assert_requests_eq(actual: Request, expected: RequestParams) {
+        pub async fn assert_request_eq(actual: Request, expected: RequestParams) {
             use axum::body::to_bytes;
             use assert_json_diff::assert_json_eq;
-        
+            
             assert_eq!(actual.method(), expected.method);
             assert_eq!(actual.uri().path(), expected.path);
             assert_eq!(actual.version(), expected.version);
+            
+            for (key, value) in expected.headers.iter() {
+                assert_eq!(actual.headers().get(key), Some(value));
+            }
+            
+            let bytes = to_bytes(actual.into_body(), usize::MAX)
+                .await
+                .expect("Failed to collect request body!");
+            
+            let payload: Value = serde_json::from_slice(&bytes)
+                .expect("Failed to parse request payload!");
+            
+            assert_json_eq!(actual_json, expected.payload.0);
+        }
+
+        pub async fn assert_response_eq(actual: Response, expected: ResponseParams) {
+            use axum::body::to_bytes;
+            use assert_json_diff::assert_json_eq;
+            
+            assert_eq!(actual.version(), expected.version);
+            assert_eq!(actual.status(), expected.status);
         
             for (key, value) in expected.headers.iter() {
                 assert_eq!(actual.headers().get(key), Some(value));
@@ -133,15 +171,13 @@ pub mod handlers {
         
             let bytes = to_bytes(actual.into_body(), usize::MAX)
                 .await
-                .expect("Failed to read actual request body");
+                .expect("Failed to collect response body!");
             
-            let actual_json: Value = serde_json::from_slice(&bytes)
-                .expect("Actual body was not valid JSON");
+            let actual_payload: Value = serde_json::from_slice(&bytes)
+                .expect("Failed to parse response payload!");
         
-            assert_json_eq!(actual_json, expected.payload.0);
+            assert_json_eq!(actual_payload, expected.payload.0);            
         }
-
-        pub async fn assert_responses_eq(response: Response, response_expected: Response) -> Result<()> {}
         
         pub async fn get_router_response(
             router: Router, 

@@ -74,9 +74,9 @@ pub mod handlers {
         }
         
         impl TryFrom<RequestParams> for Request {
-            // type Error = SvcError;
+            type Error = SvcError;
             
-            fn try_from(params: RequestParams) -> SvcResult<Self> {
+            fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
                 let params_uri = params.path
                     .parse::<Uri>()
                     .map_err(SvcError::FailedParseRequestPath)?;
@@ -105,9 +105,9 @@ pub mod handlers {
         }
         
         impl TryFrom<ResponseParams> for Response {
-            // type Error = SvcError;
+            type Error = SvcError;
             
-            fn try_from(params: ResponseParams) -> SvcResult<Self> {
+            fn try_from(params: ResponseParams) -> Result<Self, Self::error> {
                 let response = (
                     params.version,
                     params.status,
@@ -119,31 +119,26 @@ pub mod handlers {
             }
         }
         
-        pub async fn assert_requests_eq(actual: Request, expected: RequestParams) -> Result<()> {
-            let actual_path = actual.uri.path();
-
-            fn is_subset(subset: &HeaderMap, superset: &HeaderMap) -> bool {
-                subset.iter().all(|(key, value)| {
-                    superset.get(key) == Some(value)
-                })
+        pub async fn assert_requests_eq(actual: Request, expected: RequestParams) {
+            use axum::body::to_bytes;
+            use assert_json_diff::assert_json_eq;
+        
+            assert_eq!(actual.method(), expected.method);
+            assert_eq!(actual.uri().path(), expected.path);
+            assert_eq!(actual.version(), expected.version);
+        
+            for (key, value) in expected.headers.iter() {
+                assert_eq!(actual.headers().get(key), Some(value));
             }
-            let actual_headers = {
-                let headers = HeaderMap::new();
-                for(key, value) in expected.headers {
-                    actual.headers.get_name(key)
-                }
-            };
+        
+            let bytes = to_bytes(actual.into_body(), usize::MAX)
+                .await
+                .expect("Failed to read actual request body");
             
-            let actual_body = request.into_body();
-            let actual_buffer = body::into_bytes(&actual_body);
-            let actual_payload = serde_json::from_slice(&actual_buffer);
-
-            let expected
-            assert_eq!(actual.method, expected.method);
-            assert_eq!(actual_path, expected.path);
-            assert_eq!(actual.version, expected.version);
-            assert_eq!(actual.headers, expected.headers);
-            assert_eq!(actual_paylod, expected.payload);
+            let actual_json: Value = serde_json::from_slice(&bytes)
+                .expect("Actual body was not valid JSON");
+        
+            assert_json_eq!(actual_json, expected.payload.0);
         }
 
         pub async fn assert_responses_eq(response: Response, response_expected: Response) -> Result<()> {}

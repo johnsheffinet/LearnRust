@@ -132,6 +132,14 @@ pub mod handlers {
         pub async fn assert_request_eq(actual: Request, expected: RequestParams) {
             use axum::body::to_bytes;
             use assert_json_diff::assert_json_eq;
+
+            #[derive(Debug, thiserror::Error)]
+            pub enum SvcError {
+                #[error("Failed to parse request body! {0}")]
+                FailedParseRequestBody(axum::Error),
+
+                #[]
+            }
             
             assert_eq!(actual.method(), expected.method);
             assert_eq!(actual.uri().path(), expected.path);
@@ -141,14 +149,9 @@ pub mod handlers {
                 assert_eq!(actual.headers().get(key), Some(value));
             }
             
-            let bytes = to_bytes(actual.into_body(), usize::MAX)
-                .await
-                .expect("Failed to collect request body!");
+            let actual_payload: Value = assert_ok!(serde_json::from_slice(to_bytes(actual.into_body(), usize::MAX)))
                 
-            let payload: Value = serde_json::from_slice(&bytes)
-                .expect("Failed to parse request payload!");
-                
-            assert_json_eq!(actual_json, expected.payload.0);
+            assert_json_eq!(actual_payload, expected.payload.0);
         }
 
         pub async fn assert_response_eq(actual: Response, expected: ResponseParams) {

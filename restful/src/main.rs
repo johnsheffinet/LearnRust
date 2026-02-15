@@ -53,16 +53,16 @@ pub mod handlers {
         
         #[derive(Debug, thiserror::Error)]
         pub enum SvcError {
-            #[error("Failed to parse request path! {0}")]
+            #[error("Failed to parse path param into request uri! {0}")]
             FailedParseRequestPath(axum::http::uri::InvalidUri),
             
-            #[error("Failed to parse request payload! {0}")]
+            #[error("Failed to parse payload param into request body! {0}")]
             FailedParseRequestPayload(serde_json::Error),
             
             #[error("Failed to build request! {0}")]
             FailedBuildRequest(axum::http::Error),
             
-            #[error("Failed to parse response payload! {0}")]
+            #[error("Failed to parse payload param into response body! {0}")]
             FailedParseResponsePayload(serde_json::Error),
             
             #[error("Failed to build response! {0}")]
@@ -132,13 +132,15 @@ pub mod handlers {
         pub async fn assert_request_eq(actual: Request, expected: RequestParams) {
             use axum::body::to_bytes;
             use assert_json_diff::assert_json_eq;
+            use claims::assert_ok;
+            use pretty_assertations::assert_eq;
 
             #[derive(Debug, thiserror::Error)]
             pub enum SvcError {
                 #[error("Failed to parse request body into bytes! {0}")]
                 FailedParseRequestBodyIntoBytes(#[from] axum::Error),
 
-                #[error("Failed to parse request body into json! {0}")]
+                #[error("Failed to parse request body into payload param! {0}")]
                 FailedParseRequestBodyIntoJson(#[from] serde_json::Error),
             }
             
@@ -159,21 +161,25 @@ pub mod handlers {
             use axum::body::to_bytes;
             use assert_json_diff::assert_json_eq;
             
+            #[derive(Debug, thiserror::Error)]
+            pub enum SvcError {
+                #[error("Failed to parse response body into bytes! {0}")]
+                FailedParseResponseBodyIntoBytes(#[from] axum::Error),
+
+                #[error("Failed to parse response body into payload param! {0}")]
+                FailedParseResponseBodyIntoJson(#[from] serde_json::Error),
+            }
+            
             assert_eq!(actual.version(), expected.version);
             assert_eq!(actual.status(), expected.status);
         
             for (key, value) in expected.headers.iter() {
-                assert_eq!(actual.headers().get(key), Some(value));
+                assert_eq!(actual.headers().get(key), Some(value), "Failed to match response '{}' header!", key);
             }
-        
-            let bytes = to_bytes(actual.into_body(), usize::MAX)
-                .await
-                .expect("Failed to collect response body!");
             
-            let actual_payload: Value = serde_json::from_slice(&bytes)
-                .expect("Failed to parse response payload!");
-        
-            assert_json_eq!(actual_payload, expected.payload.0);            
+            let actual_payload: Value = assert_ok!(serde_json::from_slice(to_bytes(actual.into_body(), usize::MAX)))
+                
+            assert_json_eq!(actual_payload, expected.payload.0, "Failed to match response payload!");
         }
         
         pub async fn get_router_response(

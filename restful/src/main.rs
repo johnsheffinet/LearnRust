@@ -113,13 +113,6 @@ pub mod handlers {
         impl TryFrom<ResponseParams> for Response {
             type Error = SvcError;
             
-            fn try_from(params: ResponseParams) -> Result<Self, Self::error> {
-                // let response = (
-                //     params.version,
-                //     params.status,
-                //     params.headers,
-                //     params.payload
-                // ).into_response();
             fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
                 let params_body = serde_json::to_vec(&params.payload.0)
                     .map_err(SvcError::FailedParseResponsePayload)?;
@@ -151,10 +144,10 @@ pub mod handlers {
             let bytes = to_bytes(actual.into_body(), usize::MAX)
                 .await
                 .expect("Failed to collect request body!");
-            
+                
             let payload: Value = serde_json::from_slice(&bytes)
                 .expect("Failed to parse request payload!");
-            
+                
             assert_json_eq!(actual_json, expected.payload.0);
         }
 

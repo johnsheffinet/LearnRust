@@ -135,23 +135,24 @@ pub mod handlers {
 
             #[derive(Debug, thiserror::Error)]
             pub enum SvcError {
-                #[error("Failed to parse request body! {0}")]
-                FailedParseRequestBody(axum::Error),
+                #[error("Failed to parse request body into bytes! {0}")]
+                FailedParseRequestBodyIntoBytes(#[from] axum::Error),
 
-                #[]
+                #[error("Failed to parse request body into json! {0}")]
+                FailedParseRequestBodyIntoJson(#[from] serde_json::Error),
             }
             
-            assert_eq!(actual.method(), expected.method);
-            assert_eq!(actual.uri().path(), expected.path);
-            assert_eq!(actual.version(), expected.version);
+            assert_eq!(actual.method(), expected.method, "Failed to match request method!");
+            assert_eq!(actual.uri().path(), expected.path, "Failed to match request path!");
+            assert_eq!(actual.version(), expected.version, "Failed to match request version!");
             
             for (key, value) in expected.headers.iter() {
-                assert_eq!(actual.headers().get(key), Some(value));
+                assert_eq!(actual.headers().get(key), Some(value), "Failed to match request '{}' header!", key);
             }
             
             let actual_payload: Value = assert_ok!(serde_json::from_slice(to_bytes(actual.into_body(), usize::MAX)))
                 
-            assert_json_eq!(actual_payload, expected.payload.0);
+            assert_json_eq!(actual_payload, expected.payload.0, "Failed to match request payload!");
         }
 
         pub async fn assert_response_eq(actual: Response, expected: ResponseParams) {

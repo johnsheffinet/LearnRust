@@ -1,5 +1,5 @@
 use axum::{
-    body::Body,
+    body::{to_bytes, Body},
     extract::Request,
     http::{header::HeaderMap, Method, StatusCode, Uri, Version},
     response::{IntoResponse, Response},
@@ -54,16 +54,16 @@ pub mod handlers {
         #[derive(Debug, thiserror::Error)]
         pub enum SvcError {
             #[error("Failed to parse path param into request uri! {0}")]
-            FailedParseRequestPath(axum::http::uri::InvalidUri),
+            FailedParsePathIntoRequestUri(axum::http::uri::InvalidUri),
             
             #[error("Failed to parse payload param into request body! {0}")]
-            FailedParseRequestPayload(serde_json::Error),
+            FailedParsePayloadIntoRequestBody(serde_json::Error),
             
             #[error("Failed to build request! {0}")]
             FailedBuildRequest(axum::http::Error),
             
             #[error("Failed to parse payload param into response body! {0}")]
-            FailedParseResponsePayload(serde_json::Error),
+            FailedParsePayloadIntoResponseBody(serde_json::Error),
             
             #[error("Failed to build response! {0}")]
             FailedBuildResponse(axum::http::Error),
@@ -82,13 +82,14 @@ pub mod handlers {
         impl TryFrom<RequestParams> for Request {
             type Error = SvcError;
             
+            #[trace::instrument(err)]
             fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
                 let params_uri = params.path
                     .parse::<Uri>()
-                    .map_err(SvcError::FailedParseRequestPath)?;
+                    .map_err(SvcError::FailedParsePathIntoRequestUri)?;
                 
                 let params_body = serde_json::to_vec(&params.payload.0)
-                    .map_err(SvcError::FailedParseRequestPayload)?;
+                    .map_err(SvcError::FailedParsePayloadIntoRequestBody)?;
                 
                 let mut request = Request::builder()
                     .method(params.method)
@@ -113,9 +114,10 @@ pub mod handlers {
         impl TryFrom<ResponseParams> for Response {
             type Error = SvcError;
             
+            #[trace::instrument(err)]
             fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
                 let params_body = serde_json::to_vec(&params.payload.0)
-                    .map_err(SvcError::FailedParseResponsePayload)?;
+                    .map_err(SvcError::FailedParsePayloadIntoResponseBody)?;
                 
                 let mut response = Response::builder()
                     .version(params.version)
@@ -129,8 +131,8 @@ pub mod handlers {
             }
         }
         
+        #[test_log::test(tokio::test)]
         pub async fn assert_request_eq(actual: Request, expected: RequestParams) {
-            use axum::body::to_bytes;
             use assert_json_diff::assert_json_eq;
             use claims::assert_ok;
             use pretty_assertations::assert_eq;
@@ -152,13 +154,12 @@ pub mod handlers {
                 assert_eq!(actual.headers().get(key), Some(value), "Failed to match request '{}' header!", key);
             }
             
-            let actual_payload: Value = assert_ok!(serde_json::from_slice(to_bytes(actual.into_body(), usize::MAX)))
+            let actual_payload: Value = assert_ok!(serde_json::from_slice(&to_bytes(actual.into_body(), usize::MAX)))
                 
             assert_json_eq!(actual_payload, expected.payload.0, "Failed to match request payload!");
         }
 
         pub async fn assert_response_eq(actual: Response, expected: ResponseParams) {
-            use axum::body::to_bytes;
             use assert_json_diff::assert_json_eq;
             
             #[derive(Debug, thiserror::Error)]
@@ -177,7 +178,7 @@ pub mod handlers {
                 assert_eq!(actual.headers().get(key), Some(value), "Failed to match response '{}' header!", key);
             }
             
-            let actual_payload: Value = assert_ok!(serde_json::from_slice(to_bytes(actual.into_body(), usize::MAX)))
+            let actual_payload: Value = assert_ok!(serde_json::from_slice(&to_bytes(actual.into_body(), usize::MAX)))
                 
             assert_json_eq!(actual_payload, expected.payload.0, "Failed to match response payload!");
         }
@@ -188,9 +189,11 @@ pub mod handlers {
         ) -> SvcResult<Response> {
             use tower::ServiceExt;
         
-            let request = Request::try_from(params)?;
+            let request = assert_ok!(Request::try_from(params));
+
+            let response = assert_ok!(router.oneshot(request).await);
         
-            Ok(router.oneshot(request).await.unwrap())
+            Ok(response)
         }
     }
 }

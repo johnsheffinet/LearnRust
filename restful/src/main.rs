@@ -12,7 +12,7 @@ pub mod handlers {
     
     pub mod cfg {
         use super::*;
-        use figment::{Figment, providers::Env};
+        use figment::{providers::Env, Figment};
         use std::sync::LazyLock;
         
         #[derive(Debug, thiserror::Error)]
@@ -25,6 +25,7 @@ pub mod handlers {
         
         #[derive(Debug, serde::Deserialize, get_fields::GetFields)]
         #[get_fields(rename_all = "UPPERCASE")]
+        #[serde(rename_all = "UPPERCASE")]
         pub struct AppConfig {
             pub http_addr: String,
             pub https_addr: String,
@@ -38,7 +39,7 @@ pub mod handlers {
                 let env_vars = Self::get_fields();
         
                 let app_config = Figment::new()
-                    .merge(Env::raw().only(&env_vars))
+                    .merge(Env::raw().only(&env_vars).lowercase(false))
                     .extract::<Self>()
                     .map_err(SvcError::FailedExtractEnvVars)?;
         
@@ -46,7 +47,10 @@ pub mod handlers {
             }
         }
         
-        pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| { AppConfig::load().unwrap() });
+        pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| {
+            AppConfig::load()
+                .expect("Failed to load application configuration!")
+        });
     }
     pub mod utils {
         use super::*;

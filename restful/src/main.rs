@@ -27,20 +27,20 @@ pub mod handlers {
         #[get_fields(rename_all = "UPPERCASE")]
         #[serde(rename_all = "UPPERCASE")]
         pub struct AppConfig {
-            pub http_addr: String,
-            pub https_addr: String,
-            pub cert_path: String,
-            pub key_path: String,
+            pub http_addr: std::net::SocketAddr,
+            pub https_addr: std::net::SocketAddr,
+            pub cert_path: std::path::PathBuf,
+            pub key_path: std::path::PathBuf,
         }
-        
+
         impl AppConfig {
             #[tracing::instrument(err)]
             pub fn load() -> SvcResult<Self> {
-                let env_vars = Self::get_fields();
-        
                 let app_config = Figment::new()
-                    .merge(Env::raw().only(&env_vars).lowercase(false))
-                    .extract::<Self>()
+                    .merge(Env::raw()
+                           .only(&Self::get_fields())
+                           .lowercase(false))
+                    .extract()
                     .map_err(SvcError::FailedExtractEnvVars)?;
         
                 Ok(app_config)

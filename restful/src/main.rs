@@ -205,16 +205,18 @@ pub mod handlers {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use claims::{assert_ok, assert_err};
+    use pretty-assertions::{assert_eq};
 
     pub mod cfg {
         use super::*;
         use crate::handlers::cfg;
 
-        #[tokio::test]
+        #[test-log::test(tokio::test)]
         #[serial_test::serial]
         async fn test_load_app_config_success() {
-            let result = cfg::AppConfig::load()
-                .expect("Failed to load application configuration!");
+            let result = assert_ok!(cfg::AppConfig::load());
+                // .expect("Failed to load application configuration!");
 
             assert!(!result.http_addr.is_empty());
             assert!(!result.https_addr.is_empty());
@@ -222,12 +224,12 @@ pub mod tests {
             assert!(!result.key_path.is_empty());
         }
 
-        #[tokio::test]
+        #[test-log::test(tokio::test)]
         #[serial_test::serial]
         async fn test_load_app_config_failure() {
             let test = || {
-                let result = cfg::AppConfig::load();
-                assert!(result.is_err());
+                let result = assert_err!(cfg::AppConfig::load());
+                // assert!(result.is_err());
             };
 
             temp_env::with_var_unset("HTTP_ADDR", test);

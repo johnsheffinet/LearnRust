@@ -16,21 +16,26 @@ pub mod handlers {
         use std::sync::LazyLock;
         
         #[derive(Debug, thiserror::Error)]
-        pub enum SvcError {
+        pub enum AppError {
             #[error("Failed to extract environment variables! {0}")]
-            FailedExtractEnvVars(figment::Error),
+            FailedExtractEnvVars(#[from] figment::Error),
         }
-        
-        pub type SvcResult<T> = Result<T, SvcError>;
-        
+
+        pub type AppResult<T> = Result<T, AppError>;
+
         #[derive(Debug, serde::Deserialize, get_fields::GetFields)]
         #[get_fields(rename_all = "UPPERCASE")]
         #[serde(rename_all = "UPPERCASE")]
         pub struct AppConfig {
-            pub http_addr: std::net::SocketAddr,
-            pub https_addr: std::net::SocketAddr,
-            pub cert_path: std::path::PathBuf,
-            pub key_path: std::path::PathBuf,
+            http_addr: std::net::SocketAddr,
+            https_addr: std::net::SocketAddr,
+            cert_path: std::path::PathBuf,
+            key_path: std::path::PathBuf,
+        }
+
+        impl AppConfig {
+            fn load() -> AppResult<Self> {}
+            fn validate_path() -> Result<(), validator::ValidationError> {}
         }
 
         impl AppConfig {

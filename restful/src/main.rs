@@ -221,6 +221,7 @@ pub mod handlers {
 pub mod tests {
     use super::*;
     use claims::{assert_ok, assert_err};
+    use figment::Jail;
     use pretty-assertions::{assert_eq};
 
     pub mod cfg {
@@ -228,8 +229,57 @@ pub mod tests {
         use crate::handlers::cfg;
 
         #[test-log::test(tokio::test)]
-        #[serial_test::serial]
         async fn test_load_app_config_success() {
+            #[cfg(test)]
+mod tests {
+    use super::*;
+    use figment::Jail;
+
+    #[test]
+    fn test_config_loading_scenarios() {
+        // Scenario 1: Everything is Perfect
+        Jail::expect_with(|jail| {
+            jail.set_env("HTTP_ADDR", "127.0.0.1:8080");
+            jail.set_env("HTTPS_ADDR", "127.0.0.1:8443");
+            jail.set_env("CERT_PATH", "cert.pem");
+            jail.set_env("KEY_PATH", "key.pem");
+            
+            // Create the required files in the jail
+            jail.create_file("cert.pem", "contents")?;
+            jail.create_file("key.pem", "contents")?;
+
+            let config = AppConfig::load().expect("Should load valid config");
+            assert_eq!(config.http_addr.port(), 8080);
+            Ok(())
+        });
+
+        // Scenario 2: Invalid Socket Address (Missing Port)
+        Jail::expect_with(|jail| {
+            jail.set_env("HTTP_ADDR", "127.0.0.1"); // Error: No port
+            jail.set_env("HTTPS_ADDR", "127.0.0.1:443");
+            jail.set_env("CERT_PATH", "cert.pem");
+            jail.set_env("KEY_PATH", "key.pem");
+
+            let result = AppConfig::load();
+            assert!(matches!(result, Err(AppError::FailedExtractEnvVars(_))));
+            Ok(())
+        });
+
+        // Scenario 3: Missing File on Disk (Validation Error)
+        Jail::expect_with(|jail| {
+            jail.set_env("HTTP_ADDR", "0.0.0.0:80");
+            jail.set_env("HTTPS_ADDR", "0.0.0.0:443");
+            jail.set_env("CERT_PATH", "ghost.pem"); // This file won't exist
+            jail.set_env("KEY_PATH", "key.pem");
+            jail.create_file("key.pem", "data")?;
+
+            let result = AppConfig::load();
+            assert!(matches!(result, Err(AppError::FailedValidate(_))));
+            Ok(())
+        });
+    }
+}
+
             let result = assert_ok!(cfg::AppConfig::load());
                 // .expect("Failed to load application configuration!");
 
@@ -237,17 +287,6 @@ pub mod tests {
             assert!(!result.https_addr.is_empty());
             assert!(!result.cert_path.is_empty());
             assert!(!result.key_path.is_empty());
-        }
-
-        #[test-log::test(tokio::test)]
-        #[serial_test::serial]
-        async fn test_load_app_config_failure() {
-            let test = || {
-                let result = assert_err!(cfg::AppConfig::load());
-                // assert!(result.is_err());
-            };
-
-            temp_env::with_var_unset("HTTP_ADDR", test);
         }
     }
     pub mod utils {

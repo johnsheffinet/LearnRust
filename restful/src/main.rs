@@ -19,6 +19,9 @@ pub mod handlers {
         pub enum AppError {
             #[error("Failed to extract environment variables! {0}")]
             FailedExtractEnvVars(#[from] figment::Error),
+
+            #[error("Failed to find path! {0}")]
+            FailedFindPath(#[from] validator::ValidationError),
         }
 
         pub type AppResult<T> = Result<T, AppError>;
@@ -29,6 +32,7 @@ pub mod handlers {
         pub struct AppConfig {
             http_addr: std::net::SocketAddr,
             https_addr: std::net::SocketAddr,
+            #[validate(custom(function = "self", message = ""))]
             cert_path: std::path::PathBuf,
             key_path: std::path::PathBuf,
         }

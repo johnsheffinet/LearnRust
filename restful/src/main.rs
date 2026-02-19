@@ -12,7 +12,6 @@ pub mod handlers {
     
     pub mod cfg {
         use super::*;
-        use figment::{providers::Env, Figment};
         use std::sync::LazyLock;
         
         #[derive(Debug, thiserror::Error)]
@@ -21,12 +20,12 @@ pub mod handlers {
             FailedExtractEnvVars(#[from] figment::Error),
 
             #[error("{0}")]
-            FailedFindPath(#[from] validator::ValidationError),
+            FailedValidate(#[from] validator::ValidationErrors),
         }
 
         pub type AppResult<T> = Result<T, AppError>;
 
-        #[derive(Debug, serde::Deserialize, get_fields::GetFields)]
+        #[derive(Debug, get_fields::GetFields, serde::Deserialize, validator::Validate)]
         #[get_fields(rename_all = "UPPERCASE")]
         #[serde(rename_all = "UPPERCASE")]
         pub struct AppConfig {
@@ -40,30 +39,29 @@ pub mod handlers {
 
         impl AppConfig {
             #[trace::instrument(err)]
-            fn load() -> AppResult<Self> {
-                
+            pub fn load() -> AppResult<Self> {
+                let config = figment::Figment::new()
+                    .merge(figment::providers::Env::raw()
+                           .only(&Self::get_fields())
+                           .lowercase(false))
+                    .extract()?;
+
+                config.validate()?;
+
+                Ok(config)
             }
             
             #[trace::instrument(err)]
-            fn validate_path(path: &std::path::PathBuf) -> AppResult<()> {
-                
+            pub fn validate_path(path: &std::path::PathBuf) -> Result<(), validator::ValidationError> {
+                if path.exists() {
+                    Ok(())
+                }
+                else {
+                    Err(validator::ValidationError::new("FailedFindPath"))
+                }
             }
         }
-
-        impl AppConfig {
-            #[tracing::instrument(err)]
-            pub fn load() -> SvcResult<Self> {
-                let app_config = Figment::new()
-                    .merge(Env::raw()
-                           .only(&Self::get_fields())
-                           .lowercase(false))
-                    .extract()
-                    .map_err(SvcError::FailedExtractEnvVars)?;
-        
-                Ok(app_config)
-            }
-        }
-        
+       
         pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| {
             AppConfig::load()
                 .expect("Failed to load application configuration!")

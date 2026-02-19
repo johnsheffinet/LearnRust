@@ -20,7 +20,7 @@ pub mod handlers {
             #[error("Failed to extract environment variables! {0}")]
             FailedExtractEnvVars(#[from] figment::Error),
 
-            #[error("Failed to find path! {0}")]
+            #[error("{0}")]
             FailedFindPath(#[from] validator::ValidationError),
         }
 
@@ -30,16 +30,24 @@ pub mod handlers {
         #[get_fields(rename_all = "UPPERCASE")]
         #[serde(rename_all = "UPPERCASE")]
         pub struct AppConfig {
-            http_addr: std::net::SocketAddr,
-            https_addr: std::net::SocketAddr,
-            #[validate(custom(function = "self", message = ""))]
-            cert_path: std::path::PathBuf,
-            key_path: std::path::PathBuf,
+            pub http_addr: std::net::SocketAddr,
+            pub https_addr: std::net::SocketAddr,
+            #[validate(custom(function = "AppConfig::validate_path", message = "Failed to find certificate file!"))]
+            pub cert_path: std::path::PathBuf,
+            #[validate(custom(function = "AppConfig::validate_path", message = "Failed to find key file!"))]
+            pub key_path: std::path::PathBuf,
         }
 
         impl AppConfig {
-            fn load() -> AppResult<Self> {}
-            fn validate_path() -> Result<(), validator::ValidationError> {}
+            #[trace::instrument(err)]
+            fn load() -> AppResult<Self> {
+                
+            }
+            
+            #[trace::instrument(err)]
+            fn validate_path(path: &std::path::PathBuf) -> AppResult<()> {
+                
+            }
         }
 
         impl AppConfig {

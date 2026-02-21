@@ -259,7 +259,7 @@ pub mod tests {
                 
                 let result = assert_err!(AppConfig::load());
                 
-                assert_matches!(result, AppError::FailedExtractEnvVars(ref err) if err.to_string.contains("http_addr"));
+                assert_matches!(result, AppError::FailedExtractEnvVars(ref err) if err.to_string().contains("http_addr"));
 
                 Ok(())
             });
@@ -276,7 +276,7 @@ pub mod tests {
                 
                 let result = assert_err!(AppConfig::load());
                 
-                assert_matches!(result, AppError::FailedExtractEnvVars(err) if err.to_string().contains("cert_path"));
+                assert_matches!(result, AppError::FailedExtractEnvVars(ref err) if err.to_string().contains("cert_path"));
                 
                 Ok(())
             });
@@ -293,9 +293,9 @@ pub mod tests {
                 
                 let result = assert_err!(AppConfig::load());
                 
-                let validation_err = assert_matches!(result, AppError::FailedValidate(e) => e);
+                let validation_errs = assert_matches!(result, AppError::FailedValidate(err) => err);
                 
-                let field_errs = assert_some!(validation_err
+                let field_errs = assert_some!(validation_errs
                     .field_errors()
                     .get("cert_path"));
                 

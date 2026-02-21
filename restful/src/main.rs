@@ -228,7 +228,7 @@ pub mod tests {
         use super::*;
         use crate::handlers::cfg::{AppConfig, AppError};
         
-        #[test-log::test(test)]
+        #[test_log::test(test)]
         fn test_load_app_config() {
             // Success
             Jail::expect_with(|jail| {
@@ -351,7 +351,7 @@ pub mod tests {
     //         assert_eq!(result.body(), params_body);
     //     }
     // }
-}
+
 
 #[tokio::main]
 async fn main() {

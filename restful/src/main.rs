@@ -67,166 +67,166 @@ pub mod handlers {
                 .expect("Failed to load application configuration!")
         });
     }
-    pub mod utils {
-        use super::*;
+    // pub mod utils {
+    //     use super::*;
         
-        #[derive(Debug, thiserror::Error)]
-        pub enum SvcError {
-            #[error("Failed to parse path param into request uri! {0}")]
-            FailedParsePathIntoRequestUri(axum::http::uri::InvalidUri),
+    //     #[derive(Debug, thiserror::Error)]
+    //     pub enum SvcError {
+    //         #[error("Failed to parse path param into request uri! {0}")]
+    //         FailedParsePathIntoRequestUri(axum::http::uri::InvalidUri),
             
-            #[error("Failed to parse payload param into request body! {0}")]
-            FailedParsePayloadIntoRequestBody(serde_json::Error),
+    //         #[error("Failed to parse payload param into request body! {0}")]
+    //         FailedParsePayloadIntoRequestBody(serde_json::Error),
             
-            #[error("Failed to build request! {0}")]
-            FailedBuildRequest(axum::http::Error),
+    //         #[error("Failed to build request! {0}")]
+    //         FailedBuildRequest(axum::http::Error),
             
-            #[error("Failed to parse payload param into response body! {0}")]
-            FailedParsePayloadIntoResponseBody(serde_json::Error),
+    //         #[error("Failed to parse payload param into response body! {0}")]
+    //         FailedParsePayloadIntoResponseBody(serde_json::Error),
             
-            #[error("Failed to build response! {0}")]
-            FailedBuildResponse(axum::http::Error),
-        }
+    //         #[error("Failed to build response! {0}")]
+    //         FailedBuildResponse(axum::http::Error),
+    //     }
         
-        pub type SvcResult<T> = Result<T, SvcError>;
+    //     pub type SvcResult<T> = Result<T, SvcError>;
         
-        pub struct RequestParams {
-            method: Method,
-            path: String,
-            version: Version,
-            headers: HeaderMap,
-            payload: Json<Value>
-        }
+    //     pub struct RequestParams {
+    //         method: Method,
+    //         path: String,
+    //         version: Version,
+    //         headers: HeaderMap,
+    //         payload: Json<Value>
+    //     }
         
-        impl TryFrom<RequestParams> for Request {
-            type Error = SvcError;
+    //     impl TryFrom<RequestParams> for Request {
+    //         type Error = SvcError;
             
-            #[trace::instrument(err)]
-            fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
-                let params_uri = params.path
-                    .parse::<Uri>()
-                    .map_err(SvcError::FailedParsePathIntoRequestUri)?;
+    //         #[trace::instrument(err)]
+    //         fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
+    //             let params_uri = params.path
+    //                 .parse::<Uri>()
+    //                 .map_err(SvcError::FailedParsePathIntoRequestUri)?;
                 
-                let params_body = serde_json::to_vec(&params.payload.0)
-                    .map_err(SvcError::FailedParsePayloadIntoRequestBody)?;
+    //             let params_body = serde_json::to_vec(&params.payload.0)
+    //                 .map_err(SvcError::FailedParsePayloadIntoRequestBody)?;
                 
-                let mut request = Request::builder()
-                    .method(params.method)
-                    .uri(params_uri)
-                    .version(params.version)
-                    .body(Body::from(params_body))
-                    .map_err(SvcError::FailedBuildRequest)?;
+    //             let mut request = Request::builder()
+    //                 .method(params.method)
+    //                 .uri(params_uri)
+    //                 .version(params.version)
+    //                 .body(Body::from(params_body))
+    //                 .map_err(SvcError::FailedBuildRequest)?;
                 
-                *request.headers_mut() = params.headers;
+    //             *request.headers_mut() = params.headers;
                 
-                Ok(request)
-            }
-        }
+    //             Ok(request)
+    //         }
+    //     }
         
-        pub struct ResponseParams {
-            version: Version,
-            status: StatusCode,
-            headers: HeaderMap,
-            payload: Json<Value>
-        }
+    //     pub struct ResponseParams {
+    //         version: Version,
+    //         status: StatusCode,
+    //         headers: HeaderMap,
+    //         payload: Json<Value>
+    //     }
         
-        impl TryFrom<ResponseParams> for Response {
-            type Error = SvcError;
+    //     impl TryFrom<ResponseParams> for Response {
+    //         type Error = SvcError;
             
-            #[trace::instrument(err)]
-            fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
-                let params_body = serde_json::to_vec(&params.payload.0)
-                    .map_err(SvcError::FailedParsePayloadIntoResponseBody)?;
+    //         #[trace::instrument(err)]
+    //         fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
+    //             let params_body = serde_json::to_vec(&params.payload.0)
+    //                 .map_err(SvcError::FailedParsePayloadIntoResponseBody)?;
                 
-                let mut response = Response::builder()
-                    .version(params.version)
-                    .status(params.status)
-                    .body(Body::from(params_body))
-                    .map_err(SvcError::FailedBuildResponse)?;
+    //             let mut response = Response::builder()
+    //                 .version(params.version)
+    //                 .status(params.status)
+    //                 .body(Body::from(params_body))
+    //                 .map_err(SvcError::FailedBuildResponse)?;
                 
-                *response.headers_mut() = params.headers;
+    //             *response.headers_mut() = params.headers;
                 
-                Ok(response)
-            }
-        }
+    //             Ok(response)
+    //         }
+    //     }
         
-        #[test_log::test(tokio::test)]
-        pub async fn assert_request_eq(actual: Request, expected: RequestParams) {
-            use assert_json_diff::assert_json_eq;
-            use claims::assert_ok;
-            use pretty_assertations::assert_eq;
+    //     #[test_log::test(tokio::test)]
+    //     pub async fn assert_request_eq(actual: Request, expected: RequestParams) {
+    //         use assert_json_diff::assert_json_eq;
+    //         use claims::assert_ok;
+    //         use pretty_assertations::assert_eq;
 
-            #[derive(Debug, thiserror::Error)]
-            pub enum SvcError {
-                #[error("Failed to parse request body into bytes! {0}")]
-                FailedParseRequestBodyIntoBytes(#[from] axum::Error),
+    //         #[derive(Debug, thiserror::Error)]
+    //         pub enum SvcError {
+    //             #[error("Failed to parse request body into bytes! {0}")]
+    //             FailedParseRequestBodyIntoBytes(#[from] axum::Error),
 
-                #[error("Failed to parse request body into payload param! {0}")]
-                FailedParseRequestBodyIntoJson(#[from] serde_json::Error),
-            }
+    //             #[error("Failed to parse request body into payload param! {0}")]
+    //             FailedParseRequestBodyIntoJson(#[from] serde_json::Error),
+    //         }
             
-            assert_eq!(actual.method(), expected.method, "Failed to match request method!");
-            assert_eq!(actual.uri().path(), expected.path, "Failed to match request path!");
-            assert_eq!(actual.version(), expected.version, "Failed to match request version!");
+    //         assert_eq!(actual.method(), expected.method, "Failed to match request method!");
+    //         assert_eq!(actual.uri().path(), expected.path, "Failed to match request path!");
+    //         assert_eq!(actual.version(), expected.version, "Failed to match request version!");
             
-            for (key, value) in expected.headers.iter() {
-                assert_eq!(actual.headers().get(key), Some(value), "Failed to match request '{}' header!", key);
-            }
+    //         for (key, value) in expected.headers.iter() {
+    //             assert_eq!(actual.headers().get(key), Some(value), "Failed to match request '{}' header!", key);
+    //         }
             
-            let actual_payload: Value = assert_ok!(serde_json::from_slice(&to_bytes(actual.into_body(), usize::MAX)))
+    //         let actual_payload: Value = assert_ok!(serde_json::from_slice(&to_bytes(actual.into_body(), usize::MAX)))
                 
-            assert_json_eq!(actual_payload, expected.payload.0, "Failed to match request payload!");
-        }
+    //         assert_json_eq!(actual_payload, expected.payload.0, "Failed to match request payload!");
+    //     }
 
-        pub async fn assert_response_eq(actual: Response, expected: ResponseParams) {
-            use assert_json_diff::assert_json_eq;
+    //     pub async fn assert_response_eq(actual: Response, expected: ResponseParams) {
+    //         use assert_json_diff::assert_json_eq;
             
-            #[derive(Debug, thiserror::Error)]
-            pub enum SvcError {
-                #[error("Failed to parse response body into bytes! {0}")]
-                FailedParseResponseBodyIntoBytes(#[from] axum::Error),
+    //         #[derive(Debug, thiserror::Error)]
+    //         pub enum SvcError {
+    //             #[error("Failed to parse response body into bytes! {0}")]
+    //             FailedParseResponseBodyIntoBytes(#[from] axum::Error),
 
-                #[error("Failed to parse response body into payload param! {0}")]
-                FailedParseResponseBodyIntoJson(#[from] serde_json::Error),
-            }
+    //             #[error("Failed to parse response body into payload param! {0}")]
+    //             FailedParseResponseBodyIntoJson(#[from] serde_json::Error),
+    //         }
             
-            assert_eq!(actual.version(), expected.version);
-            assert_eq!(actual.status(), expected.status);
+    //         assert_eq!(actual.version(), expected.version);
+    //         assert_eq!(actual.status(), expected.status);
         
-            for (key, value) in expected.headers.iter() {
-                assert_eq!(actual.headers().get(key), Some(value), "Failed to match response '{}' header!", key);
-            }
+    //         for (key, value) in expected.headers.iter() {
+    //             assert_eq!(actual.headers().get(key), Some(value), "Failed to match response '{}' header!", key);
+    //         }
             
-            let actual_payload: Value = assert_ok!(serde_json::from_slice(&to_bytes(actual.into_body(), usize::MAX)))
+    //         let actual_payload: Value = assert_ok!(serde_json::from_slice(&to_bytes(actual.into_body(), usize::MAX)))
                 
-            assert_json_eq!(actual_payload, expected.payload.0, "Failed to match response payload!");
-        }
+    //         assert_json_eq!(actual_payload, expected.payload.0, "Failed to match response payload!");
+    //     }
         
-        pub async fn get_router_response(
-            router: Router, 
-            params: RequestParams
-        ) -> SvcResult<Response> {
-            use tower::ServiceExt;
+    //     pub async fn get_router_response(
+    //         router: Router, 
+    //         params: RequestParams
+    //     ) -> SvcResult<Response> {
+    //         use tower::ServiceExt;
         
-            let request = assert_ok!(Request::try_from(params));
+    //         let request = assert_ok!(Request::try_from(params));
 
-            let response = assert_ok!(router.oneshot(request).await);
+    //         let response = assert_ok!(router.oneshot(request).await);
         
-            Ok(response)
-        }
-    }
+    //         Ok(response)
+    //     }
+    // }
 }
 
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use claims::{assert_ok, assert_err, assert_matches};
+    use claims::{assert_ok, assert_err, assert_matches, assert_some};
     use figment::Jail;
-    use pretty-assertions::{assert_eq};
+    use pretty_assertions::{assert_eq};
     
     pub mod cfg {
         use super::*;
-        use crate::handlers::cfg;
+        use crate::handlers::cfg::{AppConfig, AppError};
         
         #[test-log::test(test)]
         fn test_load_app_config() {
@@ -259,7 +259,7 @@ pub mod tests {
                 
                 let result = assert_err!(AppConfig::load());
                 
-                assert_matches!(result, AppError::FailedExtractEnvVars(_));
+                assert_matches!(result, AppError::FailedExtractEnvVars(ref err) if err.to_string.contains("http_addr"));
 
                 Ok(())
             });
@@ -276,7 +276,7 @@ pub mod tests {
                 
                 let result = assert_err!(AppConfig::load());
                 
-                assert_matches!(result, AppError::FailedExtractEnvVars(_));
+                assert_matches!(result, AppError::FailedExtractEnvVars(err) if err.to_string().contains("cert_path"));
                 
                 Ok(())
             });
@@ -295,12 +295,11 @@ pub mod tests {
                 
                 let validation_err = assert_matches!(result, AppError::FailedValidate(e) => e);
                 
-                let err_code = validation_err
+                let field_errs = assert_some!(validation_err
                     .field_errors()
-                    .get("cert_path")[0]
-                    .code;
+                    .get("cert_path"));
                 
-                assert_eq!(err_code, "FailedFindFile");
+                assert_eq!(field_errs[0].code, "FailedFindFile");
                 
                 Ok(())
             });

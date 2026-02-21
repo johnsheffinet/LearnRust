@@ -18,13 +18,13 @@ pub mod handlers {
         pub enum AppError {
             #[error("Failed to extract environment variables! {0}")]
             FailedExtractEnvVars(#[from] figment::Error),
-
+            
             #[error("{0}")]
             FailedValidate(#[from] validator::ValidationErrors),
         }
-
+        
         pub type AppResult<T> = Result<T, AppError>;
-
+        
         #[derive(Debug, get_fields::GetFields, serde::Deserialize, validator::Validate)]
         #[get_fields(rename_all = "UPPERCASE")]
         #[serde(rename_all = "UPPERCASE")]
@@ -36,7 +36,7 @@ pub mod handlers {
             #[validate(custom(function = "AppConfig::validate_path", message = "Failed to find key file!"))]
             pub key_path: std::path::PathBuf,
         }
-
+        
         impl AppConfig {
             #[trace::instrument(err)]
             pub fn load() -> AppResult<Self> {
@@ -45,9 +45,9 @@ pub mod handlers {
                            .only(&Self::get_fields())
                            .lowercase(false))
                     .extract()?;
-
+                
                 config.validate()?;
-
+                
                 Ok(config)
             }
             
@@ -61,7 +61,7 @@ pub mod handlers {
                 }
             }
         }
-       
+        
         pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| {
             AppConfig::load()
                 .expect("Failed to load application configuration!")
@@ -223,20 +223,12 @@ pub mod tests {
     use claims::{assert_ok, assert_err, assert_matches};
     use figment::Jail;
     use pretty-assertions::{assert_eq};
-
+    
     pub mod cfg {
         use super::*;
         use crate::handlers::cfg;
-
-        #[test-log::test(tokio::test)]
-        async fn test_load_app_config_success() {
-            #[cfg(test)]
-mod tests {
-    use super::*;
-    use figment::Jail;
-
-    mod cfg {
-        #[test]
+        
+        #[test-log::test(test)]
         fn test_load_app_config() {
             // Success
             Jail::expect_with(|jail| {
@@ -244,16 +236,18 @@ mod tests {
                 jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
                 jail.set_env("CERT_PATH",  "learnrust.crt");
                 jail.set_env("KEY_PATH",   "learnrust.key");
-                
+                        
                 jail.create_file("learnrust.crt", "content")?;
                 jail.create_file("learnrust.key", "content")?;
-
+                
                 let result = assert_ok!(AppConfig::load());
-
-                assert_eq!(result.http_addr, "127.0.0.1:3080");
+                
+                assert_eq!(result.http_addr.to_string(), "127.0.0.1:3080");
+                
+                Ok(())
             });
             
-            // Failure Invalid SocketAddr
+            // Failure - Invalid SocketAddr
             Jail::expect_with(|jail| {
                 jail.set_env("HTTP_ADDR",  " "); // Invalid SocketAddr
                 jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
@@ -262,13 +256,15 @@ mod tests {
                 
                 jail.create_file("learnrust.crt", "content")?;
                 jail.create_file("learnrust.key", "content")?;
-
+                
                 let result = assert_err!(AppConfig::load());
+                
+                assert_matches!(result, AppError::FailedExtractEnvVars(_));
 
-                assert_matches!(result, Err(AppError::FailedExtractEnvVars(_)));
+                Ok(())
             });
             
-            // Failure Invalid PathBuf
+            // Failure - Invalid PathBuf
             Jail::expect_with(|jail| {
                 jail.set_env("HTTP_ADDR",  "127.0.0.1:3080");
                 jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
@@ -277,90 +273,41 @@ mod tests {
                 
                 jail.create_file("learnrust.crt", "content")?;
                 jail.create_file("learnrust.key", "content")?;
-
+                
                 let result = assert_err!(AppConfig::load());
-
-                assert_matches!(result, Err(AppError::FailedExtractEnvVars(_)));
+                
+                assert_matches!(result, AppError::FailedExtractEnvVars(_));
+                
+                Ok(())
             });
             
-            // Failure Missing File
+            // Failure - Missing File
             Jail::expect_with(|jail| {
                 jail.set_env("HTTP_ADDR",  "127.0.0.1:3080");
                 jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
                 jail.set_env("CERT_PATH",  "learnrust.crt");
                 jail.set_env("KEY_PATH",   "learnrust.key");
                 
-                // jail.create_file("learnrust.crt", "content")?; // Missing File
+                jail.create_file("missing.crt", "content")?; // Missing File
                 jail.create_file("learnrust.key", "content")?;
-
+                
                 let result = assert_err!(AppConfig::load());
-
-                let validation_err = assert_matches!(result, Err(AppError::FailedValidate(e) => e));
-
-                let cert_path_err_code = validation_err
+                
+                let validation_err = assert_matches!(result, AppError::FailedValidate(e) => e);
+                
+                let err_code = validation_err
                     .field_errors()
                     .get("cert_path")[0]
                     .code;
-
-                assert_eq!(cert_path_err_code, "FailedFindFile");
+                
+                assert_eq!(err_code, "FailedFindFile");
+                
+                Ok(())
             });
         }
     }
-
-    #[test]
-    fn test_config_loading_scenarios() {
-        // Scenario 1: Everything is Perfect
-        Jail::expect_with(|jail| {
-            jail.set_env("HTTP_ADDR", "127.0.0.1:8080");
-            jail.set_env("HTTPS_ADDR", "127.0.0.1:8443");
-            jail.set_env("CERT_PATH", "cert.pem");
-            jail.set_env("KEY_PATH", "key.pem");
-            
-            // Create the required files in the jail
-            jail.create_file("cert.pem", "contents")?;
-            jail.create_file("key.pem", "contents")?;
-
-            let config = AppConfig::load().expect("Should load valid config");
-            assert_eq!(config.http_addr.port(), 8080);
-            Ok(())
-        });
-
-        // Scenario 2: Invalid Socket Address (Missing Port)
-        Jail::expect_with(|jail| {
-            jail.set_env("HTTP_ADDR", "127.0.0.1"); // Error: No port
-            jail.set_env("HTTPS_ADDR", "127.0.0.1:443");
-            jail.set_env("CERT_PATH", "cert.pem");
-            jail.set_env("KEY_PATH", "key.pem");
-
-            let result = AppConfig::load();
-            assert!(matches!(result, Err(AppError::FailedExtractEnvVars(_))));
-            Ok(())
-        });
-
-        // Scenario 3: Missing File on Disk (Validation Error)
-        Jail::expect_with(|jail| {
-            jail.set_env("HTTP_ADDR", "0.0.0.0:80");
-            jail.set_env("HTTPS_ADDR", "0.0.0.0:443");
-            jail.set_env("CERT_PATH", "ghost.pem"); // This file won't exist
-            jail.set_env("KEY_PATH", "key.pem");
-            jail.create_file("key.pem", "data")?;
-
-            let result = AppConfig::load();
-            assert!(matches!(result, Err(AppError::FailedValidate(_))));
-            Ok(())
-        });
-    }
 }
 
-            let result = assert_ok!(cfg::AppConfig::load());
-                // .expect("Failed to load application configuration!");
-
-            assert!(!result.http_addr.is_empty());
-            assert!(!result.https_addr.is_empty());
-            assert!(!result.cert_path.is_empty());
-            assert!(!result.key_path.is_empty());
-        }
-    }
     // pub mod utils {
     //     use super::*;
     //     use handlers::utils;

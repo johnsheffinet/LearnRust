@@ -38,7 +38,7 @@ pub mod handlers {
         }
         
         impl AppConfig {
-            #[trace::instrument(err)]
+            #[instrument(err)]
             pub fn load() -> AppResult<Self> {
                 let config = figment::Figment::new()
                     .merge(figment::providers::Env::raw()
@@ -51,7 +51,7 @@ pub mod handlers {
                 Ok(config)
             }
             
-            #[trace::instrument(err)]
+            #[instrument(err)]
             pub fn validate_path(path: &std::path::PathBuf) -> Result<(), validator::ValidationError> {
                 if path.exists() {
                     Ok(())
@@ -101,7 +101,7 @@ pub mod handlers {
     //     impl TryFrom<RequestParams> for Request {
     //         type Error = SvcError;
             
-    //         #[trace::instrument(err)]
+    //         #[instrument(err)]
     //         fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
     //             let params_uri = params.path
     //                 .parse::<Uri>()
@@ -133,7 +133,7 @@ pub mod handlers {
     //     impl TryFrom<ResponseParams> for Response {
     //         type Error = SvcError;
             
-    //         #[trace::instrument(err)]
+    //         #[instrument(err)]
     //         fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
     //             let params_body = serde_json::to_vec(&params.payload.0)
     //                 .map_err(SvcError::FailedParsePayloadIntoResponseBody)?;

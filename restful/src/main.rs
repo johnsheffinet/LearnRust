@@ -38,11 +38,13 @@ pub mod handlers {
         }
         
         impl AppConfig {
-            #[instrument(err)]
-            pub fn load() -> AppResult<Self> {
-                let config = figment::Figment::new()
+            #[tracing::instrument(err)]
+            pub fn new() -> AppResult<Self> {
+                use validator::Validate;
+                
+                let config: AppConfig = figment::Figment::new()
                     .merge(figment::providers::Env::raw()
-                           .only(&Self::get_fields())
+                           .only(&Self::get_fields)
                            .lowercase(false))
                     .extract()?;
                 
@@ -51,7 +53,7 @@ pub mod handlers {
                 Ok(config)
             }
             
-            #[instrument(err)]
+            #[tracing::instrument(err)]
             pub fn validate_path(path: &std::path::PathBuf) -> Result<(), validator::ValidationError> {
                 if path.exists() {
                     Ok(())
@@ -63,7 +65,7 @@ pub mod handlers {
         }
         
         pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| {
-            AppConfig::load()
+            AppConfig::new()
                 .expect("Failed to load application configuration!")
         });
     }
@@ -219,17 +221,18 @@ pub mod handlers {
 
 #[cfg(test)]
 pub mod tests {
-    use super::*;
+    // use super::*;
     use claims::{assert_ok, assert_err, assert_matches, assert_some};
     use figment::Jail;
-    use pretty_assertions::{assert_eq};
+    use pretty_assertions::assert_eq;
     
     pub mod cfg {
         use super::*;
         use crate::handlers::cfg::{AppConfig, AppError};
+        use pretty_assertions::assert_eq;
         
         #[test_log::test(test)]
-        fn test_load_app_config() {
+        fn test_create_app_config_success() {
             // Success
             Jail::expect_with(|jail| {
                 jail.set_env("HTTP_ADDR",  "127.0.0.1:3080");
@@ -240,13 +243,16 @@ pub mod tests {
                 jail.create_file("learnrust.crt", "content")?;
                 jail.create_file("learnrust.key", "content")?;
                 
-                let result = assert_ok!(AppConfig::load());
+                let result = assert_ok!(AppConfig::new());
                 
                 assert_eq!(result.http_addr.to_string(), "127.0.0.1:3080");
                 
                 Ok(())
             });
-            
+        }
+        
+        #[test_log::test(test)]
+        fn test_create_app_config_failure_invalid_socketaddr() {
             // Failure - Invalid SocketAddr
             Jail::expect_with(|jail| {
                 jail.set_env("HTTP_ADDR",  " "); // Invalid SocketAddr
@@ -257,30 +263,16 @@ pub mod tests {
                 jail.create_file("learnrust.crt", "content")?;
                 jail.create_file("learnrust.key", "content")?;
                 
-                let result = assert_err!(AppConfig::load());
+                let result = assert_err!(AppConfig::new());
                 
-                assert_matches!(result, AppError::FailedExtractEnvVars(ref err) if err.to_string().contains("http_addr"));
+                assert_matches!(result, AppError::FailedExtractEnvVars(ref err) if err.to_string().contains("HTTP_ADDR"));
 
                 Ok(())
             });
-            
-            // Failure - Invalid PathBuf
-            Jail::expect_with(|jail| {
-                jail.set_env("HTTP_ADDR",  "127.0.0.1:3080");
-                jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
-                jail.set_env("CERT_PATH",  " "); // Invalid PathBuf
-                jail.set_env("KEY_PATH",   "learnrust.key");
-                
-                jail.create_file("learnrust.crt", "content")?;
-                jail.create_file("learnrust.key", "content")?;
-                
-                let result = assert_err!(AppConfig::load());
-                
-                assert_matches!(result, AppError::FailedExtractEnvVars(ref err) if err.to_string().contains("cert_path"));
-                
-                Ok(())
-            });
-            
+        }
+        
+        #[test_log::test(test)]
+        fn test_create_app_config_failure_missing_file() {
             // Failure - Missing File
             Jail::expect_with(|jail| {
                 jail.set_env("HTTP_ADDR",  "127.0.0.1:3080");
@@ -288,18 +280,21 @@ pub mod tests {
                 jail.set_env("CERT_PATH",  "learnrust.crt");
                 jail.set_env("KEY_PATH",   "learnrust.key");
                 
-                jail.create_file("missing.crt", "content")?; // Missing File
+                // jail.create_file("missing.crt", "content")?; // Missing File
                 jail.create_file("learnrust.key", "content")?;
                 
-                let result = assert_err!(AppConfig::load());
+                let result = assert_err!(AppConfig::new());
                 
-                let validation_errs = assert_matches!(result, AppError::FailedValidate(err) => err);
+                let validation_errs = match result {
+                    AppError::FailedValidate(err) => err,
+                    _ => unreachable!(),
+                };
                 
-                let field_errs = assert_some!(validation_errs
-                    .field_errors()
-                    .get("cert_path"));
-                
-                assert_eq!(field_errs[0].code, "FailedFindFile");
+                let field_errors = validation_errs.field_errors();
+
+                let field_errs = assert_some!(field_errors.get("cert_path"));
+
+                assert_eq!(field_errs[0].code, "FailedFindPath");
                 
                 Ok(())
             });

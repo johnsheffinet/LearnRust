@@ -60,16 +60,79 @@ pub mod tests {
   use pretty_assertions::assert_eq;
   
   pub mod cfg {
+    use super::*;
+    use crate::handlers::cfg::{AppConfig, AppError, AppResult};
     use figment::Jail;
     
     #[test-log::test(test)]
-    fn test_create_app_config_success() {}
+    fn test_create_app_config_success() {
+      Jail::expect_with(|jail| {
+        jail.clear_env();
+        
+        jail.set_env("HTTP_ADDR",  "127.0.0.1:3080");
+        jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
+        jail.set_env("CERT_PATH",  "learnrust.crt");
+        jail.set_env("KEY_PATH",   "learnrust.key");
+
+        jail.create_file("learnrust.crt", "content")?;
+        jail.create_file("learnrust.key", "content")?;
+
+        let result = assert_ok!(AppConfig::new());
+
+        assert_eq!(result.http_addr.to_string(), "127.0.0.1:3080");
+      });
+    }
+    
     #[test-log::test(test)]
-    fn test_create_app_config_failure_invalid_socketaddr() {}
+    fn test_create_app_config_failure_invalid_socketaddr() {
+      Jail::expect_with(|jail| {
+        jail.clear_env();
+        
+        jail.set_env("HTTP_ADDR",  ""); // Invalid SocketAddr
+        jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
+        jail.set_env("CERT_PATH",  "learnrust.crt");
+        jail.set_env("KEY_PATH",   "learnrust.key");
+
+        jail.create_file("learnrust.crt", "content")?;
+        jail.create_file("learnrust.key", "content")?;
+
+        assert_matches!(AppConfig::new(), AppError::FailedExtractEnvVar);
+      });
+    }
+    
     #[test-log::test(test)]
-    fn test_create_app_config_failure_invalid_pathbuf() {}
+    fn test_create_app_config_failure_invalid_pathbuf() {
+      Jail::expect_with(|jail| {
+        jail.clear_env();
+        
+        jail.set_env("HTTP_ADDR",  "127.0.0.1:3080");
+        jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
+        jail.set_env("CERT_PATH",  "\0"); // Invalid PathBuf
+        jail.set_env("KEY_PATH",   "learnrust.key");
+
+        jail.create_file("learnrust.crt", "content")?;
+        jail.create_file("learnrust.key", "content")?;
+
+        assert_matches!(AppConfig::new(), AppError::FailedExtractEnvVar);
+      });      
+    }
+    
     #[test-log::test(test)]
-    fn test_create_app_config_failure_missing_file() {}
+    fn test_create_app_config_failure_missing_file() {
+      Jail::expect_with(|jail| {
+        jail.clear_env();
+        
+        jail.set_env("HTTP_ADDR",  "127.0.0.1:3080");
+        jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
+        jail.set_env("CERT_PATH",  "learnrust.crt"); // Missing File
+        jail.set_env("KEY_PATH",   "learnrust.key");
+
+        jail.create_file("learnrust.key", "content")?;
+
+        assert_matches!(AppConfig::new(), AppError::FailedValidate);
+      });
+
+    }
   }
 }
 

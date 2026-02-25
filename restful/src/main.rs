@@ -42,7 +42,7 @@ pub mod handlers {
       }
 
       #[tracing::instrument(err)]
-      fn validate_path(path: &std::path::PathBuf) -> Result<(), validate:ValidationError> {
+      fn validate_path(path: &std::path::PathBuf) -> Result<(), validator:ValidationError> {
         if path.exists() {
           Ok(())
         } else {

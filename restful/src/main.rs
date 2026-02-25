@@ -3,10 +3,10 @@ pub mod handlers {
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
       #[error("Failed to extract environment variables!")]
-      FailedExtractEnvVar(#[from] ),
+      FailedExtractEnvVar(#[from] figment::Error),
       
       #[error("Failed to validate application configuration!")]
-      FailedValidateAppCfg(#[from] ),
+      FailedValidateAppCfg(#[from] validator::ValidationError),
       
     }
 
@@ -25,7 +25,15 @@ pub mod handlers {
     impl AppConfig {
       #[tracing::instrument(err)]
       fn new() -> AppResult<Self> {
-        
+        let config = Figment::new()
+          .merge(figment::providers::Env::raw()
+                .only(Self::getfields)
+                .lowercase(false))
+          .extract()?
+
+        config.validate()?
+
+        Ok(config)
       }
 
       #[tracing::instrument(err)]
@@ -41,4 +49,5 @@ pub mod tests {
   pub mod cfg {}
 }
 
+#[tokio::main]
 async fn main() {}

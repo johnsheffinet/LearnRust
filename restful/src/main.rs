@@ -32,7 +32,7 @@ pub mod handlers {
         
         let config = figment::Figment::new()
           .merge(figment::providers::Env::raw()
-                .only(&Self::getfields)
+                .only(&Self::FIELDS)
                 .lowercase(false))
           .extract()?;
 
@@ -57,7 +57,7 @@ pub mod handlers {
 
 #[cfg(test)]
 pub mod tests {
-  use claim::{assert_ok, assert_err};
+  use claim::assert_some;
   use cool_asserts::assert_matches;
   use pretty_assertions::assert_eq;
   
@@ -79,9 +79,13 @@ pub mod tests {
         jail.create_file("learnrust.crt", "content")?;
         jail.create_file("learnrust.key", "content")?;
 
-        assert_matches!(AppConfig::new(), Ok(AppConfig(val) => {
+        let result = AppConfig::new();
+        
+        assert_matches!(result, AppConfig(val) => {
           assert_eq!(val.http_addr.tostring(), "127.0.0.1:3080");
-        }));
+
+        Ok(result)
+        });
       });
     }
     
@@ -98,7 +102,11 @@ pub mod tests {
         jail.create_file("learnrust.crt", "content")?;
         jail.create_file("learnrust.key", "content")?;
 
-        assert_matches!(AppConfig::new(), Err(AppError::FailedExtractEnvVar));
+        let result = AppConfig::new();
+        
+        assert_matches!(result, Err(AppError::FailedExtractEnvVar));
+
+        Ok(result)
       });
     }
     
@@ -115,7 +123,11 @@ pub mod tests {
         jail.create_file("learnrust.crt", "content")?;
         jail.create_file("learnrust.key", "content")?;
 
-        assert_matches!(AppConfig::new(), Err(AppError::FailedExtractEnvVar));
+        let result = AppConfig::new();
+        
+        assert_matches!(AppConfig::new(), AppError::FailedExtractEnvVar);
+
+        Ok(result)
       });      
     }
     
@@ -131,18 +143,19 @@ pub mod tests {
 
         jail.create_file("learnrust.key", "content")?;
 
-        assert_matches!(AppConfig::new(), Err(AppError::FailedValidate(ref errs) => {
+        let result = AppConfig::new();
+        
+        assert_matches!(result, AppError::FailedValidate(ref errs) => {
           let cert_path_err = assert_some!(
             errs
               .field_errors()
-              .get("cert_path")
-              .unwrap;
-          );
+              .get("cert_path"));
           
-          assert_eq!(cert_err[0].code, "FailedFindFile");          
+          assert_eq!(cert_err[0].code, "FailedFindFile");
+
+          Ok(result)
         });
       });
-
     }
   }
 }

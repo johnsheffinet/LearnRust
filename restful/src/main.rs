@@ -50,15 +50,35 @@ pub mod handlers {
         }
       }
     }
-    
-    pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| { AppConfig.new().unwrap() })
   }
 }
 
 #[cfg(test)]
 pub mod tests {
-  pub mod cfg {}
+  use claim::{assert_ok, assert_err};
+  use cool_asserts::assert_matches;
+  use pretty_assertions::assert_eq;
+  
+  pub mod cfg {
+    use figment::Jail;
+    
+    #[test-log::test(test)]
+    fn test_create_app_config_success() {}
+    #[test-log::test(test)]
+    fn test_create_app_config_failure_invalid_socketaddr() {}
+    #[test-log::test(test)]
+    fn test_create_app_config_failure_invalid_pathbuf() {}
+    #[test-log::test(test)]
+    fn test_create_app_config_failure_missing_file() {}
+  }
 }
 
 #[tokio::main]
-async fn main() {}
+async fn main() {
+  use std::sync::LazyLock;
+  use crate::handlers::cfg::AppConfig;
+
+  tracing_subscriber::fmt::init();
+
+  pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| { AppConfig::new().unwrap() });
+}

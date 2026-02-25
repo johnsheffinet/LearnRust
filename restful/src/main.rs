@@ -149,8 +149,7 @@ pub mod tests {
 
 #[tokio::main]
 async fn main() {
-  use std::sync::LazyLock;
-  use crate::handlers::cfg::AppConfig;
-
   tracing_subscriber::fmt::init();
+
+  std::sync::LazyLock::force(&handlers::cfg::CONFIG);
 }

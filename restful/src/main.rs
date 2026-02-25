@@ -50,6 +50,8 @@ pub mod handlers {
         }
       }
     }
+
+    pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| { AppConfig::new().unwrap() });
   }
 }
 
@@ -77,9 +79,9 @@ pub mod tests {
         jail.create_file("learnrust.crt", "content")?;
         jail.create_file("learnrust.key", "content")?;
 
-        let result = assert_ok!(AppConfig::new());
-
-        assert_eq!(result.http_addr.to_string(), "127.0.0.1:3080");
+        assert_matches!(AppConfig::new(), Ok(AppConfig(val) => {
+          assert_eq!(val.http_addr.tostring(), "127.0.0.1:3080");
+        }));
       });
     }
     
@@ -96,7 +98,7 @@ pub mod tests {
         jail.create_file("learnrust.crt", "content")?;
         jail.create_file("learnrust.key", "content")?;
 
-        assert_matches!(AppConfig::new(), AppError::FailedExtractEnvVar);
+        assert_matches!(AppConfig::new(), Err(AppError::FailedExtractEnvVar));
       });
     }
     
@@ -113,7 +115,7 @@ pub mod tests {
         jail.create_file("learnrust.crt", "content")?;
         jail.create_file("learnrust.key", "content")?;
 
-        assert_matches!(AppConfig::new(), AppError::FailedExtractEnvVar);
+        assert_matches!(AppConfig::new(), Err(AppError::FailedExtractEnvVar));
       });      
     }
     
@@ -129,7 +131,16 @@ pub mod tests {
 
         jail.create_file("learnrust.key", "content")?;
 
-        assert_matches!(AppConfig::new(), AppError::FailedValidate);
+        assert_matches!(AppConfig::new(), Err(AppError::FailedValidate(ref errs) => {
+          let cert_path_err = assert_some!(
+            errs
+              .field_errors()
+              .get("cert_path")
+              .unwrap;
+          );
+          
+          assert_eq!(cert_err[0].code, "FailedFindFile");          
+        });
       });
 
     }
@@ -142,6 +153,4 @@ async fn main() {
   use crate::handlers::cfg::AppConfig;
 
   tracing_subscriber::fmt::init();
-
-  pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| { AppConfig::new().unwrap() });
 }

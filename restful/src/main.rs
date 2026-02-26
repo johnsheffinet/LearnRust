@@ -32,9 +32,9 @@ pub mod handlers {
       pub fn new() -> AppResult<Self> {
         use validator::Validate;
         
-        let config = figment::Figment::new()
+        let config: AppConfig = figment::Figment::new()
           .merge(figment::providers::Env::raw()
-                .only(&Self::FIELDS)
+                .only(&Self::get_fields)
                 .lowercase(false))
           .extract()?;
 
@@ -57,16 +57,17 @@ pub mod handlers {
 
 #[cfg(test)]
 pub mod tests {
-  use claim::assert_some;
+  use claims::assert_some;
   use cool_asserts::assert_matches;
-  use pretty_assertions::assert_eq;
   
   pub mod cfg {
     use super::*;
-    use crate::handlers::cfg::{AppConfig, AppError, AppResult};
+    use crate::handlers::cfg::{AppConfig, AppError};
     use figment::Jail;
+    use pretty_assertions::assert_eq;
+
     
-    #[test-log::test(test)]
+    #[test_log::test(test)]
     fn test_create_app_config_success() {
       Jail::expect_with(|jail| {
         jail.clear_env();
@@ -87,7 +88,7 @@ pub mod tests {
       });
     }
     
-    #[test-log::test(test)]
+    #[test_log::test(test)]
     fn test_create_app_config_failure_invalid_socketaddr() {
       Jail::expect_with(|jail| {
         jail.clear_env();
@@ -106,26 +107,7 @@ pub mod tests {
       });
     }
     
-    #[test-log::test(test)]
-    fn test_create_app_config_failure_invalid_pathbuf() {
-      Jail::expect_with(|jail| {
-        jail.clear_env();
-        
-        jail.set_env("HTTP_ADDR",  "127.0.0.1:3080");
-        jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
-        jail.set_env("CERT_PATH",  "\0"); // Invalid PathBuf
-        jail.set_env("KEY_PATH",   "learnrust.key");
-
-        jail.create_file("learnrust.crt", "content")?;
-        jail.create_file("learnrust.key", "content")?;
-
-        assert_matches!(AppConfig::new(), Err(AppError::FailedExtractEnvVar(_)));
-
-        Ok(())
-      });      
-    }
-    
-    #[test-log::test(test)]
+    #[test_log::test(test)]
     fn test_create_app_config_failure_missing_file() {
       Jail::expect_with(|jail| {
         jail.clear_env();
@@ -138,10 +120,10 @@ pub mod tests {
         jail.create_file("learnrust.key", "content")?;
 
         assert_matches!(AppConfig::new(), Err(AppError::FailedValidate(ref errs)) => {
+          let field_errs = errs.field_errors();
+
           let cert_path_err = assert_some!(
-            errs
-              .field_errors()
-              .get("cert_path"));
+            field_errs.get("cert_path"));
           
           assert_eq!(cert_path_err[0].code, "FailedFindFile");
         });

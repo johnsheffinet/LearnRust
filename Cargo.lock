@@ -559,6 +559,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cool_asserts"
+version = "2.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aefc127fad829eb36edd748660d3ee55490889bc54005cef71d2cd6e25ca2bb2"
+dependencies = [
+ "indent_write",
+]
+
+[[package]]
 name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1204,6 +1213,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "indent_write"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cfe9645a18782869361d9c8732246be7b410ad4e919d3609ebabdac00ba12c3"
+
+[[package]]
 name = "indexmap"
 version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1823,6 +1838,7 @@ dependencies = [
  "axum_thiserror",
  "chrono",
  "claims",
+ "cool_asserts",
  "figment",
  "get_fields",
  "http-body-util",
@@ -1864,7 +1880,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2163,7 +2179,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

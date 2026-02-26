@@ -1,10 +1,12 @@
 pub mod handlers {
   pub mod cfg {
     use std::sync::LazyLock;
+
+    pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| { AppConfig::new().unwrap() });
     
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
-      #[error("Failed to extract environment variables! {0}")]
+      #[error("Failed to extract environment variable! {0}")]
       FailedExtractEnvVar(#[from] figment::Error),
       
       #[error("{0}")]
@@ -42,7 +44,7 @@ pub mod handlers {
       }
 
       #[tracing::instrument(err)]
-      fn validate_path(path: &std::path::PathBuf) -> Result<(), validator:ValidationError> {
+      pub fn validate_path(path: &std::path::PathBuf) -> Result<(), validator::ValidationError> {
         if path.exists() {
           Ok(())
         } else {
@@ -50,8 +52,6 @@ pub mod handlers {
         }
       }
     }
-
-    pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| { AppConfig::new().unwrap() });
   }
 }
 
@@ -79,13 +79,11 @@ pub mod tests {
         jail.create_file("learnrust.crt", "content")?;
         jail.create_file("learnrust.key", "content")?;
 
-        let result = AppConfig::new();
-        
-        assert_matches!(result, AppConfig(val) => {
-          assert_eq!(val.http_addr.tostring(), "127.0.0.1:3080");
-
-        Ok(result)
+        assert_matches!(AppConfig::new(), Ok(val) => {
+          assert_eq!(val.http_addr.to_string(), "127.0.0.1:3080");
         });
+
+        Ok(())
       });
     }
     
@@ -102,11 +100,9 @@ pub mod tests {
         jail.create_file("learnrust.crt", "content")?;
         jail.create_file("learnrust.key", "content")?;
 
-        let result = AppConfig::new();
-        
-        assert_matches!(result, Err(AppError::FailedExtractEnvVar));
+        assert_matches!(AppConfig::new(), Err(AppError::FailedExtractEnvVar(_)));
 
-        Ok(result)
+        Ok(())
       });
     }
     
@@ -123,11 +119,9 @@ pub mod tests {
         jail.create_file("learnrust.crt", "content")?;
         jail.create_file("learnrust.key", "content")?;
 
-        let result = AppConfig::new();
-        
-        assert_matches!(AppConfig::new(), AppError::FailedExtractEnvVar);
+        assert_matches!(AppConfig::new(), Err(AppError::FailedExtractEnvVar(_)));
 
-        Ok(result)
+        Ok(())
       });      
     }
     
@@ -143,18 +137,16 @@ pub mod tests {
 
         jail.create_file("learnrust.key", "content")?;
 
-        let result = AppConfig::new();
-        
-        assert_matches!(result, AppError::FailedValidate(ref errs) => {
+        assert_matches!(AppConfig::new(), Err(AppError::FailedValidate(ref errs)) => {
           let cert_path_err = assert_some!(
             errs
               .field_errors()
               .get("cert_path"));
           
-          assert_eq!(cert_err[0].code, "FailedFindFile");
-
-          Ok(result)
+          assert_eq!(cert_path_err[0].code, "FailedFindFile");
         });
+
+        Ok(())
       });
     }
   }

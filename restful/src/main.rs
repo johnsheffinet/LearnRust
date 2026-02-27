@@ -53,6 +53,18 @@ pub mod handlers {
       }
     }
   }
+  pub mod utils {
+    pub enum AppError {}
+
+    pub type AppResult<T> = Result<T, AppError>;
+
+    pub struct RequestParams {}
+
+    impl TryFrom<RequestParams> for Request {}
+
+    impl <S> FromRequest<S> for RequestParams 
+      where S: Send + Sync {}
+  }
 }
 
 #[cfg(test)]

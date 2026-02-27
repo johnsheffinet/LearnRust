@@ -55,20 +55,66 @@ pub mod handlers {
   }
   pub mod utils {
     #[derive(Debug, thiserror::Error)]
-    pub enum AppError {}
+    pub enum AppError {
+      #[error("Failed to ! {0}")]
+      Failed(),
+      
+    }
 
     pub type AppResult<T> = Result<T, AppError>;
 
-    #[derive(Debug, serde::Deserialize)]
-    pub struct RequestParams {}
+    pub struct RequestParams {
+      method: Method,
+      path: Path<String>,
+      query: Query<String>,
+      version: Version,
+      headers: HeaderMap,
+      payload: Json<Value>,
+    }
 
-    impl TryFrom<RequestParams> for Request {}
+    impl TryFrom<RequestParams> for Request {
+      type Error = AppError;
+
+      #[tracing::instrument(err)]
+      pub fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
+        let request = Request.builder()
+          .method()
+          .uri()
+          .version()
+          .body()
+          .map_err()?;
+
+        request.mut_headers().extend();
+
+        Ok(request)
+      }
+    }
 
     impl <S> FromRequest<S> for RequestParams 
-      where S: Send + Sync {}
+      where S: Send + Sync {
+        type Rejection = AppError;
 
-    #[derive(Debug, serde::Deserialize)]
-    pub struct ResponseParams {}
+        #[tracing::instrument(err)]
+        pub fn from_request(request: Request) -> Result<Self, Self::Rejection> {
+          let params = RequestParams {
+            method: ,
+            path: ,
+            query: ,
+            version: ,
+            headers: ,
+            payload: ,
+          }
+
+          Ok(params)
+        }
+      }
+
+    pub struct ResponseParams {
+      version: Version,
+      status: StatusCode,
+      headers: HeaderMap,
+      payload: Json<Value>,
+    }
 
     impl TryFrom<ResponseParams> for Response {}
 

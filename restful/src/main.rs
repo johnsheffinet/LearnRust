@@ -54,16 +54,25 @@ pub mod handlers {
     }
   }
   pub mod utils {
+    #[derive(Debug, thiserror::Error)]
     pub enum AppError {}
 
     pub type AppResult<T> = Result<T, AppError>;
 
+    #[derive(Debug, serde::Deserialize)]
     pub struct RequestParams {}
 
     impl TryFrom<RequestParams> for Request {}
 
     impl <S> FromRequest<S> for RequestParams 
       where S: Send + Sync {}
+
+    #[derive(Debug, serde::Deserialize)]
+    pub struct ResponseParams {}
+
+    impl TryFrom<ResponseParams> for Response {}
+
+    impl FromResponse<Response> for ResponseParams {}
   }
 }
 

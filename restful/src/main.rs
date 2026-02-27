@@ -57,7 +57,7 @@ pub mod handlers {
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
       #[error("Failed to build request! {0}")]
-      FailedBuildRequest(serde_json::Error),
+      FailedBuildRequest(axum::http::Error),
       
     }
 

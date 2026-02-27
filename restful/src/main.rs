@@ -56,8 +56,8 @@ pub mod handlers {
   pub mod utils {
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
-      #[error("Failed to ! {0}")]
-      Failed(),
+      #[error("Failed to build request! {0}")]
+      FailedBuildRequest(serde_json::Error),
       
     }
 
@@ -77,14 +77,22 @@ pub mod handlers {
 
       #[tracing::instrument(err)]
       pub fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
+        let params_uri = if params.query.0.is_empty() {
+            params.path.0
+        } else {
+            format!("{}?{}", params.path.0, params.query.0)
+        };
+        
+        let params_body = serde_json::to_vec(&params.payload.0);
+        
         let request = Request.builder()
-          .method()
-          .uri()
-          .version()
-          .body()
-          .map_err()?;
+          .method(params.method)
+          .uri(params_uri)
+          .version(params.version)
+          .body(Body::from(params_body))
+          .map_err(AppError::FailedBuildRequest)?;
 
-        request.mut_headers().extend();
+        request.headers_mut().extend(params.headers);
 
         Ok(request)
       }

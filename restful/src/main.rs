@@ -54,8 +54,18 @@ pub mod handlers {
     }
   }
   pub mod utils {
+    use axum::{
+        body::{/*to_bytes,*/ Body},
+        extract::Request,
+        http::{header::HeaderMap, Method, StatusCode, Uri, Version},
+        /*response::{IntoResponse, Response},*/
+        Json/*, Router,*/
+    };
+    use serde_json::Value;
+    
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
+      #[error("Failed to serialize payload parameter into request body")]FailedSerializePayloadIntoBody
       #[error("Failed to build request! {0}")]
       FailedBuildRequest(axum::http::Error),
       
@@ -64,12 +74,12 @@ pub mod handlers {
     pub type AppResult<T> = Result<T, AppError>;
 
     pub struct RequestParams {
-      method: Method,
-      path: Path<String>,
-      query: Query<String>,
-      version: Version,
-      headers: HeaderMap,
-      payload: Json<Value>,
+      pub method: Method,
+      pub path: String,
+      pub query: String,
+      pub version: Version,
+      pub headers: HeaderMap,
+      pub payload: Json<Value>,
     }
 
     impl TryFrom<RequestParams> for Request {
@@ -83,9 +93,9 @@ pub mod handlers {
             format!("{}?{}", params.path.0, params.query.0)
         };
         
-        let params_body = serde_json::to_vec(&params.payload.0);
+        let params_body = serde_json::to_vec(&params.payload.0).mapp_err(AppError::FailedSerializePayloadIntoBody);
         
-        let request = Request.builder()
+        let request = Request::builder()
           .method(params.method)
           .uri(params_uri)
           .version(params.version)

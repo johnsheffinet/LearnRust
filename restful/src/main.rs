@@ -94,7 +94,7 @@ pub mod handlers {
         let path_and_query = if params.query.is_empty() {
           params.path
         } else {
-            format!("{}?{}", params.path, params.query)
+          format!("{}?{}", params.path, params.query)
         };
 
         let params_uri = Uri::builder()

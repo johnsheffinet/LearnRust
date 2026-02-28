@@ -125,12 +125,14 @@ pub mod handlers {
         type Rejection = AppError;
 
         #[tracing::instrument(err)]
-        pub fn from_request(request: Request) -> Result<Self, Self::Rejection> {
+        pub fn from_request(request: &mut Request) -> Result<Self, Self::Rejection> {
+          let request_path = request::extract_parts::Path<String>
+            .await
           let params = RequestParams {
-            method: ,
-            path: ,
+            method: request.method(),
+            path: request::extract_parts::Path<String>,
             query: ,
-            version: ,
+            version: request.version(),
             headers: ,
             payload: ,
           }

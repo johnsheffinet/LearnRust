@@ -126,18 +126,21 @@ pub mod handlers {
 
         #[tracing::instrument(err)]
         pub fn from_request(request: &mut Request) -> Result<Self, Self::Rejection> {
-          let request_path = request::extract_parts::Path<String>
-            .await
-          let params = RequestParams {
-            method: request.method(),
-            path: request::extract_parts::Path<String>,
-            query: ,
-            version: request.version(),
-            headers: ,
-            payload: ,
+          let method = request.method().clone();
+          let path = request.uri().path().to_string();
+          let query = request.uri().query();
+          let version = request.version();
+          let headers = std::mem::take(request.headers_mut());
+          let payload = request::extractor::<Json<Value>>().await?;
+          
+          RequestParams {
+            method,
+            path,
+            query,
+            version,
+            headers,
+            payload,
           }
-
-          Ok(params)
         }
       }
 

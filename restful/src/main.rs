@@ -126,11 +126,6 @@ pub mod handlers {
 
         #[tracing::instrument(err)]
         pub fn from_request(request: Request) -> Result<Self, Self::Rejection> {
-          let method = request.method().clone();
-          let path = request.uri().path().to_string();
-          let query = request.uri().query();
-          let version = request.version();
-          let headers = std::
           let params = RequestParams {
             method: ,
             path: ,

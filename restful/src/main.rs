@@ -53,96 +53,95 @@ pub mod handlers {
       }
     }
   }
-  pub mod utils {
-    use axum::{
-      body::{/*to_bytes,*/ Body},
-      extract::Request,
-      http::{header::HeaderMap, Method, StatusCode, Uri, Version},
-      /*response::{IntoResponse, Response},*/
-      Json/*, Router,*/
-    };
-    use serde_json::Value;
+pub mod utils {
+  use axum::{
+    async_trait,
+    body::Body,
+    extract::{FromRequest, Request, Json},
+    http::{header::HeaderMap, Method, Uri, Version},
+  };
+  use serde_json::Value;
+
+  #[derive(Debug, thiserror::Error)]
+  pub enum AppError {
+    #[error("Failed to parse path and query parameters into request uri! {0}")]
+    FailedParsePathQueryIntoUri(#[from] axum::http::uri::InvalidUri),
     
-    #[derive(Debug, thiserror::Error)]
-    pub enum AppError {
-      #[error("Failed to parse path and query parameters into request uri! {0}")]
-      FailedParsePathQueryIntoUri(axum::http::uri::InvalidUri),
-      
-      #[error("Failed to serialize payload parameter into request body! {0}")]
-      FailedSerializePayloadIntoBody(serde_json::Error),
-      
-      #[error("Failed to build request! {0}")]
-      FailedBuildRequest(axum::http::Error),
-    }
-
-    pub type AppResult<T> = Result<T, AppError>;
-
-    pub struct RequestParams {
-      pub method: Method,
-      pub path: String,
-      pub query: String,
-      pub version: Version,
-      pub headers: HeaderMap,
-      pub payload: Value,
-    }
-
-    impl TryFrom<RequestParams> for Request {
-      type Error = AppError;
+    #[error("Failed to serialize payload parameter into request body! {0}")]
+    FailedSerializePayloadIntoBody(#[from] serde_json::Error),
     
-      #[tracing::instrument(skip(params), err)]
-      fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
-        let path_and_query = if params.query.is_empty() {
-          params.path
-        } else {
-          format!("{}?{}", params.path, params.query)
-        };
+    #[error("Failed to build request! {0}")]
+    FailedBuildRequest(#[from] axum::http::Error),
 
-        let params_uri = Uri::builder()
-          .path_and_query(path_and_query)
-          .build()
-          .map_err(AppError::FailedParsePathQueryIntoUri)?;
-
-        let params_body = serde_json::to_vec(&params.payload)
-          .map_err(AppError::FailedSerializePayloadIntoBody)?;
-
-        let mut builder = Request::builder()
-          .method(params.method)
-          .uri(params_uri)
-          .version(params.version);
-
-        if let Some(headers) = builder.headers_mut() {
-          headers.extend(params.headers);
-        }
-
-        builder
-          .body(Body::from(params_body))
-          .map_err(AppError::FailedBuildRequest)
-      }
+    #[error("Failed to extract request body into payload parameter! {0}")]
+    FailedExtractBodyIntoPayload(#[from] axum::extract::rejection::JsonRejection),
+  }
+  
+  #[derive(Debug, Clone)]
+  pub struct RequestParams {
+    pub method: Method,
+    pub path: String,
+    pub query: String,
+    pub version: Version,
+    pub headers: HeaderMap,
+    pub payload: Value,
   }
 
-    impl <S> FromRequest<S> for RequestParams 
-      where S: Send + Sync {
-        type Rejection = AppError;
+  impl TryFrom<RequestParams> for Request {
+    type Error = AppError;
 
-        #[tracing::instrument(err)]
-        pub fn from_request(request: &mut Request) -> Result<Self, Self::Rejection> {
-          let method = request.method().clone();
-          let path = request.uri().path().to_string();
-          let query = request.uri().query();
-          let version = request.version();
-          let headers = std::mem::take(request.headers_mut());
-          let payload = request::extractor::<Json<Value>>().await?;
-          
-          RequestParams {
-            method,
-            path,
-            query,
-            version,
-            headers,
-            payload,
-          }
-        }
+    fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
+      let path_and_query = if params.query.is_empty() {
+        params.path
+      } else {
+        format!("{}?{}", params.path, params.query)
+      };
+      
+      let uri = Uri::builder()
+        .path_and_query(path_and_query)
+        .build()?;
+      
+      let bytes = serde_json::to_vec(&params.payload)?;
+      
+      let mut builder = Request::builder()
+        .method(params.method)
+        .uri(uri)
+        .version(params.version);
+
+      if let Some(headers) = builder.headers_mut() {
+        headers.extend(params.headers);
       }
+      
+      builder.body(Body::from(bytes))
+    }
+  }
+
+  #[async_trait]
+  impl<S> FromRequest<S> for RequestParams 
+  where 
+    S: Send + Sync 
+    {
+      type Rejection = AppError;
+
+      #[tracing::instrument(skip_all, err)]
+      async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let method = req.method().clone();
+        let uri = req.uri().clone();
+        let version = req.version();
+        let headers = req.headers().clone();
+
+        let Json(payload) = Json::<Value>::from_request(req, state).await?
+          
+        Ok(RequestParams {
+          method,
+          path: uri.path().to_string(),
+          query: uri.query().unwrap_or("").to_string(),
+          version,
+          headers,
+          payload,
+        })
+      }
+    }
 
     pub struct ResponseParams {
       version: Version,

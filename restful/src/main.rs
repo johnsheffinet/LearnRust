@@ -134,19 +134,15 @@ pub mod handlers {
 
             #[tracing::instrument(skip_all, err)]
             async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
-                let method = req.method().clone();
                 let uri = req.uri().clone();
-                let version = req.version();
-                let headers = req.headers().clone();
-
                 let Json(payload) = Json::<Value>::from_request(req, state).await?;
 
                 Ok(RequestParams {
-                    method,
+                    method: req.method().clone(),
                     path: uri.path().to_string(),
                     query: uri.query().unwrap_or("").to_string(),
-                    version,
-                    headers,
+                    version: req.version(),
+                    headers: req.headers().clone(),
                     payload,
                 })
             }
@@ -154,7 +150,7 @@ pub mod handlers {
 
         pub mod response {
             use axum::{
-                body::{Body, to_bytes},
+                body::{Self, Body},
                 response::{Response, Json},
                 http::{StatusCode, Version, header::HeaderMap},
             };
@@ -162,17 +158,14 @@ pub mod handlers {
             
             #[derive(Debug, thiserror::Error)]
             pub enum AppError {
-                #[error("Failed to serialize payload parameter into response body! {0}")]
-                FailedSerializePayloadIntoBody(#[from] serde_json::Error),
+                #[error("Failed to serialize payload parameter! {0}")]
+                FailedSerializePayload(#[from] serde_json::Error),
     
                 #[error("Failed to build response! {0}")]
                 FailedBuildResponse(#[from] axum::http::Error),
     
-                #[error("Failed to extract response body into bytes! {0}")]
-                FailedExtractBodyIntoPayload(#[from] axum::http::Error),
-
-                #[error("Failed to serialize response body into payload parameter! {0}")]
-                FailedExtractBodyIntoPayload(#[from] axum::http::Error),
+                #[error("Failed to extract bytes from response body! {0}")]
+                FailedExtractBytes(#[from] axum::Error),
             }
 
             type AppResult<T> = Result<T, AppError>;
@@ -190,8 +183,6 @@ pub mod handlers {
                 type Error = AppError;
             
                 fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
-                    let bytes = serde_json::to_vec(&params.payload)?;
-            
                     let mut builder = Response::builder()
                         .version(params.version)
                         .status(params.status);
@@ -200,26 +191,22 @@ pub mod handlers {
                         headers.extend(params.headers);
                     }
             
-                    builder.body(Body::from(bytes))
+                    let bytes = serde_json::to_vec(&params.payload)?;
+
+                    Ok(builder.body(Body::from(bytes))?)
                  }
             }
             
             impl ResponseParams {
                 #[tracing::instrument(skip_all, err)]
                 pub async fn from_response(res: Response) -> Result<Self, AppError> {
-                    let version = res.version();
-                    let status = res.status();
-                    let headers = res.headers().clone();
-            
-                    let bytes = to_bytes(res.into_body(), 10 * 1024 * 1024).await?;
-            
-                    let payload: Value = serde_json::from_slice(&bytes)?;
+                    let bytes = body::to_bytes(res.into_body(), usize::MAX).await?;
             
                     Ok(ResponseParams {
-                        version,
-                        status,
-                        headers,
-                        payload,
+                        version: res.version(),
+                        status:  res.status(),
+                        headers: res.headers().clone(),
+                        payload: serde_json::from_slice(&bytes)?,
                     })
                 }
             }

@@ -75,15 +75,19 @@ pub mod handlers {
         #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
         pub enum AppError {
             #[error("Failed to build request uri from path and query parameters! {0}")]
+            #[status(StatusCode::BAD_REQUEST)]
             FailedBuildUri(#[from] axum::http::uri::InvalidUri),
             
             #[error("Failed to serialize payload parameter! {0}")]
+            #[status(StatusCode::BAD_REQUEST)]
             FailedSerializePayload(#[from] serde_json::Error),
             
             #[error("Failed to build request! {0}")]
+            #[status(StatusCode::BAD_REQUEST)]
             FailedBuildRequest(#[from] axum::http::Error),
             
             #[error("Failed to extract payload parameter from request body! {0}")]
+            #[status(StatusCode::BAD_REQUEST)]
             FailedExtractPayload(#[from] axum::extract::rejection::JsonRejection),
         }
         

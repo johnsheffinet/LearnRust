@@ -28,6 +28,7 @@ tracing-subscriber = "0.3.22" # cargo add tracing-subscriber
 validator = { version = "0.20.0", features = ["derive"] } # cargo add validator --features derive
 
 [dev-dependencies]
+assert-json-diff = "2.0.2"
 claims = "0.8.0" # cargo add claims --dev
 cool_asserts = "2.0.4" # cargo add cool_asserts --dev
 pretty_assertions = "1.4.1" # cargo add pretty_assertions --dev

@@ -313,7 +313,32 @@ pub mod tests {
         use pretty_assertions::assert_eq;
 
         #[test-log::test(tokio::test)]
-        async fn test_create_request_from_params_success() {}
+        async fn test_create_request_from_params_success() {
+            let expected_params = RequestParams {
+                method: Method::GET,
+                path: "/".to_string(),
+                query: "".to_string(),
+                version: Version::HTTP_11,
+                headers: HeaderMap::new(),
+                payload: json!({}),
+            };
+
+            let req = expectedparams
+                .clone()
+                .try_into()
+                .expect("Failed to create request from request parameters!");
+            
+            let actual_params = RequestParams::from_request(req, &())
+                .await
+                .expect("Failed to create request parameters from request!");
+
+            assert_eq!(actual_params.method, expected_params.method);
+            assert_eq!(actual_params.method, expected_params.method);
+            assert_eq!(actual_params.method, expected_params.method);
+            assert_eq!(actual_params.method, expected_params.method);
+            assert_eq!(actual_params.method, expected_params.method);
+            assert_eq!(actual_params.method, expected_params.method);
+        }
 
         #[test-log::test(tokio::test)]
         async fn test_create_request_from_params_failure_invalid_path() {}

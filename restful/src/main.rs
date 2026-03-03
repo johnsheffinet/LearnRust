@@ -339,7 +339,7 @@ pub mod tests {
             assert_eq!(actual_params.version, expected_params.version, "Failed to match version!");
             
             for (key, value) in expected_params.headers.iter() {
-                 assert_eq!(actual_params.get(key), Some(value), "Failed to match '{}' header!", key);
+                 assert_eq!(actual_params.headers.get(key), Some(value), "Failed to match '{}' header!", key);
             }
             
             assert_json_eq!(actual_params.payload, expected_params.payload, "Failed to match payload!");

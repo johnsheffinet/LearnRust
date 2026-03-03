@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 ammonia = "4.1.2" # cargo add ammonia
+async-trait = "0.1.89"
 axum = "0.8.8" # cargo add axum
 axum_csrf = "0.11.0" # cargo add axum-csrf
 axum-governor = "1.0.3" # cargo add axum-governor
@@ -27,7 +28,6 @@ tower-http = { version = "0.6.8", features = ["cors", "limit", "timeout", "trace
 tracing = { version = "0.1.44", features = ["attributes"] } # cargo add tracing --features attributes
 tracing-subscriber = "0.3.22" # cargo add tracing-subscriber
 validator = { version = "0.20.0", features = ["derive"] } # cargo add validator --features derive
-async-trait = "0.1.89"
 
 [dev-dependencies]
 claims = "0.8.0" # cargo add claims --dev

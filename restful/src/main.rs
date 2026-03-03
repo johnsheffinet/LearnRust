@@ -64,8 +64,8 @@ pub mod handlers {
         }
     }
     pub mod request {
+        use async_trait::async_trait;
         use axum::{
-            async_trait,
             body::Body,
             extract::{FromRequest, Json, Request},
             http::{header::HeaderMap, Method, Uri, Version},

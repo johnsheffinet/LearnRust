@@ -91,9 +91,9 @@ pub mod handlers {
         
         #[derive(Debug, Clone)]
         pub struct RequestParams {
-            pub method: Method,
-            pub path: String,
-            pub query: String,
+            pub method:  Method,
+            pub path:    String,
+            pub query:   String,
             pub version: Version,
             pub headers: HeaderMap,
             pub payload: Value,            
@@ -109,6 +109,7 @@ pub mod handlers {
                 } else {
                     format!("{}?{}", params.path, params.query)
                 };
+                
                 let params_uri = Uri::builder()
                     .path_and_query(path_and_query)
                     .build()?; // FailedBuildUri(#[from] axum::http::uri::InvalidUri)
@@ -123,8 +124,10 @@ pub mod handlers {
                 }
                 
                 let bytes = serde_json::to_vec(&params.payload)?; // FailedSerializePayload(#[from] serde_json::Error)
-                                
-                builder.body(Body::from(bytes)) // FailedBuildRequest(#[from] axum::http::Error)
+                
+                builder
+                    .body(Body::from(bytes))
+                    .map_err(AppError::FailedBuildRequest)// FailedBuildRequest(#[from] axum::http::Error)                
             }
         }
 
@@ -151,72 +154,76 @@ pub mod handlers {
             }
         }
     }
-    pub mod response {}
-    pub mod utils {
-        pub mod response {
-            use axum::{
-                body::{Self, Body},
-                response::{Response, Json},
-                http::{StatusCode, Version, header::HeaderMap},
-            };
-            use serde_json::Value;
+    pub mod response {
+        use axum::{
+            body::{Body, to_bytes},
+            response::Response,
+            http::{header::HeaderMap, StatusCode, Version},
+        };
+        use serde_json::Value;
+        
+        #[derive(Debug, thiserror::Error)]
+        pub enum AppError {
+            #[error("Failed to serialize payload parameter! {0}")]
+            FailedSerializePayload(#[from] serde_json::Error),
             
-            #[derive(Debug, thiserror::Error)]
-            pub enum AppError {
-                #[error("Failed to serialize payload parameter! {0}")]
-                FailedSerializePayload(#[from] serde_json::Error),
-    
-                #[error("Failed to build response! {0}")]
-                FailedBuildResponse(#[from] axum::http::Error),
-    
-                #[error("Failed to extract bytes from response body! {0}")]
-                FailedExtractBytes(#[from] axum::Error),
-            }
-
-            type AppResult<T> = Result<T, AppError>;
-    
-            #[derive(Debug, Clone)]
-            pub struct ResponseParams {
-                pub version: Version,
-                pub status: StatusCode,
-                pub headers: HeaderMap,
-                pub payload: Value,
-            }
+            #[error("Failed to build response! {0}")]
+            FailedBuildResponse(#[from] axum::http::Error),
+            
+            #[error("Failed to extract bytes from response body! {0}")]
+            FailedExtractBytes(#[from] axum::Error),
+        }
+        
+        pub type AppResult<T> = Result<T, AppError>;
+        
+        #[derive(Debug, Clone)]
+        pub struct ResponseParams {
+            pub version: Version,
+            pub status:  StatusCode,
+            pub headers: HeaderMap,
+            pub payload: Value,
+        }
+        
+        impl TryFrom<ResponseParams> for Response {
+            type Error = AppError;
             
             #[tracing::instrument(skip_all, err)]
-            impl TryFrom<ResponseParams> for Response {
-                type Error = AppError;
-            
-                fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
-                    let mut builder = Response::builder()
-                        .version(params.version)
-                        .status(params.status);
-            
-                    if let Some(headers) = builder.headers_mut() {
-                        headers.extend(params.headers);
-                    }
-            
-                    let bytes = serde_json::to_vec(&params.payload)?;
-
-                    Ok(builder.body(Body::from(bytes))?)
-                 }
-            }
-            
-            impl ResponseParams {
-                #[tracing::instrument(skip_all, err)]
-                pub async fn from_response(res: Response) -> Result<Self, AppError> {
-                    let bytes = body::to_bytes(res.into_body(), usize::MAX).await?;
-            
-                    Ok(ResponseParams {
-                        version: res.version(),
-                        status:  res.status(),
-                        headers: res.headers().clone(),
-                        payload: serde_json::from_slice(&bytes)?,
-                    })
+            fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
+                let mut builder = Response::builder()
+                    .version(params.version)
+                    .status(params.status);
+                
+                if let Some(headers) = builder.headers_mut() {
+                    headers.extend(params.headers);
                 }
+                
+                let bytes = serde_json::to_vec(&params.payload)?; // FailedSerializePayload(#[from] serde_json::Error)
+                     
+                builder
+                    .body(Body::from(bytes))
+                    .map_err(AppError::FailedBuildResponse)// FailedBuildResponse(#[from] axum::http::Error)                
             }
-        }        
+        }
+        
+        impl ResponseParams {
+            #[tracing::instrument(skip_all, err)]
+            pub async fn from_response(res: Response) -> AppResult<Self> {
+                let version = res.version();
+                let status = res.status();
+                let headers = res.headers().clone();
+                let bytes = to_bytes(res.into_body(), 2 * 1024 * 1024).await?; // FailedExtractBytes(#[from] axum::Error)
+                let payload = serde_json::from_slice(&bytes)?; // FailedSerializePayload(#[from] serde_json::Error)
+                
+                Ok(ResponseParams {
+                    version,
+                    status,
+                    headers,
+                    payload,
+                })                
+            }
+        }
     }
+    pub mod utils {}
 }
             
 #[cfg(test)]

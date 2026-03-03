@@ -77,7 +77,7 @@ pub mod handlers {
             #[status(StatusCode::BAD_REQUEST)]
             FailedBuildUri(#[from] axum::http::uri::InvalidUri),
 
-            #[error("Failed to serialize payload parameter! {0}")]
+            #[error("Failed to serialize payload parameter into request body! {0}")]
             #[status(StatusCode::BAD_REQUEST)]
             FailedSerializePayload(#[from] serde_json::Error),
 
@@ -169,7 +169,7 @@ pub mod handlers {
 
         #[derive(Debug, thiserror::Error)]
         pub enum AppError {
-            #[error("Failed to serialize payload parameter! {0}")]
+            #[error("Failed to serialize payload parameter into! {0}")]
             FailedSerializePayload(#[from] serde_json::Error),
 
             #[error("Failed to build response! {0}")]
@@ -306,6 +306,30 @@ pub mod tests {
                 Ok(())
             });
         }
+    }
+    pub mod request {
+        use super::*;
+        use crate::handlers::request::{AppError, AppResult, RequestParams};
+        use pretty_assertions::assert_eq;
+
+        async fn test_create_request_from_params_success() {}
+        async fn test_create_request_from_params_failure_invalid_path() {}
+        async fn test_create_request_from_params_failure_invalid_query() {}
+        async fn test_create_request_from_params_failure_invalid_payload() {}
+        async fn test_create_params_from_request_success() {}
+        async fn test_create_params_from_request_failure_invalid_body() {}
+    }
+    pub mod response {
+        use super::*;
+        use crate::handlers::response::{AppError, AppResult, ResponseParams};
+        use pretty_assertions::assert_eq;
+        
+    }
+    pub mod router {
+        use super::*;
+        use crate::handlers::router;
+        use pretty_assertions::assert_eq;
+        
     }
 }
 

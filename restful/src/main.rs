@@ -92,7 +92,7 @@ pub mod handlers {
 
         pub type AppResult<T> = Result<T, AppError>;
 
-        #[derive(Debug, Clone)]
+        #[derive(Debug, Clone, PartialEq)]
         pub struct RequestParams {
             pub method: Method,
             pub path: String,
@@ -181,7 +181,7 @@ pub mod handlers {
 
         pub type AppResult<T> = Result<T, AppError>;
 
-        #[derive(Debug, Clone)]
+        #[derive(Debug, Clone, PartialEq)]
         pub struct ResponseParams {
             pub version: Version,
             pub status: StatusCode,
@@ -333,16 +333,7 @@ pub mod tests {
                 .await
                 .expect("Failed to create request parameters from request!");
 
-            assert_eq!(actual_params.method,  expected_params.method,  "Failed to match method!");
-            assert_eq!(actual_params.path,    expected_params.path,    "Failed to match path!");
-            assert_eq!(actual_params.query,   expected_params.query,   "Failed to match query!");
-            assert_eq!(actual_params.version, expected_params.version, "Failed to match version!");
-            
-            for (key, value) in expected_params.headers.iter() {
-                 assert_eq!(actual_params.headers.get(key), Some(value), "Failed to match '{}' header!", key);
-            }
-            
-            assert_json_eq!(actual_params.payload, expected_params.payload, "Failed to match payload!");
+            assert_eq!(actual_params, expected_params);
         }
 
         #[test-log::test(tokio::test)]

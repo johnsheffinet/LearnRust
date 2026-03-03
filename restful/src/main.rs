@@ -143,14 +143,16 @@ pub mod handlers {
             async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
                 let method = req.method().clone();
                 let uri = req.uri().clone();
+                let path = uri.path().to_string();
+                let query = uri.query().unwrap_or("").to_string();
                 let version = req.version();
                 let headers = req.headers().clone();
                 let Json(payload) = Json::<Value>::from_request(req, state).await?; // FailedSerializePayload(#[from] axum::extract::rejection::JsonRejection) 
                 
                 Ok(RequestParams {
                     method,
-                    path: uri.path().to_string(),
-                    query: uri.query().unwrap_or("").to_string(),
+                    path,
+                    query,
                     version,
                     headers,
                     payload,

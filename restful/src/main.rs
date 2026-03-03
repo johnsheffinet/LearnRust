@@ -72,7 +72,7 @@ pub mod handlers {
         };
         use serde_json::Value;
         
-        #[derive(Debug, thiserror::Error)]
+        #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
         pub enum AppError {
             #[error("Failed to build request uri from path and query parameters! {0}")]
             FailedBuildUri(#[from] axum::http::uri::InvalidUri),

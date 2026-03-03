@@ -312,18 +312,40 @@ pub mod tests {
         use crate::handlers::request::{AppError, AppResult, RequestParams};
         use pretty_assertions::assert_eq;
 
+        #[test-log::test(tokio::test)]
         async fn test_create_request_from_params_success() {}
+
+        #[test-log::test(tokio::test)]
         async fn test_create_request_from_params_failure_invalid_path() {}
+
+        #[test-log::test(tokio::test)]
         async fn test_create_request_from_params_failure_invalid_query() {}
+
+        #[test-log::test(tokio::test)]
         async fn test_create_request_from_params_failure_invalid_payload() {}
+
+        #[test-log::test(tokio::test)]
         async fn test_create_params_from_request_success() {}
+
+        #[test-log::test(tokio::test)]
         async fn test_create_params_from_request_failure_invalid_body() {}
     }
     pub mod response {
         use super::*;
         use crate::handlers::response::{AppError, AppResult, ResponseParams};
         use pretty_assertions::assert_eq;
-        
+
+        #[test-log::test(tokio::test)]
+        async fn test_create_response_from_params_success() {}
+
+        #[test-log::test(tokio::test)]
+        async fn test_create_response_from_params_failure_invalid_payload() {}
+
+        #[test-log::test(tokio::test)]
+        async fn test_create_params_from_response_success() {}
+
+        #[test-log::test(tokio::test)]
+        async fn test_create_params_from_response_failure_invalid_body() {}
     }
     pub mod router {
         use super::*;

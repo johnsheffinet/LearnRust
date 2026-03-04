@@ -233,19 +233,12 @@ pub mod handlers {
 
 #[cfg(test)]
 pub mod tests {
-    use assert_json_diff::assert_json_eq;
-    use claims::assert_some;
-    use cool_asserts::assert_matches;
-
     pub mod cfg {
-        use super::*;
         use crate::handlers::cfg::{AppConfig, AppError};
-        use figment::Jail;
-        use pretty_assertions::assert_eq;
 
         #[test_log::test(test)]
         fn test_create_app_config_success() {
-            Jail::expect_with(|jail| {
+            figment::Jail::expect_with(|jail| {
                 jail.clear_env();
 
                 jail.set_env("HTTP_ADDR", "127.0.0.1:3080");
@@ -256,8 +249,8 @@ pub mod tests {
                 jail.create_file("learnrust.crt", "content")?;
                 jail.create_file("learnrust.key", "content")?;
 
-                assert_matches!(AppConfig::new(), Ok(val) => {
-                  assert_eq!(val.http_addr.to_string(), "127.0.0.1:3080");
+                cool_asserts::assert_matches!(AppConfig::new(), Ok(val) => {
+                  pretty_assertions::assert_eq!(val.http_addr.to_string(), "127.0.0.1:3080");
                 });
 
                 Ok(())
@@ -266,7 +259,7 @@ pub mod tests {
 
         #[test_log::test(test)]
         fn test_create_app_config_failure_invalid_socketaddr() {
-            Jail::expect_with(|jail| {
+            figment::Jail::expect_with(|jail| {
                 jail.clear_env();
 
                 jail.set_env("HTTP_ADDR", ""); // Invalid SocketAddr
@@ -277,7 +270,10 @@ pub mod tests {
                 jail.create_file("learnrust.crt", "content")?;
                 jail.create_file("learnrust.key", "content")?;
 
-                assert_matches!(AppConfig::new(), Err(AppError::FailedExtractEnvVar(_)));
+                cool_asserts::assert_matches!(
+                    AppConfig::new(),
+                    Err(AppError::FailedExtractEnvVar(_))
+                );
 
                 Ok(())
             });
@@ -285,7 +281,7 @@ pub mod tests {
 
         #[test_log::test(test)]
         fn test_create_app_config_failure_missing_file() {
-            Jail::expect_with(|jail| {
+            figment::Jail::expect_with(|jail| {
                 jail.clear_env();
 
                 jail.set_env("HTTP_ADDR", "127.0.0.1:3080");
@@ -295,13 +291,13 @@ pub mod tests {
 
                 jail.create_file("learnrust.key", "content")?;
 
-                assert_matches!(AppConfig::new(), Err(AppError::FailedValidate(ref errs)) => {
+                cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedValidate(ref errs)) => {
                   let field_errs = errs.field_errors();
 
-                  let cert_path_err = assert_some!(
+                  let cert_path_err = claims::assert_some!(
                     field_errs.get("cert_path"));
 
-                  assert_eq!(cert_path_err[0].code, "FailedFindFile");
+                  pretty_assertions::assert_eq!(cert_path_err[0].code, "FailedFindFile");
                 });
 
                 Ok(())
@@ -314,7 +310,7 @@ pub mod tests {
 
         #[test_log::test(tokio::test)]
         async fn test_create_request_from_params_success() {
-            use axum::http::header::{HeaderName, HeaderValue, CONTENT_TYPE};
+            use axum::http::header::{CONTENT_TYPE, HeaderValue};
 
             let method = axum::http::Method::GET;
             let path = "/".to_string();
@@ -337,7 +333,7 @@ pub mod tests {
                 .clone()
                 .try_into()
                 .expect("Failed to create request from request parameters!");
-            
+
             let actual_params = RequestParams::from_request(req, &())
                 .await
                 .expect("Failed to create request parameters from request!");
@@ -361,9 +357,7 @@ pub mod tests {
         async fn test_create_params_from_request_failure_invalid_body() {}
     }
     pub mod response {
-        use super::*;
-        use crate::handlers::response::{AppError, AppResult, ResponseParams};
-        use pretty_assertions::assert_eq;
+        use crate::handlers::response::ResponseParams;
 
         #[test_log::test(tokio::test)]
         async fn test_create_response_from_params_success() {}
@@ -381,7 +375,6 @@ pub mod tests {
         // use super::*;
         // use crate::handlers::router;
         // use pretty_assertions::assert_eq;
-        
     }
 }
 

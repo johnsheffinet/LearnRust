@@ -309,19 +309,17 @@ pub mod tests {
         }
     }
     pub mod request {
-        use super::*;
-        use crate::handlers::request::{AppError, AppResult, RequestParams};
-        use pretty_assertions::assert_eq;
+        use crate::handlers::request::RequestParams;
 
         #[test_log::test(tokio::test)]
         async fn test_create_request_from_params_success() {
             let expected_params = RequestParams {
-                method: Method::GET,
+                method: axum::http::Method::GET,
                 path: "/".to_string(),
                 query: "".to_string(),
-                version: Version::HTTP_11,
-                headers: HeaderMap::new(),
-                payload: json!({}),
+                version: axum::http::Version::HTTP_11,
+                headers: axum::http::header::HeaderMap::new(),
+                payload: axum::extract::Json::json!({}),
             };
 
             let req = expected_params
@@ -333,7 +331,7 @@ pub mod tests {
                 .await
                 .expect("Failed to create request parameters from request!");
 
-            assert_eq!(actual_params, expected_params);
+            pretty_assertions::assert_eq!(actual_params, expected_params);
         }
 
         #[test_log::test(tokio::test)]

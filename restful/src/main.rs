@@ -316,16 +316,21 @@ pub mod tests {
         async fn test_create_request_from_params_success() {
             use axum::http::header::{HeaderName, HeaderValue, CONTENT_TYPE};
 
+            let method = axum::http::Method::GET;
+            let path = "/".to_string();
+            let query = "".to_string();
+            let version = axum::http::Version::HTTP_11;
             let mut headers = axum::http::header::HeaderMap::new();
             headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+            let payload = serde_json::json!({});
 
             let expected_params = RequestParams {
-                method: axum::http::Method::GET,
-                path: "/".to_string(),
-                query: "".to_string(),
-                version: axum::http::Version::HTTP_11,
-                headers: headers,
-                payload: serde_json::json!({}),
+                method,
+                path,
+                query,
+                version,
+                headers,
+                payload,
             };
 
             let req = expected_params

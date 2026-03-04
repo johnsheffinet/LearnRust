@@ -310,6 +310,7 @@ pub mod tests {
     }
     pub mod request {
         use crate::handlers::request::RequestParams;
+        use axum::extract::FromRequest;
 
         #[test_log::test(tokio::test)]
         async fn test_create_request_from_params_success() {
@@ -319,7 +320,7 @@ pub mod tests {
                 query: "".to_string(),
                 version: axum::http::Version::HTTP_11,
                 headers: axum::http::header::HeaderMap::new(),
-                payload: axum::extract::Json::json!({}),
+                payload: serde_json::json!({}),
             };
 
             let req = expected_params
@@ -367,9 +368,9 @@ pub mod tests {
         async fn test_create_params_from_response_failure_invalid_body() {}
     }
     pub mod router {
-        use super::*;
-        use crate::handlers::router;
-        use pretty_assertions::assert_eq;
+        // use super::*;
+        // use crate::handlers::router;
+        // use pretty_assertions::assert_eq;
         
     }
 }

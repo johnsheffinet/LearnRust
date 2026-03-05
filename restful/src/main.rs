@@ -310,11 +310,11 @@ pub mod tests {
 
             let method = axum::http::Method::GET;
             let path = "/".to_string();
-            let query = "".to_string();
+            let query = "key1=value1&key2=value2".to_string();
             let version = axum::http::Version::HTTP_11;
             let mut headers = axum::http::header::HeaderMap::new();
             headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-            let payload = serde_json::json!({});
+            let payload = serde_json::json!(r#"{ "key1": "value1", "key2": "value2" }"#);
 
             let expected_params = RequestParams {
                 method,

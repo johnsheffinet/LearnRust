@@ -84,7 +84,6 @@ pub mod handlers {
         }
 
         pub type AppResult<T> = Result<T, AppError>;
-        
 
         #[derive(Debug, Clone, PartialEq)]
         pub struct RequestParams {
@@ -107,7 +106,9 @@ pub mod handlers {
                     format!("{}?{}", params.path, params.query)
                 };
 
-                let params_uri = axum::http::Uri::builder().path_and_query(path_and_query).build()?; // FailedBuildUri(#[from] axum::http::uri::InvalidUri)
+                let params_uri = axum::http::Uri::builder()
+                    .path_and_query(path_and_query)
+                    .build()?; // FailedBuildUri(#[from] axum::http::uri::InvalidUri)
 
                 let mut builder = axum::extract::Request::builder()
                     .method(params.method)
@@ -133,7 +134,10 @@ pub mod handlers {
             type Rejection = AppError;
 
             #[tracing::instrument(skip_all, err)]
-            async fn from_request(req: axum::extract::Request, state: &S) -> Result<Self, Self::Rejection> {
+            async fn from_request(
+                req: axum::extract::Request,
+                state: &S,
+            ) -> Result<Self, Self::Rejection> {
                 use axum::extract::Json;
 
                 let method = req.method().clone();

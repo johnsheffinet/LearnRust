@@ -64,7 +64,7 @@ pub mod handlers {
         }
     }
     pub mod request {
-        use axum::extract::Request;
+        use axum::extract::{FromRequest, Request};
 
         #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
         pub enum AppError {
@@ -97,8 +97,7 @@ pub mod handlers {
             pub payload: serde_json::Value,
         }
 
-        impl axum::extract::TryFrom<Request, RequestParams> for Request
-        where RequestParams: Into<Request> {
+        impl TryFrom<RequestParams> for Request {
             type Error = AppError;
 
             #[tracing::instrument(skip_all, err)]
@@ -130,17 +129,14 @@ pub mod handlers {
             }
         }
 
-        impl<S> axum::extract::FromRequest<S> for RequestParams
+        impl<S> FromRequest<S> for RequestParams
         where
             S: Send + Sync,
         {
             type Rejection = AppError;
 
             #[tracing::instrument(skip_all, err)]
-            async fn from_request(
-                req: axum::extract::Request,
-                state: &S,
-            ) -> Result<Self, Self::Rejection> {
+            async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
                 use axum::extract::Json;
 
                 let method = req.method().clone();
@@ -304,8 +300,8 @@ pub mod tests {
         }
     }
     pub mod request {
-        use crate::handlers::request::{AppErrors, RequestParams};
-        use axum::extract::FromRequest;
+        use crate::handlers::request::{AppError, RequestParams};
+        use axum::extract::{FromRequest, Request};
 
         #[test_log::test(tokio::test)]
         async fn test_create_request_from_params_success() {
@@ -328,9 +324,7 @@ pub mod tests {
                 payload,
             };
 
-            let req = expected_params
-                .clone()
-                .try_into()
+            let req = Request::try_from(expected_params.clone())
                 .expect("Failed to create request from request parameters!");
 
             let actual_params = RequestParams::from_request(req, &())
@@ -348,10 +342,8 @@ pub mod tests {
             let path = "/invalid path".to_string();
             let query = "key1=value1".to_string();
             let version = axum::http::Version::HTTP_11;
-
             let mut headers = axum::http::header::HeaderMap::new();
             headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-
             let payload = serde_json::json!({ "key1": "value1", "key2": "value2" });
 
             let expected_params = RequestParams {
@@ -363,10 +355,9 @@ pub mod tests {
                 payload,
             };
 
-            cool_asserts::assert_matches!(
-                expected_params.try_into(),
-                Err(AppError::FailedBuildUri(_))
-            );
+            let err = Request::try_from(expected_params.clone()).unwrap_err();
+
+            cool_asserts::assert_matches!(err, AppError::FailedBuildRequest(_));
         }
 
         #[test_log::test(tokio::test)]

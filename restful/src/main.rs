@@ -64,6 +64,8 @@ pub mod handlers {
         }
     }
     pub mod request {
+        use axum::extract::Request;
+
         #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
         pub enum AppError {
             #[error("Failed to build request uri from path and query parameters! {0}")]
@@ -95,7 +97,8 @@ pub mod handlers {
             pub payload: serde_json::Value,
         }
 
-        impl TryFrom<RequestParams> for axum::extract::Request {
+        impl axum::extract::TryFrom<Request, RequestParams> for Request
+        where RequestParams: Into<Request> {
             type Error = AppError;
 
             #[tracing::instrument(skip_all, err)]
@@ -340,17 +343,17 @@ pub mod tests {
         #[test_log::test(tokio::test)]
         async fn test_create_request_from_params_failure_invalid_path() {
             use axum::http::header::{CONTENT_TYPE, HeaderValue};
-        
+
             let method = axum::http::Method::GET;
-            let path = "/invalid path".to_string(); 
+            let path = "/invalid path".to_string();
             let query = "key1=value1".to_string();
             let version = axum::http::Version::HTTP_11;
-            
+
             let mut headers = axum::http::header::HeaderMap::new();
             headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-            
+
             let payload = serde_json::json!({ "key1": "value1", "key2": "value2" });
-        
+
             let expected_params = RequestParams {
                 method,
                 path,
@@ -360,7 +363,9 @@ pub mod tests {
                 payload,
             };
 
-            cool_asserts::assert_matches!(expected_params.try_into(), Err(AppError::FailedBuildUri(_))
+            cool_asserts::assert_matches!(
+                expected_params.try_into(),
+                Err(AppError::FailedBuildUri(_))
             );
         }
 

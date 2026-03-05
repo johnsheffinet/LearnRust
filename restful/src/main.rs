@@ -156,22 +156,18 @@ pub mod handlers {
         }
     }
     pub mod response {
-        use axum::{
-            body::{Body, to_bytes},
-            http::{StatusCode, Version, header::HeaderMap},
-            response::Response,
-        };
-        use serde_json::Value;
-
-        #[derive(Debug, thiserror::Error)]
+        #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
         pub enum AppError {
             #[error("Failed to serialize payload parameter into! {0}")]
+            #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
             FailedSerializePayload(#[from] serde_json::Error),
 
             #[error("Failed to build response! {0}")]
+            #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
             FailedBuildResponse(#[from] axum::http::Error),
 
             #[error("Failed to extract bytes from response body! {0}")]
+            #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
             FailedExtractBytes(#[from] axum::Error),
         }
 
@@ -179,18 +175,18 @@ pub mod handlers {
 
         #[derive(Debug, Clone, PartialEq)]
         pub struct ResponseParams {
-            pub version: Version,
-            pub status: StatusCode,
-            pub headers: HeaderMap,
-            pub payload: Value,
+            pub version: axum::http::Version,
+            pub status: axum::http::StatusCode,
+            pub headers: axum::http::header::HeaderMap,
+            pub payload: serde_json::Value,
         }
 
-        impl TryFrom<ResponseParams> for Response {
+        impl TryFrom<ResponseParams> for axum::response::Response {
             type Error = AppError;
 
             #[tracing::instrument(skip_all, err)]
             fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
-                let mut builder = Response::builder()
+                let mut builder = axum::response::Response::builder()
                     .version(params.version)
                     .status(params.status);
 
@@ -201,18 +197,18 @@ pub mod handlers {
                 let bytes = serde_json::to_vec(&params.payload)?; // FailedSerializePayload(#[from] serde_json::Error)
 
                 builder
-                    .body(Body::from(bytes))
+                    .body(axum::body::Body::from(bytes))
                     .map_err(AppError::FailedBuildResponse) // FailedBuildResponse(#[from] axum::http::Error)                
             }
         }
 
         impl ResponseParams {
             #[tracing::instrument(skip_all, err)]
-            pub async fn from_response(res: Response) -> AppResult<Self> {
+            pub async fn from_response(res: axum::response::Response) -> AppResult<Self> {
                 let version = res.version();
                 let status = res.status();
                 let headers = res.headers().clone();
-                let bytes = to_bytes(res.into_body(), 2 * 1024 * 1024).await?; // FailedExtractBytes(#[from] axum::Error)
+                let bytes = axum::body::to_bytes(res.into_body(), 2 * 1024 * 1024).await?; // FailedExtractBytes(#[from] axum::Error)
                 let payload = serde_json::from_slice(&bytes)?; // FailedSerializePayload(#[from] serde_json::Error)
 
                 Ok(ResponseParams {

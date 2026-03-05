@@ -83,7 +83,7 @@ pub mod handlers {
             FailedExtractPayload(#[from] axum::extract::rejection::JsonRejection),
         }
 
-        pub type AppResult<T> = axum:extract::Result<T, AppError>;
+        pub type AppResult<T> = Result<T, AppError>;
         
 
         #[derive(Debug, Clone, PartialEq)]

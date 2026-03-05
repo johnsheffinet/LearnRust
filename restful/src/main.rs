@@ -301,7 +301,7 @@ pub mod tests {
         }
     }
     pub mod request {
-        use crate::handlers::request::RequestParams;
+        use crate::handlers::request::{AppErrors, RequestParams};
         use axum::extract::FromRequest;
 
         #[test_log::test(tokio::test)]
@@ -314,7 +314,7 @@ pub mod tests {
             let version = axum::http::Version::HTTP_11;
             let mut headers = axum::http::header::HeaderMap::new();
             headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-            let payload = serde_json::json!(r#"{ "key1": "value1", "key2": "value2" }"#);
+            let payload = serde_json::json!({ "key1": "value1", "key2": "value2" });
 
             let expected_params = RequestParams {
                 method,
@@ -338,7 +338,31 @@ pub mod tests {
         }
 
         #[test_log::test(tokio::test)]
-        async fn test_create_request_from_params_failure_invalid_path() {}
+        async fn test_create_request_from_params_failure_invalid_path() {
+            use axum::http::header::{CONTENT_TYPE, HeaderValue};
+        
+            let method = axum::http::Method::GET;
+            let path = "/invalid path".to_string(); 
+            let query = "key1=value1".to_string();
+            let version = axum::http::Version::HTTP_11;
+            
+            let mut headers = axum::http::header::HeaderMap::new();
+            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+            
+            let payload = serde_json::json!({ "key1": "value1", "key2": "value2" });
+        
+            let expected_params = RequestParams {
+                method,
+                path,
+                query,
+                version,
+                headers,
+                payload,
+            };
+
+            cool_asserts::assert_matches!(expected_params.try_into(), Err(AppError::FailedBuildUri(_))
+            );
+        }
 
         #[test_log::test(tokio::test)]
         async fn test_create_request_from_params_failure_invalid_query() {}

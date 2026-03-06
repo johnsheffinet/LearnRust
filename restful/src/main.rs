@@ -68,17 +68,9 @@ pub mod handlers {
 
         #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
         pub enum AppError {
-            #[error("Failed to build request method from method parameter! {0}")]
-            #[status(axum::http::StatusCode::BAD_REQUEST)]
-            FailedBuildMethod(axum::http::method::InvalidMethod),
-
             #[error("Failed to build request uri from path and query parameters! {0}")]
             #[status(axum::http::StatusCode::BAD_REQUEST)]
             FailedBuildUri(#[from] axum::http::uri::InvalidUri),
-
-            #[error("Failed to build request headers from headers parameter! {0}")]
-            #[status(axum::http::StatusCode::BAD_REQUEST)]
-            FailedBuildHeaders(#[from] axum::http::Error),
 
             #[error("Failed to serialize payload parameter into request body! {0}")]
             #[status(axum::http::StatusCode::BAD_REQUEST)]
@@ -86,7 +78,7 @@ pub mod handlers {
 
             #[error("Failed to build request! {0}")]
             #[status(axum::http::StatusCode::BAD_REQUEST)]
-            FailedBuildRequest(axum::http::Error),
+            FailedBuildRequest(#[from] axum::http::Error),
 
             #[error("Failed to extract payload parameter from request body! {0}")]
             #[status(axum::http::StatusCode::BAD_REQUEST)]
@@ -115,10 +107,7 @@ pub mod handlers {
                 } else {
                     format!("{}?{}", params.path, params.query)
                 };
-
-                let params_uri = axum::http::Uri::builder()
-                    .path_and_query(path_and_query)
-                    .build()?; // FailedBuildUri(#[from] axum::http::uri::InvalidUri)
+                let params_uri = axum::http::Uri::try_from(path_and_query.as_str())?; // FailedBuildUri(#[from] axum::http::uri::InvalidUri)
 
                 let mut builder = axum::extract::Request::builder()
                     .method(params.method)
@@ -133,19 +122,7 @@ pub mod handlers {
 
                 builder
                     .body(axum::body::Body::from(bytes))
-                    .map_err(|err| {
-                        if let Some(e) = err.downcast_ref::<axum::http::method::InvalidMethod>() {
-                            AppError::FailedBuildMethod(err.into()) // FailedBuildMethod(#[from] axum::http::method::InvalidMethod)
-                        } else if let Some(e) = err.downcast_ref::<axum::http::uri::InvalidUri>() {
-                            AppError::FailedBuildUri(err.into()) // FailedBuildUri(#[from] axum::http::uri::InvalidUri)
-                        } else if err.is::<axum::http::header::InvalidHeaderName>() || err.is::<axum::http::header::InvalidHeaderValue>() {
-                            AppError::FailedBuildHeaders(err.into())
-                        } else if err.is::<serde_json::Error>() {
-                            AppError::FailedSerializePayload(err)
-                        } else {
-                            AppError::FailedBuildRequest(err)
-                        }
-                    })               
+                    .map_err(AppError::FailedBuildRequest)
             }
         }
 
@@ -377,7 +354,7 @@ pub mod tests {
 
             let err = Request::try_from(expected_params.clone()).unwrap_err();
 
-            cool_asserts::assert_matches!(err, AppError::FailedBuildRequest(_));
+            cool_asserts::assert_matches!(err, AppError::FailedBuildUri(_));
         }
 
         #[test_log::test(tokio::test)]

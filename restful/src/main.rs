@@ -113,7 +113,7 @@ pub mod handlers {
                     headers.extend(params.headers);
                 }
 
-                let bytes = serde_json::to_vec(&params.payload)?; // FailedSerializePayload(#[from] serde_json::Error)
+                let bytes = serde_json::to_vec(&params.payload).map_err(AppError::FailedSerializePayload)?; // FailedSerializePayload(#[from] serde_json::Error)
 
                 builder
                     .body(axum::body::Body::from(bytes))
@@ -347,7 +347,7 @@ pub mod tests {
 
             let result = Request::try_from(expected_params.clone());
 
-            cool_asserts::assert_matches!(result, Err(AppError::FailedBuildRequest()));
+            cool_asserts::assert_matches!(result, Err(AppError::FailedBuildRequest(_)));
         }
 
         #[test_log::test(tokio::test)]
@@ -373,7 +373,7 @@ pub mod tests {
 
             let result = Request::try_from(expected_params.clone());
 
-            cool_asserts::assert_matches!(result, Err(AppError::FailedBuildRequest()));            
+            cool_asserts::assert_matches!(result, Err(AppError::FailedBuildRequest(_)));
         }
 
         #[test_log::test(tokio::test)]
@@ -381,12 +381,13 @@ pub mod tests {
             use axum::http::header::{CONTENT_TYPE, HeaderValue};
 
             let method = axum::http::Method::GET;
-            let path = "/invalid path".to_string();
+            let path = "/".to_string();
             let query = "".to_string();
             let version = axum::http::Version::HTTP_11;
             let mut headers = axum::http::header::HeaderMap::new();
             headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-            let payload = serde_json::json!({ "invalid payload": f64::NAN });
+            let key = "invalid payload".to_string();
+            let payload = serde_json::to_value({ "invalid payload": f64::NAN })?;
 
             let expected_params = RequestParams {
                 method,
@@ -399,7 +400,7 @@ pub mod tests {
 
             let result = Request::try_from(expected_params.clone());
 
-            cool_asserts::assert_matches!(result, Err(AppError::FailedSerializePayload()));            
+            cool_asserts::assert_matches!(result, Err(AppError::FailedSerializePayload(_)));
         }
 
         #[test_log::test(tokio::test)]

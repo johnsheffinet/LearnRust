@@ -377,6 +377,32 @@ pub mod tests {
         }
 
         #[test_log::test(tokio::test)]
+        async fn test_create_request_from_params_failure_invalid_payload() {
+            use axum::http::header::{CONTENT_TYPE, HeaderValue};
+
+            let method = axum::http::Method::GET;
+            let path = "/".to_string();
+            let query = "".to_string();
+            let version = axum::http::Version::HTTP_11;
+            let mut headers = axum::http::header::HeaderMap::new();
+            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+            let payload = serde_json::json!({});
+
+            let expected_params = RequestParams {
+                method,
+                path,
+                query,
+                version,
+                headers,
+                payload,
+            };
+
+            let result = Request::try_from(expected_params.clone());
+
+            cool_asserts::assert_matches!(result, Err(AppError::FailedBuildRequest(_)));
+        }
+
+        #[test_log::test(tokio::test)]
         async fn test_create_params_from_request_success() {
             use axum::http::header::{HeaderValue, CONTENT_TYPE};
             

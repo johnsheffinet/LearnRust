@@ -166,7 +166,7 @@ pub mod handlers {
     pub mod response {
         #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
         pub enum AppError {
-            #[error("Failed to serialize payload parameter into! {0}")]
+            #[error("Failed to serialize payload parameter into response body! {0}")]
             #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
             FailedSerializePayload(#[from] serde_json::Error),
 

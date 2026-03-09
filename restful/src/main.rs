@@ -1,5 +1,5 @@
 pub mod handlers {
-    pub mod cfg {
+    pub mod config {
         use std::sync::LazyLock;
 
         pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().unwrap());
@@ -38,7 +38,7 @@ pub mod handlers {
             pub fn new() -> AppResult<Self> {
                 use validator::Validate;
 
-                let config: AppConfig = figment::Figment::new()
+                let cfg: AppConfig = figment::Figment::new()
                     .merge(
                         figment::providers::Env::raw()
                             .only(&Self::get_fields)
@@ -47,11 +47,11 @@ pub mod handlers {
                     .extract()
                     .map_err(AppError::FailedExtractEnvVar)?;
 
-                config
+                cfg
                     .validate()
                     .map_err(AppError::FailedValidate)?;
 
-                Ok(config)
+                Ok(cfg)
             }
 
             #[tracing::instrument(err)]
@@ -240,8 +240,8 @@ pub mod handlers {
 
 #[cfg(test)]
 pub mod tests {
-    pub mod cfg {
-        use crate::handlers::cfg::{AppConfig, AppError};
+    pub mod config {
+        use crate::handlers::config::{AppConfig, AppError};
 
         #[test_log::test(test)]
         fn test_create_app_config_success() {
@@ -422,5 +422,5 @@ pub mod tests {
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    std::sync::LazyLock::force(&handlers::cfg::CONFIG);
+    std::sync::LazyLock::force(&handlers::config::CONFIG);
 }

@@ -44,9 +44,12 @@ pub mod handlers {
                             .only(&Self::get_fields)
                             .lowercase(false),
                     )
-                    .extract()?;
+                    .extract()
+                    .map_err(AppError::FailedExtractEnvVar)?;
 
-                config.validate()?;
+                config
+                    .validate()
+                    .map_err(AppError::FailedValidate)?;
 
                 Ok(config)
             }
@@ -64,7 +67,7 @@ pub mod handlers {
         }
     }
     pub mod request {
-        use axum::extract::{FromRequest, Json, Request};
+        use axum::extract::{FromRequest, Request};
 
         #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
         pub enum AppError {
@@ -78,7 +81,7 @@ pub mod handlers {
 
             #[error("Failed to extract payload parameter from request body! {0}")]
             #[status(axum::http::StatusCode::BAD_REQUEST)]
-            FailedExtractPayload(#[from] axum::Error),
+            FailedExtractBody(#[from] axum::Error),
         }
 
         pub type AppResult<T> = Result<T, AppError>;
@@ -113,7 +116,8 @@ pub mod handlers {
                     headers.extend(params.headers);
                 }
 
-                let bytes = serde_json::to_vec(&params.payload)?; // FailedSerializePayload(#[from] serde_json::Error)
+                let bytes = serde_json::to_vec(&params.payload)
+                    .map_err(AppError::FailedSerializePayload)?;
 
                 builder
                     .body(axum::body::Body::from(bytes))
@@ -135,8 +139,11 @@ pub mod handlers {
                 let query = uri.query().unwrap_or("").to_string();
                 let version = req.version();
                 let headers = req.headers().clone();
-                let payload = serde_json::from_slice(&axum::body::to_bytes(req.into_body(), 2 * 1024 * 1024).await?)?; // FailedExtractPayload(#[from] axum::Error) and FailedSerializePayload(#[from] serde_json::Error)
-                // let Json(payload) = Json::<serde_json::Value>::from_request(req, state).await?; // FailedExtractPayload(#[from] axum::extract::rejection::JsonRejection) 
+                let bytes = axum::body::to_bytes(req.into_body(), 2 * 1024 * 1024)
+                    .await
+                    .map_err(AppError::FailedExtractBody)?;
+                let payload = serde_json::from_slice(&bytes)
+                    .map_err(AppError::FailedSerializePayload)?;
 
                 Ok(RequestParams {
                     method,
@@ -188,7 +195,8 @@ pub mod handlers {
                     headers.extend(params.headers);
                 }
 
-                let bytes = serde_json::to_vec(&params.payload)?; // FailedSerializePayload(#[from] serde_json::Error)
+                let bytes = serde_json::to_vec(&params.payload)
+                    .map_err(AppError::FailedSerializePayload)?;
 
                 builder
                     .body(axum::body::Body::from(bytes))
@@ -202,8 +210,11 @@ pub mod handlers {
                 let version = res.version();
                 let status = res.status();
                 let headers = res.headers().clone();
-                let bytes = axum::body::to_bytes(res.into_body(), 2 * 1024 * 1024).await?; // FailedExtractBytes(#[from] axum::Error)
-                let payload = serde_json::from_slice(&bytes)?; // FailedSerializePayload(#[from] serde_json::Error)
+                let bytes = axum::body::to_bytes(res.into_body(), 2 * 1024 * 1024)
+                    .await
+                    .map_err(AppError::FailedExtractBytes)?;
+                let payload = serde_json::from_slice(&bytes)
+                    .map_err(AppError::FailedSerializePayload)?;
 
                 Ok(ResponseParams {
                     version,
@@ -232,8 +243,8 @@ pub mod tests {
                 jail.set_env("CERT_PATH", "learnrust.crt");
                 jail.set_env("KEY_PATH", "learnrust.key");
 
-                jail.create_file("learnrust.crt", "content")?;
-                jail.create_file("learnrust.key", "content")?;
+                jail.create_file("learnrust.crt", "content").expect("Failed to create 'learnrust.crt' file!");
+                jail.create_file("learnrust.key", "content").expect("Failed to create 'learnrust.key' file!");
 
                 cool_asserts::assert_matches!(AppConfig::new(), Ok(val) => {
                   pretty_assertions::assert_eq!(val.http_addr.to_string(), "127.0.0.1:3080");
@@ -253,8 +264,8 @@ pub mod tests {
                 jail.set_env("CERT_PATH", "learnrust.crt");
                 jail.set_env("KEY_PATH", "learnrust.key");
 
-                jail.create_file("learnrust.crt", "content")?;
-                jail.create_file("learnrust.key", "content")?;
+                jail.create_file("learnrust.crt", "content").expect("Failed to create 'learn.crt' file!");
+                jail.create_file("learnrust.key", "content").expect("Failed to create 'learn.key' file!");
 
                 cool_asserts::assert_matches!(
                     AppConfig::new(),
@@ -275,7 +286,7 @@ pub mod tests {
                 jail.set_env("CERT_PATH", "learnrust.crt"); // Missing File
                 jail.set_env("KEY_PATH", "learnrust.key");
 
-                jail.create_file("learnrust.key", "content")?;
+                jail.create_file("learnrust.key", "content").expect("Failed to create 'learnrust.key' file!");
 
                 cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedValidate(ref errs)) => {
                   let field_errs = errs.field_errors();
@@ -343,7 +354,10 @@ pub mod tests {
                 payload,
             };
 
-            cool_asserts::assert_matches!(Request::try_from(expected_params.clone()), Err(AppError::FailedBuildRequest(_)));
+            cool_asserts::assert_matches!(
+                Request::try_from(expected_params.clone()),
+                Err(AppError::FailedBuildRequest(_))
+            );
         }
 
         #[test_log::test(tokio::test)]

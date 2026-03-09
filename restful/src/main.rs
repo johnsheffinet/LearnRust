@@ -134,14 +134,21 @@ pub mod handlers {
             #[tracing::instrument(skip_all, err)]
             async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
                 let method = req.method().clone();
+                
                 let uri = req.uri().clone();
+                
                 let path = uri.path().to_string();
+                
                 let query = uri.query().unwrap_or("").to_string();
+                
                 let version = req.version();
+                
                 let headers = req.headers().clone();
+                
                 let bytes = axum::body::to_bytes(req.into_body(), 2 * 1024 * 1024)
                     .await
                     .map_err(AppError::FailedExtractBody)?;
+                
                 let payload = serde_json::from_slice(&bytes)
                     .map_err(AppError::FailedSerializePayload)?;
 
@@ -208,8 +215,11 @@ pub mod handlers {
             #[tracing::instrument(skip_all, err)]
             pub async fn from_response(res: axum::response::Response) -> AppResult<Self> {
                 let version = res.version();
+                
                 let status = res.status();
+                
                 let headers = res.headers().clone();
+                
                 let bytes = axum::body::to_bytes(res.into_body(), 2 * 1024 * 1024)
                     .await
                     .map_err(AppError::FailedExtractBytes)?;

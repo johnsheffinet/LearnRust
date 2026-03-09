@@ -400,7 +400,29 @@ pub mod tests {
         use crate::handlers::response::ResponseParams;
 
         #[test_log::test(tokio::test)]
-        async fn test_create_response_from_params_success() {}
+        async fn test_create_response_from_params_success() {
+            let version = axum::http::Version::HTTP_11;
+
+            let status = axum::http::StatusCode::OK;
+
+            let mut headers = axum::http::header::HeaderMap::new();
+            headers.insert(axum::http::header::CONTENT_TYPE, axum::http::header::HeaderValue::from_static("application/json"));
+
+            let payload = serde_json::json!({ "key": "value" });
+
+            let expected_params = ResponseParams {
+                version,
+                status,
+                headers,
+                payload,
+            };
+
+            let res = cool_asserts::assert_matches!(axum::response::Response::try_from(expected_params.clone()), Ok(res) => res);
+
+            let actual_params = cool_asserts::assert_matches!(ResponseParams::from_response(res).await, Ok(actual_params) => actual_params);
+
+            pretty_assertions::assert_eq!(actual_params, expected_params);
+        }
 
         #[test_log::test(tokio::test)]
         async fn test_create_response_from_params_failure_invalid_payload() {}

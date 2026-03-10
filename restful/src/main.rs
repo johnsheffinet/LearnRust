@@ -429,15 +429,6 @@ pub mod tests {
 
             pretty_assertions::assert_eq!(actual_params, expected_params);
         }
-
-        #[test_log::test(tokio::test)]
-        async fn test_create_response_from_params_failure_invalid_payload() {}
-
-        #[test_log::test(tokio::test)]
-        async fn test_create_params_from_response_success() {}
-
-        #[test_log::test(tokio::test)]
-        async fn test_create_params_from_response_failure_invalid_body() {}
     }
     pub mod router {
         // use super::*;

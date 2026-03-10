@@ -47,9 +47,7 @@ pub mod handlers {
                     .extract()
                     .map_err(AppError::FailedExtractEnvVar)?;
 
-                cfg
-                    .validate()
-                    .map_err(AppError::FailedValidate)?;
+                cfg.validate().map_err(AppError::FailedValidate)?;
 
                 Ok(cfg)
             }
@@ -149,8 +147,8 @@ pub mod handlers {
                     .await
                     .map_err(AppError::FailedExtractBody)?;
 
-                let payload = serde_json::from_slice(&bytes)
-                    .map_err(AppError::FailedSerializePayload)?;
+                let payload =
+                    serde_json::from_slice(&bytes).map_err(AppError::FailedSerializePayload)?;
 
                 Ok(RequestParams {
                     method,
@@ -223,8 +221,8 @@ pub mod handlers {
                 let bytes = axum::body::to_bytes(res.into_body(), 2 * 1024 * 1024)
                     .await
                     .map_err(AppError::FailedExtractBytes)?;
-                let payload = serde_json::from_slice(&bytes)
-                    .map_err(AppError::FailedSerializePayload)?;
+                let payload =
+                    serde_json::from_slice(&bytes).map_err(AppError::FailedSerializePayload)?;
 
                 Ok(ResponseParams {
                     version,
@@ -253,8 +251,10 @@ pub mod tests {
                 jail.set_env("CERT_PATH", "learnrust.crt");
                 jail.set_env("KEY_PATH", "learnrust.key");
 
-                jail.create_file("learnrust.crt", "content").expect("Failed to create 'learnrust.crt' file!");
-                jail.create_file("learnrust.key", "content").expect("Failed to create 'learnrust.key' file!");
+                jail.create_file("learnrust.crt", "content")
+                    .expect("Failed to create 'learnrust.crt' file!");
+                jail.create_file("learnrust.key", "content")
+                    .expect("Failed to create 'learnrust.key' file!");
 
                 cool_asserts::assert_matches!(AppConfig::new(), Ok(val) => {
                   pretty_assertions::assert_eq!(val.http_addr.to_string(), "127.0.0.1:3080");
@@ -274,8 +274,10 @@ pub mod tests {
                 jail.set_env("CERT_PATH", "learnrust.crt");
                 jail.set_env("KEY_PATH", "learnrust.key");
 
-                jail.create_file("learnrust.crt", "content").expect("Failed to create 'learn.crt' file!");
-                jail.create_file("learnrust.key", "content").expect("Failed to create 'learn.key' file!");
+                jail.create_file("learnrust.crt", "content")
+                    .expect("Failed to create 'learn.crt' file!");
+                jail.create_file("learnrust.key", "content")
+                    .expect("Failed to create 'learn.key' file!");
 
                 cool_asserts::assert_matches!(
                     AppConfig::new(),
@@ -296,7 +298,8 @@ pub mod tests {
                 jail.set_env("CERT_PATH", "learnrust.crt"); // Missing File
                 jail.set_env("KEY_PATH", "learnrust.key");
 
-                jail.create_file("learnrust.key", "content").expect("Failed to create 'learnrust.key' file!");
+                jail.create_file("learnrust.key", "content")
+                    .expect("Failed to create 'learnrust.key' file!");
 
                 cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedValidate(ref errs)) => {
                   let field_errs = errs.field_errors();
@@ -406,7 +409,10 @@ pub mod tests {
             let status = axum::http::StatusCode::OK;
 
             let mut headers = axum::http::header::HeaderMap::new();
-            headers.insert(axum::http::header::CONTENT_TYPE, axum::http::header::HeaderValue::from_static("application/json"));
+            headers.insert(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::header::HeaderValue::from_static("application/json"),
+            );
 
             let payload = serde_json::json!({ "key": "value" });
 

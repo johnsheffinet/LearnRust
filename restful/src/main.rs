@@ -162,6 +162,64 @@ pub mod handlers {
                 })
             }
         }
+    impl TryFrom<RequestParams> for Request {
+      type Error = AppError;
+    
+      #[tracing::instrument(skip(params), err)]
+      fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
+        let path_and_query = if params.query.is_empty() {
+          params.path
+        } else {
+          format!("{}?{}", params.path, params.query)
+        };
+
+        let params_uri = Uri::builder()
+          .path_and_query(path_and_query)
+          .build()
+          .map_err(AppError::FailedParsePathQueryIntoUri)?;
+
+        let params_body = serde_json::to_vec(&params.payload)
+          .map_err(AppError::FailedSerializePayloadIntoBody)?;
+
+        let mut builder = Request::builder()
+          .method(params.method)
+          .uri(params_uri)
+          .version(params.version);
+
+        if let Some(headers) = builder.headers_mut() {
+          headers.extend(params.headers);
+        }
+
+        builder
+          .body(Body::from(params_body))
+          .map_err(AppError::FailedBuildRequest)?
+      }
+  }
+
+    impl <S> FromRequest<S> for RequestParams 
+      where S: Send + Sync {
+        type Rejection = AppError;
+
+        #[tracing::instrument(err)]
+        pub fn from_request(request: Request) -> Result<Self, Self::Rejection> {
+          let params = RequestParams {
+            method: ,
+            path: ,
+            query: ,
+            version: ,
+            headers: ,
+            payload: ,
+          }
+
+          Ok(params)
+        }
+      }
+
+    pub struct ResponseParams {
+      version: Version,
+      status: StatusCode,
+      headers: HeaderMap,
+      payload: Json<Value>,
     }
     pub mod response {
         #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]

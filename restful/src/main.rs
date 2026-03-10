@@ -69,17 +69,35 @@ pub mod handlers {
 
         #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
         pub enum AppError {
+            // FailedSerializePayloadIntoBody
+            // * Params To Request: Payload ->(serde_json::to_vec) Bytes
+            // * “Failed to serialize payload parameter into request body!”
+            // FailedSerializePayloadFromBody
+            // * Request To Params: Bytes ->(serde_json:: from_slice) Payload
+            // * “Failed to serialize payload parameter from request body!”
+            
+            // FailedBuildRequestFromPayload
+            // * Params To Request: Bytes ->(Body::from) Body
+            // * “Failed to build request body from payload parameter!”
+            // FailedExtractBodyIntoPayload
+            // * Request To Params: Body ->(to_bytes) Bytes
+            // * “Failed to extract request body into payload parameter!”
+
             #[error("Failed to serialize payload parameter into request body! {0}")]
             #[status(axum::http::StatusCode::BAD_REQUEST)]
-            FailedSerializePayload(#[from] serde_json::Error),
+            FailedSerializePayloadIntoBody(/*#[from] */serde_json::Error),
 
-            #[error("Failed to build request! {0}")]
+            #[error("Failed to serialize payload parameter from request body! {0}")]
             #[status(axum::http::StatusCode::BAD_REQUEST)]
-            FailedBuildRequest(#[from] axum::http::Error),
+            FailedSerializePayloadFromBody(/*#[from] */serde_json::Error),
 
-            #[error("Failed to extract payload parameter from request body! {0}")]
+            #[error("Failed to build request body from payload parameter! {0}")]
             #[status(axum::http::StatusCode::BAD_REQUEST)]
-            FailedExtractBody(#[from] axum::Error),
+            FailedBuildRequestFromPayload(/*#[from] */axum::http::Error),
+
+            #[error("Failed to extract request body into payload parameter! {0}")]
+            #[status(axum::http::StatusCode::BAD_REQUEST)]
+            FailedExtractBodyIntoPayload(/*#[from] */axum::Error),
         }
 
         pub type AppResult<T> = Result<T, AppError>;
@@ -115,11 +133,11 @@ pub mod handlers {
                 }
 
                 let bytes = serde_json::to_vec(&params.payload)
-                    .map_err(AppError::FailedSerializePayload)?;
+                    .map_err(AppError::FailedSerializePayloadIntoBody)?;
 
                 builder
                     .body(axum::body::Body::from(bytes))
-                    .map_err(AppError::FailedBuildRequest)
+                    .map_err(AppError::FailedBuildRequestFromPayload)
             }
         }
 
@@ -145,10 +163,10 @@ pub mod handlers {
 
                 let bytes = axum::body::to_bytes(req.into_body(), 2 * 1024 * 1024)
                     .await
-                    .map_err(AppError::FailedExtractBody)?;
+                    .map_err(AppError::FailedExtractBodyIntoPayload)?;
 
                 let payload =
-                    serde_json::from_slice(&bytes).map_err(AppError::FailedSerializePayload)?;
+                    serde_json::from_slice(&bytes).map_err(AppError::FailedSerializePayloadFromBody)?;
 
                 Ok(RequestParams {
                     method,

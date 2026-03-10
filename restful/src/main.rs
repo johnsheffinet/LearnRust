@@ -71,19 +71,19 @@ pub mod handlers {
         pub enum AppError {
             #[error("Failed to serialize payload parameter into request body! {0}")]
             #[status(axum::http::StatusCode::BAD_REQUEST)]
-            FailedSerializePayloadIntoBody(/*#[from] */serde_json::Error),
+            FailedSerializePayloadIntoBody(serde_json::Error),
 
             #[error("Failed to serialize payload parameter from request body! {0}")]
             #[status(axum::http::StatusCode::BAD_REQUEST)]
-            FailedSerializePayloadFromBody(/*#[from] */serde_json::Error),
+            FailedSerializePayloadFromBody(serde_json::Error),
 
             #[error("Failed to build request body from payload parameter! {0}")]
             #[status(axum::http::StatusCode::BAD_REQUEST)]
-            FailedBuildRequestFromPayload(/*#[from] */axum::http::Error),
+            FailedBuildRequestFromPayload(axum::http::Error),
 
             #[error("Failed to extract request body into payload parameter! {0}")]
             #[status(axum::http::StatusCode::BAD_REQUEST)]
-            FailedExtractBodyIntoPayload(/*#[from] */axum::Error),
+            FailedExtractBodyIntoPayload(axum::Error),
         }
 
         pub type AppResult<T> = Result<T, AppError>;
@@ -151,8 +151,8 @@ pub mod handlers {
                     .await
                     .map_err(AppError::FailedExtractBodyIntoPayload)?;
 
-                let payload =
-                    serde_json::from_slice(&bytes).map_err(AppError::FailedSerializePayloadFromBody)?;
+                let payload = serde_json::from_slice(&bytes)
+                    .map_err(AppError::FailedSerializePayloadFromBody)?;
 
                 Ok(RequestParams {
                     method,
@@ -170,19 +170,19 @@ pub mod handlers {
         pub enum AppError {
             #[error("Failed to serialize payload parameter into response body! {0}")]
             #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-            FailedSerializePayloadIntoBody(/*#[from] */serde_json::Error),
+            FailedSerializePayloadIntoBody(serde_json::Error),
 
             #[error("Failed to serialize payload parameter from response body! {0}")]
             #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-            FailedSerializePayloadFromBody(/*#[from] */serde_json::Error),
+            FailedSerializePayloadFromBody(serde_json::Error),
 
             #[error("Failed to build response body from payload parameter! {0}")]
             #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-            FailedBuildResponseFromPayload(/*#[from] */axum::http::Error),
+            FailedBuildResponseFromPayload(axum::http::Error),
 
             #[error("Failed to extract response body into payload parameter! {0}")]
             #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-            FailedExtractBodyIntoPayload(/*#[from] */axum::Error),
+            FailedExtractBodyIntoPayload(axum::Error),
         }
 
         pub type AppResult<T> = Result<T, AppError>;
@@ -229,8 +229,8 @@ pub mod handlers {
                 let bytes = axum::body::to_bytes(res.into_body(), 2 * 1024 * 1024)
                     .await
                     .map_err(AppError::FailedExtractBodyIntoPayload)?;
-                let payload =
-                    serde_json::from_slice(&bytes).map_err(AppError::FailedSerializePayloadFromBody)?;
+                let payload = serde_json::from_slice(&bytes)
+                    .map_err(AppError::FailedSerializePayloadFromBody)?;
 
                 Ok(ResponseParams {
                     version,
@@ -377,7 +377,7 @@ pub mod tests {
 
             cool_asserts::assert_matches!(
                 Request::try_from(expected_params.clone()),
-                Err(AppError::FailedBuildRequest(_))
+                Err(AppError::FailedBuildRequestFromPayload(_))
             );
         }
 
@@ -402,7 +402,7 @@ pub mod tests {
                 payload,
             };
 
-            cool_asserts::assert_matches!(Request::try_from(expected_params.clone()), Err(AppError::FailedBuildRequest(ref err)) => {
+            cool_asserts::assert_matches!(Request::try_from(expected_params.clone()), Err(AppError::FailedBuildRequestFromPayload(ref err)) => {
                 pretty_assertions::assert_eq!(err.to_string(), "invalid uri character");
             });
         }

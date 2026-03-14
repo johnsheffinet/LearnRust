@@ -1,4 +1,30 @@
 pub mod handlers {
+    use axum::{extract::Request, response::Response};
+    use crate::handlers::{request::RequestParams, response::ResponseParams};
+
+    pub async fn redirect_to_https(req: Request) -> Response {
+        let version = axum::http::Version::HTTP_11;
+
+        let status = axum::http::StatusCode::TEMPORARY_REDIRECT;
+
+        let mut headers = axum::http::headers::HeaderMap::new();
+        headers.insert();
+
+        let payload = serde_json::json!("{ "status": "Redirected to ." }");
+
+        let params = ResponseParams {
+            version,
+            status,
+            headers,
+            payload,
+        };
+
+        Response.try_from(params.clone()).await
+    }
+
+    pub async fn check_liveliness(req: Request) -> Response {}
+
+    pub async fn report_invalid_route(req: Request) -> Response {}
     pub mod config {
         use std::sync::LazyLock;
 
@@ -241,7 +267,9 @@ pub mod handlers {
             }
         }
     }
-    pub mod utils {}
+    pub mod router {
+        pub async fn () -> {}
+    }
 }
 
 #[cfg(test)]

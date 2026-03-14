@@ -1,16 +1,64 @@
 pub mod handlers {
-    use axum::{extract::Request, response::Response};
+use axum::{extract::Request, http::{header::LOCATION, HeaderValue, StatusCode, Version}, response::Response};
+use serde_json::json;
+// Assuming these are in your crate
+// use crate::handlers::{request::RequestParams, response::ResponseParams};
+
+pub async fn redirect_to_https(req: Request) -> Response {
+    let version = Version::HTTP_11;
+    let status = StatusCode::TEMPORARY_REDIRECT;
+
+    // 1. Get path and query from the request object
+    let path_query = req.uri().path_and_query()
+        .map(|pq| pq.as_str())
+        .unwrap_or("/");
+
+    // 2. Build the destination URL
+    // Note: ensure CONFIG::https_addr is accessible
+    let location_str = format!("https://{}{}", "your.domain.com", path_query);
+    
+    // 3. Create the HeaderMap correctly
+    let mut headers = axum::http::HeaderMap::new();
+    let header_value = HeaderValue::try_from(&location_str)
+        .expect("Invalid characters in redirect URL");
+    headers.insert(LOCATION, header_value);
+
+    // 4. Correct JSON interpolation
+    let payload = json!({ 
+        "status": format!("Redirected to {}.", location_str) 
+    });
+
+    let params = ResponseParams {
+        version,
+        status,
+        headers,
+        payload,
+    };
+
+    // 5. Convert params to Response
+    // If your TryFrom is async, keep .await; otherwise remove it.
+    Response::try_from(params).unwrap_or_else(|_| {
+        StatusCode::INTERNAL_SERVER_ERROR.into_response()
+    })
+}
+    use axum::{extract::Request, http::{header::LOCATION, HeaderValue}, response::Response};
     use crate::handlers::{request::RequestParams, response::ResponseParams};
 
-    pub async fn redirect_to_https(req: Request) -> Response {
+    pub async fn redirect_to_https(uri: axum::http::Uri) -> Response {
         let version = axum::http::Version::HTTP_11;
-
         let status = axum::http::StatusCode::TEMPORARY_REDIRECT;
+        let payload = serde_json::json!("{ "status": format!("Redirected to {}.", location) }");
 
-        let mut headers = axum::http::headers::HeaderMap::new();
-        headers.insert();
-
-        let payload = serde_json::json!("{ "status": "Redirected to ." }");
+        let path_query = uri
+            .path_and_query()
+            .map(|pq| {pq.as_str})
+            .unwrap_or()"/";
+        let location = format!("https:://{}{}", CONFIG::https_addr, path_query);
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            LOCATION, 
+            HeaderValue::try_from(location).unwrap_or("/"),
+        );
 
         let params = ResponseParams {
             version,

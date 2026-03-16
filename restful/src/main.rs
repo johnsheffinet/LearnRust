@@ -5,22 +5,16 @@ use serde_json::json;
 // use crate::handlers::{request::RequestParams, response::ResponseParams};
 
 pub async fn redirect_to_https(req: Request) -> Response {
-    use axum::{extract::Request, http::{header::LOCATION, HeaderValue}, response::Response};
-    use crate::handlers::{request::RequestParams, response::ResponseParams};
+    use axum::{Json, /*extract::Request, */http::{header::LOCATION, HeaderValue}, response::IntoResponse};
+    // use crate::handlers::{request::RequestParams, response::ResponseParams};
 
-    pub async fn redirect_to_https(uri: axum::http::Uri) -> Response {
-        let path_query = uri
-            .path_and_query()
-            .map(|pq| { pq.as_str })
-            .unwrap_or("/");
-        let location = HeaderValue::try_from(format!("https:://{}{}", CONFIG.https_addr, path_query));
 
         let mut headers = axum::http::HeaderMap::new();
         headers.insert(LOCATION, location);
 
         let version = axum::http::Version::HTTP_11;
-        let status = axum::http::StatusCode::TEMPORARY_REDIRECT;
-        let payload = serde_json::json!({ "status": format!("Redirected to {}.", location) });
+    let payload = serde_json::json!({ "status": format!("Redirected to {}.", location) });
+
 
         let params = ResponseParams {
             version,
@@ -29,14 +23,26 @@ pub async fn redirect_to_https(req: Request) -> Response {
             payload,
         };
 
-        (version, status, [(LOCATION, location),], payload) // params
-            .into_response()
-            .await
-            .unwrap_or_else(|err| { err.into_response() })
-        
-        Response::try_from(&params)
-            .await
-            .unwrap_or_else(|err| { err.into_response() })
+    pub async fn redirect_to_https(uri: axum::http::Uri) -> Response {
+        use axum::{Json, http::{header::LOCATION, HeaderValue}, response::IntoResponse};
+
+        enum AppError {
+            #[error("Failed to create header! {0}")]
+            #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+            FailedCreateHeader([#from] axum::http::header::InvalidHeaderValue),
+        }
+
+        let status = axum::http::StatusCode::TEMPORARY_REDIRECT;
+
+        let path_query = uri
+            .path_and_query()
+            .map(|pq| { pq.as_str() })
+            .unwrap_or("/");
+        let location = HeaderValue::try_from(format!("https://{}{}", CONFIG.https_addr, path_query))?;
+
+        let body = Json(serde_json::json!({ "status": format!("Redirected to {}.", location) }));
+
+        (status, [(LOCATION, location),], body).into_response()
     }
 
     pub async fn check_liveliness(req: Request) -> Response {}

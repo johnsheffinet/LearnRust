@@ -1,5 +1,5 @@
 pub mod handlers {
-    use axum::{http::{header::LOCATION, HeaderValue, StatusCode}, response::Response};
+    use axum::{extract::Path, http::{header::LOCATION, HeaderValue, StatusCode}, response::{IntoResponse, Response}};
 
     #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
     pub enum AppError {
@@ -8,9 +8,11 @@ pub mod handlers {
         FailedCreateHeader(#[from] axum::http::header::InvalidHeaderValue),
     }
 
-    type Result<T> = Result<T, AppError>;
+    type AppResult<T> = Result<T, AppError>;
 
-    pub async fn redirect_to_https(uri: axum::http::Uri) -> Result<Response> {
+    pub async fn redirect_to_https(uri: axum::http::Uri) -> AppResult<Response> {
+        use crate::handlers::config::CONFIG;
+
         let status = StatusCode::TEMPORARY_REDIRECT;
 
         let path_query = uri
@@ -24,9 +26,22 @@ pub mod handlers {
         Ok((status, [(LOCATION, location)], body).into_response())
     }
 
-    pub async fn check_liveliness(req: Request) -> Response {}
+    pub async fn check_liveliness() -> AppResult<Response> {
+        let status = StatusCode::OK;
 
-    pub async fn report_invalid_route(req: Request) -> Response {}
+        let body = axum::Json(serde_json::json!({ "status": "App is lively." }));
+
+        Ok((status, body).into_response())
+    }
+
+    pub async fn report_invalid_route(Path(path): Path<String>) -> AppResult<Response> {
+        let status = StatusCode::NOT_FOUND;
+
+        let body = axum::Json(serde_json::json!({ "status": format!("'{}' path not found!", path) }));
+
+        Ok((status, body).into_response())
+    }
+
     pub mod config {
         use std::sync::LazyLock;
 

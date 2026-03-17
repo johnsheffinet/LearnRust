@@ -161,11 +161,11 @@ pub mod handlers {
                     headers.extend(params.headers);
                 }
 
-                let bytes = serde_json::to_vec(&params.payload)
+                let body = serde_json::to_vec(&params.payload)
                     .map_err(AppError::FailedSerializePayloadIntoBody)?;
 
                 builder
-                    .body(axum::body::Body::from(bytes))
+                    .body(axum::body::Body::from(body))
                     .map_err(AppError::FailedBuildRequestFromPayload)
             }
         }
@@ -269,10 +269,10 @@ pub mod handlers {
 
                 let headers = res.headers().clone();
 
-                let bytes = axum::body::to_bytes(res.into_body(), 2 * 1024 * 1024)
+                let body = axum::body::to_bytes(res.into_body(), 2 * 1024 * 1024)
                     .await
                     .map_err(AppError::FailedExtractBodyIntoPayload)?;
-                let payload = serde_json::from_slice(&bytes)
+                let payload = serde_json::from_slice(&body)
                     .map_err(AppError::FailedSerializePayloadFromBody)?;
 
                 Ok(ResponseParams {
@@ -285,6 +285,15 @@ pub mod handlers {
         }
     }
     pub mod router {
+        pub async fn (router: axum::Router, params: crate::handlers::request::RequestParams) -> AppResult<Response> {
+            use tower::ext;
+
+            let req = Request::try_from(params).map_err(crate::handlers::request:AppError::Failed...)?;
+
+            let res = oneshot(req);
+
+            Ok(res)
+        }
     }
 }
 

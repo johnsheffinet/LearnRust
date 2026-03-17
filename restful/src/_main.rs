@@ -2,19 +2,6 @@
 pub mod handlers {
     use super::*;
     
-    //     pub async fn get_router_response(
-    //         router: Router, 
-    //         params: RequestParams
-    //     ) -> SvcResult<Response> {
-    //         use tower::ServiceExt;
-        
-    //         let request = assert_ok!(Request::try_from(params));
-
-    //         let response = assert_ok!(router.oneshot(request).await);
-        
-    //         Ok(response)
-    //     }
-    // }
 }
 
 /*

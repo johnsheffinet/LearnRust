@@ -1,38 +1,17 @@
 pub mod handlers {
-use axum::{extract::Request, http::{header::LOCATION, HeaderValue, StatusCode, Version}, response::Response};
-use serde_json::json;
-// Assuming these are in your crate
-// use crate::handlers::{request::RequestParams, response::ResponseParams};
+    use axum::{http::{header::LOCATION, HeaderValue, StatusCode}, response::Response};
 
-pub async fn redirect_to_https(req: Request) -> Response {
-    use axum::{Json, /*extract::Request, */http::{header::LOCATION, HeaderValue}, response::IntoResponse};
-    // use crate::handlers::{request::RequestParams, response::ResponseParams};
+    #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
+    pub enum AppError {
+        #[error("Failed to create header! {0}")]
+        #[status(StatusCode::INTERNAL_SERVER_ERROR)]
+        FailedCreateHeader(#[from] axum::http::header::InvalidHeaderValue),
+    }
 
+    type Result<T> = Result<T, AppError>;
 
-        let mut headers = axum::http::HeaderMap::new();
-        headers.insert(LOCATION, location);
-
-        let version = axum::http::Version::HTTP_11;
-    let payload = serde_json::json!({ "status": format!("Redirected to {}.", location) });
-
-
-        let params = ResponseParams {
-            version,
-            status,
-            headers,
-            payload,
-        };
-
-    pub async fn redirect_to_https(uri: axum::http::Uri) -> Response {
-        use axum::{Json, http::{header::LOCATION, HeaderValue}, response::IntoResponse};
-
-        enum AppError {
-            #[error("Failed to create header! {0}")]
-            #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-            FailedCreateHeader([#from] axum::http::header::InvalidHeaderValue),
-        }
-
-        let status = axum::http::StatusCode::TEMPORARY_REDIRECT;
+    pub async fn redirect_to_https(uri: axum::http::Uri) -> Result<Response> {
+        let status = StatusCode::TEMPORARY_REDIRECT;
 
         let path_query = uri
             .path_and_query()
@@ -40,9 +19,9 @@ pub async fn redirect_to_https(req: Request) -> Response {
             .unwrap_or("/");
         let location = HeaderValue::try_from(format!("https://{}{}", CONFIG.https_addr, path_query))?;
 
-        let body = Json(serde_json::json!({ "status": format!("Redirected to {}.", location) }));
+        let body = axum::Json(serde_json::json!({ "status": format!("Temporarily redirecting to {:?}.", location) }));
 
-        (status, [(LOCATION, location),], body).into_response()
+        Ok((status, [(LOCATION, location)], body).into_response())
     }
 
     pub async fn check_liveliness(req: Request) -> Response {}

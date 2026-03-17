@@ -285,6 +285,14 @@ pub mod handlers {
         }
     }
     pub mod router {
+//         pub async fn get_https_router() -> axum::Router {
+//             use axum::routing::get;
+
+//             axum::Router::new()
+//                 .route("healthz", get(app_is_healthy))
+//                 .fallback(route_is_invalid)
+//         }
+
         pub async fn (router: axum::Router, params: crate::handlers::request::RequestParams) -> AppResult<Response> {
             use tower::ServiceExt;
 

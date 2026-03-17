@@ -286,11 +286,11 @@ pub mod handlers {
     }
     pub mod router {
         pub async fn (router: axum::Router, params: crate::handlers::request::RequestParams) -> AppResult<Response> {
-            use tower::ext;
+            use tower::ServiceExt;
 
             let req = Request::try_from(params).map_err(crate::handlers::request:AppError::Failed...)?;
 
-            let res = oneshot(req);
+            let res = router.oneshot(req).await.map_err()?;
 
             Ok(res)
         }

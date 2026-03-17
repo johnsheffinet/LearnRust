@@ -37,7 +37,7 @@ pub mod handlers {
     pub async fn report_invalid_route(Path(path): Path<String>) -> AppResult<Response> {
         let status = StatusCode::NOT_FOUND;
 
-        let body = axum::Json(serde_json::json!({ "status": format!("'{}' path not found!", path) }));
+        let body = axum::Json(serde_json::json!({ "status": format!("'{}' path is invalid!", path) }));
 
         Ok((status, body).into_response())
     }

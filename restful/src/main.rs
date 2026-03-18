@@ -1,112 +1,114 @@
 pub mod handlers {
-    use axum::{extract::Path, http::{header::LOCATION, HeaderValue, StatusCode}, response::{IntoResponse, Response}};
+    use axum::{extract::Path, response::IntoResponse};
 
     #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
     pub enum AppError {
         #[error("Failed to create header! {0}")]
-        #[status(StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedCreateHeader(#[from] axum::http::header::InvalidHeaderValue),
+        #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+        FailedCreateHeader(axum::http::header::InvalidHeaderValue),
     }
 
     type AppResult<T> = Result<T, AppError>;
 
-    pub async fn redirect_to_https(uri: axum::http::Uri) -> AppResult<Response> {
+    pub async fn redirect_to_https(uri: axum::http::Uri) -> AppResult<axum::response::Response> {
+        use axum::http::header::LOCATION;
         use crate::handlers::config::CONFIG;
 
-        let status = StatusCode::TEMPORARY_REDIRECT;
+        let status = axum::http::StatusCode::TEMPORARY_REDIRECT;
 
         let path_query = uri
             .path_and_query()
             .map(|pq| { pq.as_str() })
             .unwrap_or("/");
-        let location = HeaderValue::try_from(format!("https://{}{}", CONFIG.https_addr, path_query))?;
+        let location = axum::http::HeaderValue::try_from(format!("https://{}{}", CONFIG.https_addr, path_query))
+            .map_err(AppError::FailedCreateHeader)?;
 
         let body = axum::Json(serde_json::json!({ "status": format!("Temporarily redirecting to {:?}.", location) }));
 
         Ok((status, [(LOCATION, location)], body).into_response())
     }
 
-    pub async fn check_liveliness() -> AppResult<Response> {
-        let status = StatusCode::OK;
+    pub async fn check_app_liveliness() -> AppResult<axum::response::Response> {
+        let status = axum::http::StatusCode::OK;
 
         let body = axum::Json(serde_json::json!({ "status": "App is lively." }));
 
         Ok((status, body).into_response())
     }
 
-    pub async fn report_invalid_route(Path(path): Path<String>) -> AppResult<Response> {
-        let status = StatusCode::NOT_FOUND;
+    pub async fn report_invalid_route(Path(path): Path<String>) -> AppResult<axum::response::Response> {
+        let status = axum::http::StatusCode::NOT_FOUND;
 
         let body = axum::Json(serde_json::json!({ "status": format!("'{}' path is invalid!", path) }));
 
         Ok((status, body).into_response())
     }
+}
+pub mod config {
+    use std::sync::LazyLock;
 
-    pub mod config {
-        use std::sync::LazyLock;
+    pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().unwrap());
 
-        pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().unwrap());
+    #[derive(Debug, thiserror::Error)]
+    pub enum AppError {
+        #[error("Failed to extract environment variable! {0}")]
+        FailedExtractEnvVar(figment::Error),
 
-        #[derive(Debug, thiserror::Error)]
-        pub enum AppError {
-            #[error("Failed to extract environment variable! {0}")]
-            FailedExtractEnvVar(#[from] figment::Error),
+        #[error("{0}")]
+        FailedValidate(validator::ValidationErrors),
+    }
 
-            #[error("{0}")]
-            FailedValidate(#[from] validator::ValidationErrors),
+    pub type AppResult<T> = Result<T, AppError>;
+
+    #[derive(Debug, serde::Deserialize, get_fields::GetFields, validator::Validate)]
+    #[serde(rename_all = "UPPERCASE")]
+    #[get_fields(rename_all = "UPPERCASE")]
+    pub struct AppConfig {
+        pub http_addr: std::net::SocketAddr,
+        pub https_addr: std::net::SocketAddr,
+        #[validate(custom(
+            function = "AppConfig::validate_path",
+            message = "Failed to find certificate file!"
+        ))]
+        pub cert_path: std::path::PathBuf,
+        #[validate(custom(
+            function = "AppConfig::validate_path",
+            message = "Failed to find key file!"
+        ))]
+        pub key_path: std::path::PathBuf,
+    }
+
+    impl AppConfig {
+        #[tracing::instrument(err)]
+        pub fn new() -> AppResult<Self> {
+            use validator::Validate;
+
+            let cfg: AppConfig = figment::Figment::new()
+                .merge(
+                    figment::providers::Env::raw()
+                        .only(&Self::get_fields)
+                        .lowercase(false),
+                )
+                .extract()
+                .map_err(AppError::FailedExtractEnvVar)?;
+
+            cfg.validate().map_err(AppError::FailedValidate)?;
+
+            Ok(cfg)
         }
 
-        pub type AppResult<T> = Result<T, AppError>;
-
-        #[derive(Debug, serde::Deserialize, get_fields::GetFields, validator::Validate)]
-        #[serde(rename_all = "UPPERCASE")]
-        #[get_fields(rename_all = "UPPERCASE")]
-        pub struct AppConfig {
-            pub http_addr: std::net::SocketAddr,
-            pub https_addr: std::net::SocketAddr,
-            #[validate(custom(
-                function = "AppConfig::validate_path",
-                message = "Failed to find certificate file!"
-            ))]
-            pub cert_path: std::path::PathBuf,
-            #[validate(custom(
-                function = "AppConfig::validate_path",
-                message = "Failed to find key file!"
-            ))]
-            pub key_path: std::path::PathBuf,
-        }
-
-        impl AppConfig {
-            #[tracing::instrument(err)]
-            pub fn new() -> AppResult<Self> {
-                use validator::Validate;
-
-                let cfg: AppConfig = figment::Figment::new()
-                    .merge(
-                        figment::providers::Env::raw()
-                            .only(&Self::get_fields)
-                            .lowercase(false),
-                    )
-                    .extract()
-                    .map_err(AppError::FailedExtractEnvVar)?;
-
-                cfg.validate().map_err(AppError::FailedValidate)?;
-
-                Ok(cfg)
-            }
-
-            #[tracing::instrument(err)]
-            pub fn validate_path(
-                path: &std::path::PathBuf,
-            ) -> Result<(), validator::ValidationError> {
-                if path.exists() {
-                    Ok(())
-                } else {
-                    Err(validator::ValidationError::new("FailedFindFile"))
-                }
+        #[tracing::instrument(err)]
+        pub fn validate_path(
+            path: &std::path::PathBuf,
+        ) -> Result<(), validator::ValidationError> {
+            if path.exists() {
+                Ok(())
+            } else {
+                Err(validator::ValidationError::new("FailedFindFile"))
             }
         }
     }
+}
     pub mod request {
         use axum::extract::{FromRequest, Request};
 

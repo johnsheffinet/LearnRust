@@ -10,6 +10,7 @@ pub mod handlers {
 
     type AppResult<T> = Result<T, AppError>;
 
+    #[tracing::instrument(skip_all, err)]
     pub async fn redirect_to_https(uri: axum::http::Uri) -> AppResult<axum::response::Response> {
         use axum::http::header::LOCATION;
         use crate::handlers::config::CONFIG;
@@ -28,6 +29,7 @@ pub mod handlers {
         Ok((status, [(LOCATION, location)], body).into_response())
     }
 
+    #[tracing::instrument(skip_all, err)]
     pub async fn check_app_liveliness() -> AppResult<axum::response::Response> {
         let status = axum::http::StatusCode::OK;
 
@@ -36,6 +38,7 @@ pub mod handlers {
         Ok((status, body).into_response())
     }
 
+    #[tracing::instrument(skip_all, err)]
     pub async fn report_invalid_route(Path(path): Path<String>) -> AppResult<axum::response::Response> {
         let status = axum::http::StatusCode::NOT_FOUND;
 
@@ -79,7 +82,7 @@ pub mod config {
     }
 
     impl AppConfig {
-        #[tracing::instrument(err)]
+        #[tracing::instrument(skip_all, err)]
         pub fn new() -> AppResult<Self> {
             use validator::Validate;
 
@@ -97,7 +100,7 @@ pub mod config {
             Ok(cfg)
         }
 
-        #[tracing::instrument(err)]
+        #[tracing::instrument(skip_all, err)]
         pub fn validate_path(
             path: &std::path::PathBuf,
         ) -> Result<(), validator::ValidationError> {

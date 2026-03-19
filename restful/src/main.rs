@@ -13,7 +13,7 @@ pub mod handlers {
     #[tracing::instrument(skip_all, err)]
     pub async fn redirect_to_https(uri: axum::http::Uri) -> AppResult<axum::response::Response> {
         use axum::http::header::LOCATION;
-        use crate::handlers::config::CONFIG;
+        use crate::config::CONFIG;
 
         let status = axum::http::StatusCode::TEMPORARY_REDIRECT;
 
@@ -298,22 +298,21 @@ pub mod config {
 //                 .fallback(route_is_invalid)
 //         }
 
-        pub async fn (router: axum::Router, params: crate::handlers::request::RequestParams) -> AppResult<Response> {
-            use tower::ServiceExt;
+    //     pub async fn (router: axum::Router, params: crate::handlers::request::RequestParams) -> AppResult<Response> {
+    //         use tower::ServiceExt;
 
-            let req = Request::try_from(params).map_err(crate::handlers::request:AppError::Failed...)?;
+    //         let req = Request::try_from(params).map_err(crate::handlers::request:AppError::Failed...)?;
 
-            let res = router.oneshot(req).await.map_err()?;
+    //         let res = router.oneshot(req).await.map_err()?;
 
-            Ok(res)
-        }
+    //         Ok(res)
+    //     }
+    // }
     }
-}
-
 #[cfg(test)]
 pub mod tests {
     pub mod config {
-        use crate::handlers::config::{AppConfig, AppError};
+        use crate::config::{AppConfig, AppError};
 
         #[test_log::test(test)]
         fn test_create_app_config_success() {
@@ -389,8 +388,8 @@ pub mod tests {
         }
     }
     pub mod request {
-        use crate::handlers::request::{AppError, RequestParams};
-        use axum::extract::{FromRequest, Request};
+        use crate::request::{AppError, RequestParams};
+        use axum::extract::Request;
 
         #[test_log::test(tokio::test)]
         async fn test_create_request_from_params_success() {
@@ -515,5 +514,5 @@ pub mod tests {
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    std::sync::LazyLock::force(&handlers::config::CONFIG);
+    std::sync::LazyLock::force(&config::CONFIG);
 }

@@ -1,5 +1,5 @@
 pub mod handlers {
-    use axum::{extract::Path, response::IntoResponse};
+    use axum::response::IntoResponse;
 
     #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
     pub enum AppError {
@@ -11,13 +11,14 @@ pub mod handlers {
     type AppResult<T> = Result<T, AppError>;
 
     #[tracing::instrument(skip_all, err)]
-    pub async fn redirect_to_https(uri: axum::http::Uri) -> AppResult<axum::response::Response> {
+    pub async fn redirect_to_https(req: axum::extract::Request) -> AppResult<axum::response::Response> {
         use axum::http::header::LOCATION;
         use crate::config::CONFIG;
 
         let status = axum::http::StatusCode::TEMPORARY_REDIRECT;
 
-        let path_query = uri
+        let path_query = req
+            .uri()
             .path_and_query()
             .map(|pq| { pq.as_str() })
             .unwrap_or("/");

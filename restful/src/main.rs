@@ -236,64 +236,19 @@ pub mod config {
 
         pub type AppResult<T> = Result<T, AppError>;
 
-        #[derive(Debug, Clone, PartialEq)]
-        pub struct ResponseParams {
-            pub version: axum::http::Version,
-            pub status: axum::http::StatusCode,
-            pub headers: axum::http::header::HeaderMap,
-            pub payload: serde_json::Value,
         }
 
-        impl TryFrom<ResponseParams> for axum::response::Response {
-            type Error = AppError;
-
-            #[tracing::instrument(skip_all, err)]
-            fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
-                let mut builder = axum::response::Response::builder()
-                    .version(params.version)
-                    .status(params.status);
-
-                if let Some(headers) = builder.headers_mut() {
-                    headers.extend(params.headers);
-                }
-
-                let bytes = serde_json::to_vec(&params.payload)
-                    .map_err(AppError::FailedSerializePayloadIntoBody)?;
-
-                builder
-                    .body(axum::body::Body::from(bytes))
-                    .map_err(AppError::FailedBuildResponseFromPayload)
-            }
-        }
-
-        impl ResponseParams {
-            #[tracing::instrument(skip_all, err)]
-            pub async fn from_response(res: axum::response::Response) -> AppResult<Self> {
-                let version = res.version();
-
-                let status = res.status();
-
-                let headers = res.headers().clone();
-
-                let body = axum::body::to_bytes(res.into_body(), 2 * 1024 * 1024)
-                    .await
-                    .map_err(AppError::FailedExtractBodyIntoPayload)?;
-                let payload = serde_json::from_slice(&body)
-                    .map_err(AppError::FailedSerializePayloadFromBody)?;
-
-                Ok(ResponseParams {
-                    version,
-                    status,
-                    headers,
-                    payload,
-                })
-            }
-        }
     }
 pub mod tls {
     use create::handlers as h;
-    
-    pub async fn get_rustls_config() -> axum_server::RustlsConfig {}
+
+    pub async fn get_rustls_config() -> axum_server::tls_rustls::RustlsConfig {
+        use crate::config::CONFIG;
+
+        axum_server::tls_rustls::RustlsConfig::from_pem_file(CONFIG.cert_path, CONFIG.key_path)
+            .await
+            .expect("Failed to load '{}' or '{}' pem file!", CONFIG.cert_path, CONFIG.key_path)
+    }
 
     pub async fn get_http_router() -> axum::Router {
         axum::Router::new()
@@ -311,6 +266,61 @@ pub mod tls {
 
 #[cfg(test)]
 pub mod tests {
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct ResponseParams {
+        pub version: axum::http::Version,
+        pub status: axum::http::StatusCode,
+        pub headers: axum::http::header::HeaderMap,
+        pub payload: serde_json::Value,
+    }
+
+    impl TryFrom<ResponseParams> for axum::response::Response {
+        type Error = AppError;
+
+        #[tracing::instrument(skip_all, err)]
+        fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
+            let mut builder = axum::response::Response::builder()
+                .version(params.version)
+                .status(params.status);
+
+            if let Some(headers) = builder.headers_mut() {
+                headers.extend(params.headers);
+            }
+
+            let body = serde_json::to_vec(&params.payload)
+                .map_err(AppError::FailedSerializePayloadIntoResponseBody)?;
+
+            builder
+                .body(axum::body::Body::from(&body))
+                .map_err(AppError::FailedBuildResponseFromPayload)
+        }
+    }
+
+    impl ResponseParams {
+    #[tracing::instrument(skip_all, err)]
+        pub async fn from_response(res: axum::response::Response) -> AppResult<Self> {
+            let version = res.version();
+    
+            let status = res.status();
+    
+            let headers = res.headers().clone();
+    
+            let body = axum::body::to_bytes(res.into_body(), 2 * 1024 * 1024)
+                .await
+                .map_err(AppError::FailedExtractBodyIntoPayload)?;
+            let payload = serde_json::from_slice(&body)
+                .map_err(AppError::FailedSerializePayloadFromBody)?;
+    
+            Ok(ResponseParams {
+                version,
+                status,
+                headers,
+                payload,
+            })
+        }
+    }
+
     pub async fn get_router_response_params_from_request_params(router: axum::Router, req_params: RequestParams) -> AppResult<ResponseParams> {
         use tower::ServiceExt;
 

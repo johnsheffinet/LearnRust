@@ -266,6 +266,84 @@ pub mod tls {
 
 #[cfg(test)]
 pub mod tests {
+    pub type AppResult<T> = Result<T, AppError>;
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct RequestParams {
+        pub method: axum::http::Method,
+        pub path: String,
+        pub query: String,
+        pub version: axum::http::Version,
+        pub headers: axum::http::header::HeaderMap,
+        pub payload: serde_json::Value,
+    }
+
+    impl TryFrom<RequestParams> for Request {
+        type Error = AppError;
+
+        #[tracing::instrument(skip_all, err)]
+        fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
+            let params_uri = if params.query.is_empty() {
+                params.path
+            } else {
+                format!("{}?{}", params.path, params.query)
+            };
+
+            let mut builder = axum::extract::Request::builder()
+                .method(params.method)
+                .uri(params_uri)
+                .version(params.version);
+
+            if let Some(headers) = builder.headers_mut() {
+                headers.extend(params.headers);
+            }
+
+            let body = serde_json::to_vec(&params.payload)
+                .map_err(AppError::FailedSerializePayloadIntoBody)?;
+
+            builder
+                .body(axum::body::Body::from(body))
+                .map_err(AppError::FailedBuildRequestFromPayload)
+        }
+    }
+
+    impl<S> FromRequest<S> for RequestParams
+    where
+        S: Send + Sync,
+    {
+        type Rejection = AppError;
+
+        #[tracing::instrument(skip_all, err)]
+        async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+            let method = req.method().clone();
+
+            let uri = req.uri().clone();
+
+            let path = uri.path().to_string();
+
+            let query = uri.query().unwrap_or("").to_string();
+
+            let version = req.version();
+
+            let headers = req.headers().clone();
+
+            let bytes = axum::body::to_bytes(req.into_body(), 2 * 1024 * 1024)
+                .await
+                .map_err(AppError::FailedExtractBodyIntoPayload)?;
+
+            let payload = serde_json::from_slice(&bytes)
+                .map_err(AppError::FailedSerializePayloadFromBody)?;
+
+            Ok(RequestParams {
+                method,
+                path,
+                query,
+                version,
+                headers,
+                payload,
+            })
+        }
+    }
 
     #[derive(Debug, Clone, PartialEq)]
     pub struct ResponseParams {

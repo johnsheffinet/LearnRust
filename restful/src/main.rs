@@ -313,11 +313,11 @@ pub mod tests {
     pub async fn get_router_response_params_from_request_params(router: axum::Router, req_params: RequestParams) -> AppResult<ResponseParams> {
         use tower::ServiceExt;
 
-        let req = Request::try_from(req_params)?;
+        let req = axum::extract::Request::try_from(req_params)?;
 
         let res = router.oneshot(req);
 
-        let res_params = Response::from_response(res)?
+        let res_params = axum::response::Response::from_response(res)?
 
         Ok(res_params)
     }
@@ -399,7 +399,6 @@ pub mod tests {
     }
     pub mod request {
         use crate::request::{AppError, RequestParams};
-        use axum::extract::Request;
 
         #[test_log::test(tokio::test)]
         async fn test_create_request_from_params_success() {
@@ -422,7 +421,7 @@ pub mod tests {
                 payload,
             };
 
-            let req = cool_asserts::assert_matches!(Request::try_from(expected_params.clone()), Ok(req) => req);
+            let req = cool_asserts::assert_matches!(axum::extract::Request::try_from(expected_params.clone()), Ok(req) => req);
 
             let actual_params = cool_asserts::assert_matches!(RequestParams::from_request(req, &()).await, Ok(actual_params) => actual_params);
 
@@ -451,7 +450,7 @@ pub mod tests {
             };
 
             cool_asserts::assert_matches!(
-                Request::try_from(expected_params.clone()),
+                axum::extract::Request::try_from(expected_params.clone()),
                 Err(AppError::FailedBuildRequestFromPayload(_))
             );
         }
@@ -477,7 +476,7 @@ pub mod tests {
                 payload,
             };
 
-            cool_asserts::assert_matches!(Request::try_from(expected_params.clone()), Err(AppError::FailedBuildRequestFromPayload(ref err)) => {
+            cool_asserts::assert_matches!(axum::extract::Request::try_from(expected_params.clone()), Err(AppError::FailedBuildRequestFromPayload(ref err)) => {
                 pretty_assertions::assert_eq!(err.to_string(), "invalid uri character");
             });
         }
@@ -512,11 +511,6 @@ pub mod tests {
 
             pretty_assertions::assert_eq!(actual_params, expected_params);
         }
-    }
-    pub mod router {
-        // use super::*;
-        // use crate::handlers::router;
-        // use pretty_assertions::assert_eq;
     }
 }
 

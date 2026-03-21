@@ -150,11 +150,11 @@ pub mod tests {
 
         #[error("Failed to serialize payload parameter from request body! {0}")]
         #[status(axum::http::StatusCode::BAD_REQUEST)]
-        FailedSerializePayloadFromBody(serde_json::Error),
+        FailedSerializePayloadFromRequestBody(serde_json::Error),
 
         #[error("Failed to build request body from payload parameter! {0}")]
         #[status(axum::http::StatusCode::BAD_REQUEST)]
-        FailedBuildRequestFromPayload(axum::http::Error),
+        FailedBuildRequestBodyFromPayload(axum::http::Error),
 
         #[error("Failed to extract request body into payload parameter! {0}")]
         #[status(axum::http::StatusCode::BAD_REQUEST)]

@@ -290,28 +290,38 @@ pub mod config {
             }
         }
     }
-    pub mod router {
-//         pub async fn get_https_router() -> axum::Router {
-//             use axum::routing::get;
+pub mod tls {
+    use create::handlers as h;
+    
+    pub async fn get_rustls_config() -> axum_server::RustlsConfig {}
 
-//             axum::Router::new()
-//                 .route("healthz", get(app_is_healthy))
-//                 .fallback(route_is_invalid)
-//         }
-
-    //     pub async fn (router: axum::Router, params: crate::handlers::request::RequestParams) -> AppResult<Response> {
-    //         use tower::ServiceExt;
-
-    //         let req = Request::try_from(params).map_err(crate::handlers::request:AppError::Failed...)?;
-
-    //         let res = router.oneshot(req).await.map_err()?;
-
-    //         Ok(res)
-    //     }
-    // }
+    pub async fn get_http_router() -> axum::Router {
+        axum::Router::new()
+            .fallback(h::redirect_to_https)
     }
+
+    pub async fn get_https_router() -> axum::Router {
+        use axum::routing::get;
+
+        axum::Router::new()
+            .route("healthz", get(h::check_app_liveliness))
+            .fallback(h::report_route_invalid)
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
+    pub async fn get_router_response_params_from_request_params(router: axum::Router, req_params: RequestParams) -> AppResult<ResponseParams> {
+        use tower::ServiceExt;
+
+        let req = Request::try_from(req_params)?;
+
+        let res = router.oneshot(req);
+
+        let res_params = Response::from_response(res)?
+
+        Ok(res_params)
+    }
     pub mod config {
         use crate::config::{AppConfig, AppError};
 

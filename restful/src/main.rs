@@ -311,11 +311,11 @@ pub mod tests {
     }
 
     pub async fn get_router_response_params_from_request_params(router: axum::Router, req_params: RequestParams) -> AppResult<ResponseParams> {
-        use tower::ServiceExt;
+        use tower::util::ServiceExt;
 
         let req = axum::extract::Request::try_from(req_params)?;
 
-        let res = router.oneshot(req).await;
+        let res = router.oneshot(req);
 
         let res_params = ResponseParams::from_response(res).await?;
 

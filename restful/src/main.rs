@@ -52,9 +52,7 @@ pub mod config {
         }
 
         #[tracing::instrument(skip_all, err)]
-        pub fn validate_path(
-            path: &std::path::PathBuf,
-        ) -> Result<(), validator::ValidationError> {
+        pub fn validate_path(path: &std::path::PathBuf) -> Result<(), validator::ValidationError> {
             if path.exists() {
                 Ok(())
             } else {
@@ -76,21 +74,28 @@ pub mod handlers {
     type AppResult<T> = Result<T, AppError>;
 
     #[tracing::instrument(skip_all, err)]
-    pub async fn redirect_to_https(req: axum::extract::Request) -> AppResult<axum::response::Response> {
-        use axum::http::header::LOCATION;
+    pub async fn redirect_to_https(
+        req: axum::extract::Request,
+    ) -> AppResult<axum::response::Response> {
         use crate::config::CONFIG;
+        use axum::http::header::LOCATION;
 
         let status = axum::http::StatusCode::TEMPORARY_REDIRECT;
 
         let path_query = req
             .uri()
             .path_and_query()
-            .map(|pq| { pq.as_str() })
+            .map(|pq| pq.as_str())
             .unwrap_or("/");
-        let location = axum::http::HeaderValue::try_from(format!("https://{}{}", CONFIG.https_addr, path_query))
-            .map_err(AppError::FailedCreateHeader)?;
+        let location = axum::http::HeaderValue::try_from(format!(
+            "https://{}{}",
+            CONFIG.https_addr, path_query
+        ))
+        .map_err(AppError::FailedCreateHeader)?;
 
-        let body = axum::Json(serde_json::json!({ "status": format!("Temporarily redirecting to {:?}.", location) }));
+        let body = axum::Json(
+            serde_json::json!({ "status": format!("Temporarily redirecting to {:?}.", location) }),
+        );
 
         Ok((status, [(LOCATION, location)], body).into_response())
     }
@@ -105,10 +110,13 @@ pub mod handlers {
     }
 
     #[tracing::instrument(skip_all, err)]
-    pub async fn report_invalid_route(axum::extract::Path(path): axum::extract::Path<String>) -> AppResult<axum::response::Response> {
+    pub async fn report_invalid_route(
+        axum::extract::Path(path): axum::extract::Path<String>,
+    ) -> AppResult<axum::response::Response> {
         let status = axum::http::StatusCode::NOT_FOUND;
 
-        let body = axum::Json(serde_json::json!({ "status": format!("'{}' route is invalid!", path) }));
+        let body =
+            axum::Json(serde_json::json!({ "status": format!("'{}' route is invalid!", path) }));
 
         Ok((status, body).into_response())
     }
@@ -121,12 +129,14 @@ pub mod tls {
 
         axum_server::tls_rustls::RustlsConfig::from_pem_file(&CONFIG.cert_path, &CONFIG.key_path)
             .await
-            .expect(&format!("Failed to load '{:?}' or '{:?}' pem file!", CONFIG.cert_path, CONFIG.key_path))
+            .expect(&format!(
+                "Failed to load '{:?}' or '{:?}' pem file!",
+                CONFIG.cert_path, CONFIG.key_path
+            ))
     }
 
     pub async fn get_http_router() -> axum::Router {
-        axum::Router::new()
-            .fallback(h::redirect_to_https)
+        axum::Router::new().fallback(h::redirect_to_https)
     }
 
     pub async fn get_https_router() -> axum::Router {
@@ -225,7 +235,10 @@ pub mod tests {
         type Rejection = AppError;
 
         #[tracing::instrument(skip_all, err)]
-        async fn from_request(req: axum::extract::Request, state: &S) -> Result<Self, Self::Rejection> {
+        async fn from_request(
+            req: axum::extract::Request,
+            state: &S,
+        ) -> Result<Self, Self::Rejection> {
             let method = req.method().clone();
 
             let uri = req.uri().clone();
@@ -287,20 +300,20 @@ pub mod tests {
     }
 
     impl ResponseParams {
-    #[tracing::instrument(skip_all, err)]
+        #[tracing::instrument(skip_all, err)]
         pub async fn from_response(res: axum::response::Response) -> AppResult<Self> {
             let version = res.version();
-    
+
             let status = res.status();
-    
+
             let headers = res.headers().clone();
-    
+
             let body = axum::body::to_bytes(res.into_body(), 2 * 1024 * 1024)
                 .await
                 .map_err(AppError::FailedExtractResponseBodyIntoPayload)?;
             let payload = serde_json::from_slice(&body)
                 .map_err(AppError::FailedSerializePayloadFromResponseBody)?;
-    
+
             Ok(ResponseParams {
                 version,
                 status,
@@ -310,7 +323,10 @@ pub mod tests {
         }
     }
 
-    pub async fn get_router_response_params_from_request_params(router: axum::Router, req_params: RequestParams) -> AppResult<ResponseParams> {
+    pub async fn get_router_response_params_from_request_params(
+        router: axum::Router,
+        req_params: RequestParams,
+    ) -> AppResult<ResponseParams> {
         use tower::util::ServiceExt;
 
         let req = axum::extract::Request::try_from(req_params)?;

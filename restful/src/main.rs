@@ -1,53 +1,3 @@
-pub mod handlers {
-    use axum::response::IntoResponse;
-
-    #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
-    pub enum AppError {
-        #[error("Failed to create header! {0}")]
-        #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedCreateHeader(axum::http::header::InvalidHeaderValue),
-    }
-
-    type AppResult<T> = Result<T, AppError>;
-
-    #[tracing::instrument(skip_all, err)]
-    pub async fn redirect_to_https(req: axum::extract::Request) -> AppResult<axum::response::Response> {
-        use axum::http::header::LOCATION;
-        use crate::config::CONFIG;
-
-        let status = axum::http::StatusCode::TEMPORARY_REDIRECT;
-
-        let path_query = req
-            .uri()
-            .path_and_query()
-            .map(|pq| { pq.as_str() })
-            .unwrap_or("/");
-        let location = axum::http::HeaderValue::try_from(format!("https://{}{}", CONFIG.https_addr, path_query))
-            .map_err(AppError::FailedCreateHeader)?;
-
-        let body = axum::Json(serde_json::json!({ "status": format!("Temporarily redirecting to {:?}.", location) }));
-
-        Ok((status, [(LOCATION, location)], body).into_response())
-    }
-
-    #[tracing::instrument(skip_all, err)]
-    pub async fn check_app_liveliness() -> AppResult<axum::response::Response> {
-        let status = axum::http::StatusCode::OK;
-
-        let body = axum::Json(serde_json::json!({ "status": "App is lively." }));
-
-        Ok((status, body).into_response())
-    }
-
-    #[tracing::instrument(skip_all, err)]
-    pub async fn report_invalid_route(Path(path): Path<String>) -> AppResult<axum::response::Response> {
-        let status = axum::http::StatusCode::NOT_FOUND;
-
-        let body = axum::Json(serde_json::json!({ "status": format!("'{}' route is invalid!", path) }));
-
-        Ok((status, body).into_response())
-    }
-}
 pub mod config {
     use std::sync::LazyLock;
 
@@ -113,28 +63,57 @@ pub mod config {
         }
     }
 }
+pub mod handlers {
+    use axum::response::IntoResponse;
+
+    #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
+    pub enum AppError {
+        #[error("Failed to create header! {0}")]
+        #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+        FailedCreateHeader(axum::http::header::InvalidHeaderValue),
+    }
+
+    type AppResult<T> = Result<T, AppError>;
+
+    #[tracing::instrument(skip_all, err)]
+    pub async fn redirect_to_https(req: axum::extract::Request) -> AppResult<axum::response::Response> {
+        use axum::http::header::LOCATION;
+        use crate::config::CONFIG;
+
+        let status = axum::http::StatusCode::TEMPORARY_REDIRECT;
+
+        let path_query = req
+            .uri()
+            .path_and_query()
+            .map(|pq| { pq.as_str() })
+            .unwrap_or("/");
+        let location = axum::http::HeaderValue::try_from(format!("https://{}{}", CONFIG.https_addr, path_query))
+            .map_err(AppError::FailedCreateHeader)?;
+
+        let body = axum::Json(serde_json::json!({ "status": format!("Temporarily redirecting to {:?}.", location) }));
+
+        Ok((status, [(LOCATION, location)], body).into_response())
+    }
+
+    #[tracing::instrument(skip_all, err)]
+    pub async fn check_app_liveliness() -> AppResult<axum::response::Response> {
+        let status = axum::http::StatusCode::OK;
+
+        let body = axum::Json(serde_json::json!({ "status": "App is lively." }));
+
+        Ok((status, body).into_response())
+    }
+
+    #[tracing::instrument(skip_all, err)]
+    pub async fn report_invalid_route(Path(path): Path<String>) -> AppResult<axum::response::Response> {
+        let status = axum::http::StatusCode::NOT_FOUND;
+
+        let body = axum::Json(serde_json::json!({ "status": format!("'{}' route is invalid!", path) }));
+
+        Ok((status, body).into_response())
+    }
+}
     pub mod request {
-        use axum::extract::{FromRequest, Request};
-
-        #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
-        pub enum AppError {
-            #[error("Failed to serialize payload parameter into request body! {0}")]
-            #[status(axum::http::StatusCode::BAD_REQUEST)]
-            FailedSerializePayloadIntoBody(serde_json::Error),
-
-            #[error("Failed to serialize payload parameter from request body! {0}")]
-            #[status(axum::http::StatusCode::BAD_REQUEST)]
-            FailedSerializePayloadFromBody(serde_json::Error),
-
-            #[error("Failed to build request body from payload parameter! {0}")]
-            #[status(axum::http::StatusCode::BAD_REQUEST)]
-            FailedBuildRequestFromPayload(axum::http::Error),
-
-            #[error("Failed to extract request body into payload parameter! {0}")]
-            #[status(axum::http::StatusCode::BAD_REQUEST)]
-            FailedExtractBodyIntoPayload(axum::Error),
-        }
-
         pub type AppResult<T> = Result<T, AppError>;
 
         #[derive(Debug, Clone, PartialEq)]
@@ -215,25 +194,6 @@ pub mod config {
         }
     }
     pub mod response {
-        #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
-        pub enum AppError {
-            #[error("Failed to serialize payload parameter into response body! {0}")]
-            #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-            FailedSerializePayloadIntoBody(serde_json::Error),
-
-            #[error("Failed to serialize payload parameter from response body! {0}")]
-            #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-            FailedSerializePayloadFromBody(serde_json::Error),
-
-            #[error("Failed to build response body from payload parameter! {0}")]
-            #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-            FailedBuildResponseFromPayload(axum::http::Error),
-
-            #[error("Failed to extract response body into payload parameter! {0}")]
-            #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-            FailedExtractBodyIntoPayload(axum::Error),
-        }
-
         pub type AppResult<T> = Result<T, AppError>;
 
         }
@@ -266,6 +226,43 @@ pub mod tls {
 
 #[cfg(test)]
 pub mod tests {
+    use axum::extract::FromRequest;
+
+    #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
+    pub enum AppError {
+        #[error("Failed to serialize payload parameter into request body! {0}")]
+        #[status(axum::http::StatusCode::BAD_REQUEST)]
+        FailedSerializePayloadIntoBody(serde_json::Error),
+
+        #[error("Failed to serialize payload parameter from request body! {0}")]
+        #[status(axum::http::StatusCode::BAD_REQUEST)]
+        FailedSerializePayloadFromBody(serde_json::Error),
+
+        #[error("Failed to build request body from payload parameter! {0}")]
+        #[status(axum::http::StatusCode::BAD_REQUEST)]
+        FailedBuildRequestFromPayload(axum::http::Error),
+
+        #[error("Failed to extract request body into payload parameter! {0}")]
+        #[status(axum::http::StatusCode::BAD_REQUEST)]
+        FailedExtractBodyIntoPayload(axum::Error),
+
+        #[error("Failed to serialize payload parameter into response body! {0}")]
+        #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+        FailedSerializePayloadIntoBody(serde_json::Error),
+
+        #[error("Failed to serialize payload parameter from response body! {0}")]
+        #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+        FailedSerializePayloadFromBody(serde_json::Error),
+
+        #[error("Failed to build response body from payload parameter! {0}")]
+        #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+        FailedBuildResponseFromPayload(axum::http::Error),
+
+        #[error("Failed to extract response body into payload parameter! {0}")]
+        #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+        FailedExtractBodyIntoPayload(axum::Error),
+    }
+
     pub type AppResult<T> = Result<T, AppError>;
 
     #[derive(Debug, Clone, PartialEq)]
@@ -278,7 +275,7 @@ pub mod tests {
         pub payload: serde_json::Value,
     }
 
-    impl TryFrom<RequestParams> for Request {
+    impl TryFrom<RequestParams> for axum::extract::Request {
         type Error = AppError;
 
         #[tracing::instrument(skip_all, err)]
@@ -314,7 +311,7 @@ pub mod tests {
         type Rejection = AppError;
 
         #[tracing::instrument(skip_all, err)]
-        async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        async fn from_request(req: axum::extract::Request, state: &S) -> Result<Self, Self::Rejection> {
             let method = req.method().clone();
 
             let uri = req.uri().clone();
@@ -327,11 +324,11 @@ pub mod tests {
 
             let headers = req.headers().clone();
 
-            let bytes = axum::body::to_bytes(req.into_body(), 2 * 1024 * 1024)
+            let body = axum::body::to_bytes(req.into_body(), 2 * 1024 * 1024)
                 .await
                 .map_err(AppError::FailedExtractBodyIntoPayload)?;
 
-            let payload = serde_json::from_slice(&bytes)
+            let payload = serde_json::from_slice(&body)
                 .map_err(AppError::FailedSerializePayloadFromBody)?;
 
             Ok(RequestParams {

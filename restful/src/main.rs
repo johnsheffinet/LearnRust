@@ -185,6 +185,10 @@ pub mod tests {
         #[error("Failed to extract response body into payload parameter! {0}")]
         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
         FailedExtractResponseBodyIntoPayload(axum::Error),
+
+        #[error("Failed to get router response parameters fro request parameters! {0}")]
+        #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+        FailedGetRouterResponse(String)
     }
 
     pub type AppResult<T> = Result<T, AppError>;
@@ -331,7 +335,10 @@ pub mod tests {
 
         let req = axum::extract::Request::try_from(req_params)?;
 
-        let res = router.oneshot(req);
+        let res = router
+        .oneshot(req)
+        .await
+        .map_err(|err| AppError::RouterError(err.to_string()))?;
 
         let res_params = ResponseParams::from_response(res).await?;
 

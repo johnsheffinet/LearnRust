@@ -188,7 +188,7 @@ pub mod tests {
 
         #[error("Failed to get router response parameters fro request parameters! {0}")]
         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedGetRouterResponse(String)
+        FailedGetRouterResponse(String),
     }
 
     pub type AppResult<T> = Result<T, AppError>;
@@ -336,9 +336,9 @@ pub mod tests {
         let req = axum::extract::Request::try_from(req_params)?;
 
         let res = router
-        .oneshot(req)
-        .await
-        .map_err(|err| AppError::RouterError(err.to_string()))?;
+            .oneshot(req)
+            .await
+            .map_err(|err| AppError::FailedGetRouterResponse(err.to_string()))?;
 
         let res_params = ResponseParams::from_response(res).await?;
 

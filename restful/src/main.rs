@@ -10,6 +10,9 @@ pub mod config {
 
         #[error("{0}")]
         FailedValidate(validator::ValidationErrors),
+
+        #[error("Failed to load TLS file(s)! {0}")]
+        FailedLoadTlsFile(std::io::Error),
     }
 
     pub type AppResult<T> = Result<T, AppError>;
@@ -30,6 +33,12 @@ pub mod config {
             message = "Failed to find key file!"
         ))]
         pub key_path: std::path::PathBuf,
+        #[get_fields(skip)]
+        pub rustls_config: axum_server::tls_rustls::RustlsConfig,
+        #[get_fields(skip)]
+        pub http_router: axum::Router,
+        #[get_fields(skip)]
+        pub https_router: axum::Router,
     }
 
     impl AppConfig {
@@ -47,6 +56,17 @@ pub mod config {
                 .map_err(AppError::FailedExtractEnvVar)?;
 
             cfg.validate().map_err(AppError::FailedValidate)?;
+
+            cfg.rustls_config = axum_server::tls_rustls::RustlsConfig::from_pem_file(cfg.cert_path, )
+                .await
+                .map_err(AppError::FailedLoadTlsFile)?;
+
+            cfg.http_router = axum::Router::new()
+                .fallback(h::redirect_to_https);
+
+            cfg.https_router = axum::Router::new()
+                .route()
+                .fallback();
 
             Ok(cfg)
         }

@@ -21,7 +21,7 @@ pub mod config {
     #[derive(Debug, serde::Deserialize, get_fields::GetFields, validator::Validate)]
     #[serde(rename_all = "UPPERCASE")]
     #[get_fields(rename_all = "UPPERCASE")]
-    pub struct AppConfig {
+    pub struct EnvVar {
         pub http_addr: std::net::SocketAddr,
         pub https_addr: std::net::SocketAddr,
         #[validate(custom(
@@ -35,21 +35,14 @@ pub mod config {
         ))]
         pub key_path: std::path::PathBuf,
         #[get_fields(skip)]
-        pub rustls_config: RustlsConfig,
-        #[get_fields(skip)]
-        pub http_router: axum::Router,
-        #[get_fields(skip)]
-        pub https_router: axum::Router,
     }
 
-    impl AppConfig {
+    impl EnvVar {
         #[tracing::instrument(skip_all, err)]
         pub fn new() -> AppResult<Self> {
-            use crate::handlers as h;
             use validator::Validate;
-            use axum::routing::get;
 
-            let cfg: AppConfig = figment::Figment::new()
+            let env_var: Self = figment::Figment::new()
                 .merge(
                     figment::providers::Env::raw()
                         .only(&Self::get_fields)
@@ -58,20 +51,9 @@ pub mod config {
                 .extract()
                 .map_err(AppError::FailedExtractEnvVar)?;
 
-            cfg.validate().map_err(AppError::FailedValidate)?;
+            env_var.validate().map_err(AppError::FailedValidate)?;
 
-            cfg.rustls_config = RustlsConfig::from_pem_file(cfg.cert_path, cfg.key_path)
-                .await
-                .map_err(AppError::FailedLoadTlsFile)?;
-
-            cfg.http_router = axum::Router::new()
-                .fallback(h::redirect_to_https);
-
-            cfg.https_router = axum::Router::new()
-                .route("/healthz", get(h::check_app_liveliness))
-                .fallback(h::report_invalid_route);
-
-            Ok(cfg)
+            Ok(env_var)
         }
 
         #[tracing::instrument(skip_all, err)]
@@ -81,6 +63,46 @@ pub mod config {
             } else {
                 Err(validator::ValidationError::new("FailedFindFile"))
             }
+        }
+    }
+    #[derive(Clone, Debug)]
+    pub struct AppConfig {
+        pub http_addr: std::net::SocketAddr,
+        pub https_addr: std::net::SocketAddr,
+        pub rustls_config: RustlsConfig,
+        pub http_router: axum::Router,
+        pub https_router: axum::Router,
+    }
+
+    impl AppConfig {
+        fn new() -> AppResult(Self) {
+            use crate::handlers as h;
+            use axum::routing::get;
+
+            let env_var = EnvVar::new()?;
+            
+            let http_addr = env_var.http_addr;
+            
+            let https_addr = env_var.https_addr;
+            
+            let rustls_config = RustlsConfig::from_pem_file(env_var.cert_path, env_var.key_path)
+                .await
+                .map_err(AppError::FailedLoadTlsFile)?;
+            
+            let http_router = axum::Router::new()
+                .fallback(h::redirect_to_https);
+            
+            let https_router = axum::Router::new()
+                .route("/healthz", get(h::check_app_liveliness))
+                .fallback(h::report_invalid_route);
+
+            Ok(Self {
+                http_addr,
+                https_addr,
+                rustls_config,
+                http_router,
+                https_router,
+            })
         }
     }
 }

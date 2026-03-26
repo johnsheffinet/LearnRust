@@ -2,7 +2,7 @@ pub mod config {
     use std::sync::LazyLock;
     use axum_server::tls_rustls::RustlsConfig;
 
-    pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().unwrap());
+    pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().expect("Error: "));
 
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
@@ -47,6 +47,7 @@ pub mod config {
         pub fn new() -> AppResult<Self> {
             use crate::handlers as h;
             use validator::Validate;
+            use axum::routing::get;
 
             let cfg: AppConfig = figment::Figment::new()
                 .merge(

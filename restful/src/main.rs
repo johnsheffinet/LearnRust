@@ -34,7 +34,6 @@ pub mod config {
             message = "Failed to find key file!"
         ))]
         pub key_path: std::path::PathBuf,
-        #[get_fields(skip)]
     }
 
     impl EnvVar {
@@ -75,10 +74,11 @@ pub mod config {
     }
 
     impl AppConfig {
+        #[tracing::instrument(skip_all, err)]
         fn new() -> AppResult(Self) {
             use crate::handlers as h;
             use axum::routing::get;
-
+        
             let env_var = EnvVar::new()?;
             
             let http_addr = env_var.http_addr;
@@ -95,7 +95,7 @@ pub mod config {
             let https_router = axum::Router::new()
                 .route("/healthz", get(h::check_app_liveliness))
                 .fallback(h::report_invalid_route);
-
+        
             Ok(Self {
                 http_addr,
                 https_addr,

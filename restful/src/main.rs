@@ -1,5 +1,6 @@
 pub mod config {
     use std::sync::LazyLock;
+    use axum_server::tls_rustls::RustlsConfig;
 
     pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().unwrap());
 
@@ -34,7 +35,7 @@ pub mod config {
         ))]
         pub key_path: std::path::PathBuf,
         #[get_fields(skip)]
-        pub rustls_config: axum_server::tls_rustls::RustlsConfig,
+        pub rustls_config: RustlsConfig,
         #[get_fields(skip)]
         pub http_router: axum::Router,
         #[get_fields(skip)]
@@ -44,6 +45,7 @@ pub mod config {
     impl AppConfig {
         #[tracing::instrument(skip_all, err)]
         pub fn new() -> AppResult<Self> {
+            use crate::handlers as h;
             use validator::Validate;
 
             let cfg: AppConfig = figment::Figment::new()
@@ -57,7 +59,7 @@ pub mod config {
 
             cfg.validate().map_err(AppError::FailedValidate)?;
 
-            cfg.rustls_config = axum_server::tls_rustls::RustlsConfig::from_pem_file(cfg.cert_path, )
+            cfg.rustls_config = RustlsConfig::from_pem_file(cfg.cert_path, cfg.key_path)
                 .await
                 .map_err(AppError::FailedLoadTlsFile)?;
 
@@ -65,8 +67,8 @@ pub mod config {
                 .fallback(h::redirect_to_https);
 
             cfg.https_router = axum::Router::new()
-                .route()
-                .fallback();
+                .route("/healthz", get(h::check_app_liveliness))
+                .fallback(h::report_invalid_route);
 
             Ok(cfg)
         }

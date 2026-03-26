@@ -25,12 +25,12 @@ pub mod config {
         pub http_addr: std::net::SocketAddr,
         pub https_addr: std::net::SocketAddr,
         #[validate(custom(
-            function = "AppConfig::validate_path",
+            function = "EnvVar::validate_path",
             message = "Failed to find certificate file!"
         ))]
         pub cert_path: std::path::PathBuf,
         #[validate(custom(
-            function = "AppConfig::validate_path",
+            function = "EnvVar::validate_path",
             message = "Failed to find key file!"
         ))]
         pub key_path: std::path::PathBuf,

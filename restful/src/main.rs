@@ -23,23 +23,23 @@ pub mod config {
     pub type AppResult<T> = Result<T, AppError>;
 
     #[derive(validator::Validate)]
-    struct AppConfig {
+    pub struct AppConfig {
         #[validate(skip)]
-        http_addr: std::net::SocketAddr,
+        pub http_addr: std::net::SocketAddr,
         #[validate(skip)]
-        https_addr: std::net::SocketAddr,
+        pub https_addr: std::net::SocketAddr,
         #[validate(custom(function = "AppConfig::validate_path",
             message = "Failed to find learnrust.crt path!"))]
-        cert_path: std::path::PathBuf,
+        pub cert_path: std::path::PathBuf,
         #[validate(custom(function = "AppConfig::validate_path",
             message = "Failed to find learnrust.key path!"))]
-        key_path: std::path::PathBuf,
+        pub key_path: std::path::PathBuf,
         #[validate(skip)]
-        http_router: axum::Router,
+        pub http_router: axum::Router,
         #[validate(skip)]
-        https_router: axum::Router,
+        pub https_router: axum::Router,
         #[validate(skip)]
-        tls_config: RustlsConfig,
+        pub tls_config: RustlsConfig,
     }
 
     impl AppConfig {
@@ -445,7 +445,7 @@ pub mod tests {
                   let cert_path_err = claims::assert_some!(
                     field_errs.get("cert_path"));
 
-                  pretty_assertions::assert_eq!(cert_path_err[0].code, "FailedFindFile");
+                  pretty_assertions::assert_eq!(cert_path_err[0].code, "FailedFindPath");
                 });
 
                 Ok(())

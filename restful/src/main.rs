@@ -2,108 +2,95 @@ pub mod config {
     use std::sync::LazyLock;
     use axum_server::tls_rustls::RustlsConfig;
 
-    pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().expect("Error: "));
+    pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(
+        || { AppConfig::try().expect("Error: ") });
 
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
-        #[error("Failed to extract environment variable! {0}")]
-        FailedExtractEnvVar(figment::Error),
+        #[error("Failed to find environment variable! {0}")]
+        FailedFindEnvVar(#[from] std::env::VarError),
+
+        #[error("Failed to parse socket address! {0}")]
+        FailedParseSocketAddr(#[from] std::net::AddrParseError),
 
         #[error("{0}")]
-        FailedValidate(validator::ValidationErrors),
+        FailedValidate(#[from] validator::ValidationErrors),
 
-        #[error("Failed to load TLS file(s)! {0}")]
-        FailedLoadTlsFile(std::io::Error),
+        #[error("Failed to load TLS file! {0}")]
+        FailedLoadTLSFile(#[from] std::io::Error),
     }
 
     pub type AppResult<T> = Result<T, AppError>;
 
-    #[derive(Debug, serde::Deserialize, get_fields::GetFields, validator::Validate)]
-    #[serde(rename_all = "UPPERCASE")]
-    #[get_fields(rename_all = "UPPERCASE")]
-    pub struct EnvVar {
-        pub http_addr: std::net::SocketAddr,
-        pub https_addr: std::net::SocketAddr,
-        #[validate(custom(
-            function = "EnvVar::validate_path",
-            message = "Failed to find certificate file!"
-        ))]
-        pub cert_path: std::path::PathBuf,
-        #[validate(custom(
-            function = "EnvVar::validate_path",
-            message = "Failed to find key file!"
-        ))]
-        pub key_path: std::path::PathBuf,
-    }
-
-    impl EnvVar {
-        #[tracing::instrument(skip_all, err)]
-        pub fn new() -> AppResult<Self> {
-            use validator::Validate;
-
-            let env_var: Self = figment::Figment::new()
-                .merge(
-                    figment::providers::Env::raw()
-                        .only(&Self::get_fields)
-                        .lowercase(false),
-                )
-                .extract()
-                .map_err(AppError::FailedExtractEnvVar)?;
-
-            env_var.validate().map_err(AppError::FailedValidate)?;
-
-            Ok(env_var)
-        }
-
-        #[tracing::instrument(skip_all, err)]
-        pub fn validate_path(path: &std::path::PathBuf) -> Result<(), validator::ValidationError> {
-            if path.exists() {
-                Ok(())
-            } else {
-                Err(validator::ValidationError::new("FailedFindFile"))
-            }
-        }
-    }
-    #[derive(Clone, Debug)]
-    pub struct AppConfig {
-        pub http_addr: std::net::SocketAddr,
-        pub https_addr: std::net::SocketAddr,
-        pub rustls_config: RustlsConfig,
-        pub http_router: axum::Router,
-        pub https_router: axum::Router,
+    #[derive(validator::Validate)]
+    struct AppConfig {
+        #[validate(skip)]
+        http_addr: std::net::SocketAddr,
+        #[validate(skip)]
+        https_addr: std::net::SocketAddr,
+        #[validate(custom(function = "AppConfig::validate_path",
+            message = "Failed to find learnrust.crt path!"))]
+        cert_path: std::path::PathBuf,
+        #[validate(custom(function = "AppConfig::validate_path",
+            message = "Failed to find learnrust.key path!"))]
+        key_path: std::path::PathBuf,
+        #[validate(skip)]
+        http_router: axum::Router,
+        #[validate(skip)]
+        https_router: axum::Router,
+        #[validate(skip)]
+        tls_config: RustlsConfig,
     }
 
     impl AppConfig {
         #[tracing::instrument(skip_all, err)]
-        pub async fn new() -> AppResult<Self> {
+        fn try() -> AppResult<AppConfig> {
             use crate::handlers as h;
             use axum::routing::get;
-        
-            let env_var = EnvVar::new()?;
-            
-            let http_addr = env_var.http_addr;
-            
-            let https_addr = env_var.https_addr;
-            
-            let rustls_config = RustlsConfig::from_pem_file(env_var.cert_path, env_var.key_path)
-                .await
-                .map_err(AppError::FailedLoadTlsFile)?;
-            
+
+            let http_addr = std::env::var("HTTP_ADDR")?
+                .parse::<std::net::SocketAddr>()?;
+
+            let https_addr = std::env::var("HTTPS_ADDR")?
+                .parse::<std::net::SocketAddr>()?;
+
+            let cert_path = std::path::PathBuf::from(std::env::var("CERT_PATH")?);
+
+            let key_path = std::path::PathBuf::from(std::env::var("KEY_PATH")?);
+
             let http_router = axum::Router::new()
                 .fallback(h::redirect_to_https);
-            
+
             let https_router = axum::Router::new()
                 .route("/healthz", get(h::check_app_liveliness))
                 .fallback(h::report_invalid_route);
-        
-            Ok(Self {
+
+            let tls_config = futures::executor::block_on(
+                RustlsConfig::from_pem_file(&cert_path, &key_path))?;
+
+            let cfg = AppConfig {
                 http_addr,
                 https_addr,
-                rustls_config,
+                cert_path,
+                key_path,
                 http_router,
                 https_router,
-            })
+                tls_config,
+            };
+
+            cfg.validate()?;
+
+            Ok(cfg)
         }
+
+        #[tracing::instrument(skip_all, err)]
+        fn validate_path(path: &std::path::PathBuf) -> Result<(), validator::ValidationError> {
+            if path.exists() {
+                Ok(())
+            } else {
+                Err(validator::ValidationError::new("FailedFindPath"))
+            }
+        } 
     }
 }
 pub mod handlers {

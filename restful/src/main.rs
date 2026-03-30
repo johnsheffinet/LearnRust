@@ -35,19 +35,26 @@ pub mod config {
             use crate::handlers as h;
             use axum::routing::get;
 
-            let http_addr_str = std::env::var("HTTP_ADDR")
-                .map_err(AppError::FailedFindEnvVar,)?;
-            let http_addr = http_addr_str
-                .parse::<std::net::SocketAddr>()
-                .map_err(AppError::FailedParseSocketAddr, http_addr_str)?;
+            let http_addr_val = std::env::var("HTTP_ADDR")
+                .map_err(AppError::FailedFindEnvVar, "HTTP_ADDR")?;
 
-            let https_addr = std::env::var("HTTPS_ADDR")?.parse::<std::net::SocketAddr>()?;
+            let http_addr = http_addr_val.parse::<std::net::SocketAddr>()
+                .map_err(AppError::FailedParseSocketAddr, http_addr_val)?;
 
-            let cert_path = std::path::PathBuf::from(std::env::var("CERT_PATH")?);
+            let https_addr_val = std::env::var("HTTPS_ADDR")
+                .map_err(AppError::FailedFindEnvVar, "HTTPS_ADDR")?
 
-            let key_path = std::path::PathBuf::from(std::env::var("KEY_PATH")?);
+            let https_addr = https_addr_val.parse::<std::net::SocketAddr>()
+                .map_err(AppError::FailedParseSocketAddr, https_addr_val)?;
 
-            let http_router = axum::Router::new().fallback(h::redirect_to_https);
+            let cert_path = std::path::PathBuf::from(std::env::var("CERT_PATH")
+                .map_err(AppError::FailedFindEnvVar, "CERT_PATH")?);
+
+            let key_path = std::path::PathBuf::from(std::env::var("KEY_PATH")
+                .map_err(AppError::FailedFindEnvVar, "KEY_PATH")?);
+
+            let http_router = axum::Router::new()
+                .fallback(h::redirect_to_https);
 
             let https_router = axum::Router::new()
                 .route("/healthz", get(h::check_app_liveliness))

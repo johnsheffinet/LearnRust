@@ -6,14 +6,14 @@ pub mod config {
 
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
-        #[error("Failed to find environment variable! {0}")]
-        FailedFindEnvVar(#[from] std::env::VarError),
+        #[error("Failed to find '{1}' environment variable! {0}")]
+        FailedFindEnvVar(#[from] std::env::VarError, String),
 
-        #[error("Failed to parse socket address! {0}")]
-        FailedParseSocketAddr(#[from] std::net::AddrParseError),
+        #[error("Failed to parse '{1}' socket address {0}")]
+        FailedParseSocketAddr(#[from] std::net::AddrParseError, String),
 
-        #[error("Failed to load PEM file! {0}")]
-        FailedLoadPEMFile(#[from] std::io::Error),
+        #[error("Failed to read PEM file! {0}")]
+        FailedReadPEMFile(#[from] std::io::Error),
     }
 
     pub type AppResult<T> = Result<T, AppError>;
@@ -35,7 +35,11 @@ pub mod config {
             use crate::handlers as h;
             use axum::routing::get;
 
-            let http_addr = std::env::var("HTTP_ADDR")?.parse::<std::net::SocketAddr>()?;
+            let http_addr_str = std::env::var("HTTP_ADDR")
+                .map_err(AppError::FailedFindEnvVar,)?;
+            let http_addr = http_addr_str
+                .parse::<std::net::SocketAddr>()
+                .map_err(AppError::FailedParseSocketAddr, http_addr_str)?;
 
             let https_addr = std::env::var("HTTPS_ADDR")?.parse::<std::net::SocketAddr>()?;
 
@@ -52,7 +56,7 @@ pub mod config {
             let tls_config =
                 futures::executor::block_on(RustlsConfig::from_pem_file(&cert_path, &key_path))?;
 
-            let cfg = AppConfig {
+            Ok(AppConfig {
                 http_addr,
                 https_addr,
                 cert_path,
@@ -60,9 +64,7 @@ pub mod config {
                 http_router,
                 https_router,
                 tls_config,
-            };
-
-            Ok(cfg)
+            })
         }
     }
 }
@@ -453,7 +455,7 @@ pub mod tests {
 
                 cool_asserts::assert_matches!(
                     AppConfig::new(),
-                    Err(AppError::FailedLoadPEMFile(_))
+                    Err(AppError::FailedReadPEMFile(_))
                 );
 
                 Ok(())
@@ -479,7 +481,7 @@ pub mod tests {
 
                 cool_asserts::assert_matches!(
                     AppConfig::new(),
-                    Err(AppError::FailedLoadPEMFile(_))
+                    Err(AppError::FailedReadPEMFile(_))
                 );
 
                 Ok(())

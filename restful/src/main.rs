@@ -3,7 +3,7 @@ pub mod config {
     use axum_server::tls_rustls::RustlsConfig;
 
     pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(
-        || { AppConfig::try().expect("Error: ") });
+        || { AppConfig::new().expect("Error: ") });
 
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
@@ -16,17 +16,15 @@ pub mod config {
         #[error("{0}")]
         FailedValidate(#[from] validator::ValidationErrors),
 
-        #[error("Failed to load TLS file! {0}")]
-        FailedLoadTLSFile(#[from] std::io::Error),
+        #[error("Failed to load PEM file! {0}")]
+        FailedLoadPEMFile(#[from] std::io::Error),
     }
 
     pub type AppResult<T> = Result<T, AppError>;
 
     #[derive(validator::Validate)]
     pub struct AppConfig {
-        #[validate(skip)]
         pub http_addr: std::net::SocketAddr,
-        #[validate(skip)]
         pub https_addr: std::net::SocketAddr,
         #[validate(custom(function = "AppConfig::validate_path",
             message = "Failed to find learnrust.crt path!"))]
@@ -34,17 +32,14 @@ pub mod config {
         #[validate(custom(function = "AppConfig::validate_path",
             message = "Failed to find learnrust.key path!"))]
         pub key_path: std::path::PathBuf,
-        #[validate(skip)]
         pub http_router: axum::Router,
-        #[validate(skip)]
         pub https_router: axum::Router,
-        #[validate(skip)]
         pub tls_config: RustlsConfig,
     }
 
     impl AppConfig {
         #[tracing::instrument(skip_all, err)]
-        fn try() -> AppResult<AppConfig> {
+        fn new() -> AppResult<AppConfig> {
             use crate::handlers as h;
             use axum::routing::get;
 
@@ -379,9 +374,20 @@ pub mod tests {
     pub mod config {
         use crate::config::{AppConfig, AppError};
 
+        fn setup_tests() -> (String, String) {
+            let learnrust = rcgen::generate_simple_self_signed(vec!["127.0.0.1:3443".into()])
+                .expect("Failed to create self-signed certificate!");
+            let learnrust_crt = learnrust.serialize_pem();
+            let learnrust_key = learnrust.get_key_pair().serialize_pem();
+
+            (learnrust_crt, learnrust_key)
+        }
+        
         #[test_log::test(test)]
         fn test_create_app_config_success() {
             figment::Jail::expect_with(|jail| {
+                let (learnrust_crt, learnrust_key) = setup_tests();
+                
                 jail.clear_env();
 
                 jail.set_env("HTTP_ADDR", "127.0.0.1:3080");
@@ -389,13 +395,13 @@ pub mod tests {
                 jail.set_env("CERT_PATH", "learnrust.crt");
                 jail.set_env("KEY_PATH", "learnrust.key");
 
-                jail.create_file("learnrust.crt", "content")
+                jail.create_file("learnrust.crt", &learnrust_crt)
                     .expect("Failed to create 'learnrust.crt' file!");
-                jail.create_file("learnrust.key", "content")
+                jail.create_file("learnrust.key", &learnrust_key)
                     .expect("Failed to create 'learnrust.key' file!");
 
-                cool_asserts::assert_matches!(AppConfig::new(), Ok(val) => {
-                  pretty_assertions::assert_eq!(val.http_addr.to_string(), "127.0.0.1:3080");
+                cool_asserts::assert_matches!(AppConfig::new(), Ok(cfg) => {
+                  pretty_assertions::assert_eq!(cfg.http_addr.to_string(), "127.0.0.1:3080");
                 });
 
                 Ok(())
@@ -403,8 +409,32 @@ pub mod tests {
         }
 
         #[test_log::test(test)]
-        fn test_create_app_config_failure_invalid_socketaddr() {
+        fn test_create_app_config_failure_missing_socket_addr() {
             figment::Jail::expect_with(|jail| {
+                let (learnrust_crt, learnrust_key) = setup_tests();
+                
+                jail.clear_env();
+
+                jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
+                jail.set_env("CERT_PATH", "learnrust.crt");
+                jail.set_env("KEY_PATH", "learnrust.key");
+
+                jail.create_file("learnrust.crt", &learnrust_crt)
+                    .expect("Failed to create 'learnrust.crt' file!");
+                jail.create_file("learnrust.key", &learnrust_key)
+                    .expect("Failed to create 'learnrust.key' file!");
+
+                cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedFindEnvVar(_)));
+
+                Ok(())
+            });
+        }
+
+        #[test_log::test(test)]
+        fn test_create_app_config_failure_invalid_socket_addr() {
+            figment::Jail::expect_with(|jail| {
+                let (learnrust_crt, learnrust_key) = setup_tests();
+                
                 jail.clear_env();
 
                 jail.set_env("HTTP_ADDR", ""); // Invalid SocketAddr
@@ -412,14 +442,14 @@ pub mod tests {
                 jail.set_env("CERT_PATH", "learnrust.crt");
                 jail.set_env("KEY_PATH", "learnrust.key");
 
-                jail.create_file("learnrust.crt", "content")
-                    .expect("Failed to create 'learn.crt' file!");
-                jail.create_file("learnrust.key", "content")
-                    .expect("Failed to create 'learn.key' file!");
+                jail.create_file("learnrust.crt", &learnrust_crt)
+                    .expect("Failed to create 'learnrust.crt' file!");
+                jail.create_file("learnrust.key", &learnrust_key)
+                    .expect("Failed to create 'learnrust.key' file!");
 
                 cool_asserts::assert_matches!(
                     AppConfig::new(),
-                    Err(AppError::FailedExtractEnvVar(_))
+                    Err(AppError::FailedParseSocketAddr(_))
                 );
 
                 Ok(())
@@ -427,16 +457,18 @@ pub mod tests {
         }
 
         #[test_log::test(test)]
-        fn test_create_app_config_failure_missing_file() {
+        fn test_create_app_config_failure_missing_pem_file() {
             figment::Jail::expect_with(|jail| {
+                let (learnrust_crt, learnrust_key) = setup_tests();
+                
                 jail.clear_env();
 
                 jail.set_env("HTTP_ADDR", "127.0.0.1:3080");
                 jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
-                jail.set_env("CERT_PATH", "learnrust.crt"); // Missing File
+                jail.set_env("CERT_PATH", "learnrust.crt"); // Missing PEM File
                 jail.set_env("KEY_PATH", "learnrust.key");
 
-                jail.create_file("learnrust.key", "content")
+                jail.create_file("learnrust.key", &learnrust_key)
                     .expect("Failed to create 'learnrust.key' file!");
 
                 cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedValidate(ref errs)) => {
@@ -451,7 +483,35 @@ pub mod tests {
                 Ok(())
             });
         }
-    }
+ 
+        #[test_log::test(test)]
+        fn test_create_app_config_failure_invalid_pem_file() {
+            figment::Jail::expect_with(|jail| {
+                let (learnrust_crt, learnrust_key) = setup_tests();
+                
+                jail.clear_env();
+
+                jail.set_env("HTTP_ADDR", "127.0.0.1:3080");
+                jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
+                jail.set_env("CERT_PATH", "learnrust.crt");
+                jail.set_env("KEY_PATH", "learnrust.key");
+
+                jail.create_file("learnrust.crt", "invalid content")
+                    .expect("Failed to create 'learnrust.crt' file!"); // Invalid PEM File
+                jail.create_file("learnrust.key", &learnrust_key)
+                    .expect("Failed to create 'learnrust.key' file!");
+
+                cool_asserts::assert_matches!(
+                    AppConfig::new(),
+                    Err(AppError::FailedLoadPEMFile(_))
+                );
+
+                Ok(())
+            });
+        }
+   }
+
+
     // pub mod request {
     //     #[test_log::test(tokio::test)]
     //     async fn test_create_request_from_params_success() {

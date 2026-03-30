@@ -12,9 +12,6 @@ pub mod config {
         #[error("Failed to parse socket address! {0}")]
         FailedParseSocketAddr(#[from] std::net::AddrParseError),
 
-        #[error("{0}")]
-        FailedValidate(#[from] validator::ValidationErrors),
-
         #[error("Failed to load PEM file! {0}")]
         FailedLoadPEMFile(#[from] std::io::Error),
     }

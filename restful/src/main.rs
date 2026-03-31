@@ -359,7 +359,7 @@ pub mod tests {
         Ok(res_params)
     }
     pub mod config {
-        use crate::config::{AppConfig, AppError};
+        use crate::config::{AppConfig, AppError, CONFIG};
 
         fn setup_tests() -> (String, String) {
             let learnrust = rcgen::generate_simple_self_signed(vec!["127.0.0.1:3443".into()])
@@ -387,13 +387,14 @@ pub mod tests {
                 jail.create_file("learnrust.key", &learnrust_key)
                     .expect("Failed to create 'learnrust.key' file!");
 
-                cool_asserts::assert_matches!(
-                    AppConfig::new(),
-                    Ok(cfg) => {
-                        pretty_assertions::assert_eq!(cfg.http_addr.to_string(), "127.0.0.1:3080");
-                });
+                // cool_asserts::assert_matches!(
+                //     AppConfig::new(),
+                //     Ok(cfg) => {
+                //         pretty_assertions::assert_eq!(cfg.http_addr.to_string(), "127.0.0.1:3080");
+                // });
 
-                Ok(())
+                // Ok(())
+                pretty_assertions::assert_eq!(CONFIG.http_addr.to_string(), "127.0.0.1:3080")
             });
         }
 

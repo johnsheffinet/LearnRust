@@ -1,16 +1,17 @@
 pub mod config {
     use axum_server::tls_rustls::RustlsConfig;
+    // use figment::Source;
     use std::sync::LazyLock;
 
     pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().expect("Error: "));
 
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
-        #[error("Failed to find '{1}' environment variable! {0}")]
-        FailedFindEnvVar(#[from] std::env::VarError, String),
+        #[error("Failed to find '{key}' environment variable! {source}")]
+        FailedFindEnvVar{#[source]source: std::env::VarError, key:String},
 
-        #[error("Failed to parse '{1}' socket address {0}")]
-        FailedParseSocketAddr(#[from] std::net::AddrParseError, String),
+        #[error("Failed to parse '{key}' socket address {source}")]
+        FailedParseSocketAddr{#[source] source: std::net::AddrParseError, key: String},
 
         #[error("Failed to read PEM file! {0}")]
         FailedReadPEMFile(#[from] std::io::Error),
@@ -35,23 +36,21 @@ pub mod config {
             use crate::handlers as h;
             use axum::routing::get;
 
-            let http_addr_val = std::env::var("HTTP_ADDR")
-                .map_err(AppError::FailedFindEnvVar, "HTTP_ADDR")?;
+            let http_addr = std::env::var("HTTP_ADDR")
+                .map_err(|source| AppError::FailedFindEnvVar { source, key: "HTTP_ADDR".into() })?
+                .parse::<std::net::SocketAddr>()
+                .map_err(|source| AppError::FailedParseSocketAddr { source, key: "HTTP_ADDR".into() })?;
 
-            let http_addr = http_addr_val.parse::<std::net::SocketAddr>()
-                .map_err(AppError::FailedParseSocketAddr, http_addr_val)?;
-
-            let https_addr_val = std::env::var("HTTPS_ADDR")
-                .map_err(AppError::FailedFindEnvVar, "HTTPS_ADDR")?
-
-            let https_addr = https_addr_val.parse::<std::net::SocketAddr>()
-                .map_err(AppError::FailedParseSocketAddr, https_addr_val)?;
+            let https_addr = std::env::var("HTTPS_ADDR")
+                .map_err(|source| AppError::FailedFindEnvVar { source, key: "HTTPS_ADDR".into() })?
+                .parse::<std::net::SocketAddr>()
+                .map_err(|source| AppError::FailedParseSocketAddr { source, key: "HTTPS_ADDR".into() })?;
 
             let cert_path = std::path::PathBuf::from(std::env::var("CERT_PATH")
-                .map_err(AppError::FailedFindEnvVar, "CERT_PATH")?);
+                .map_err(|source| AppError::FailedFindEnvVar { source, key: "CERT_PATH".into() })?);
 
             let key_path = std::path::PathBuf::from(std::env::var("KEY_PATH")
-                .map_err(AppError::FailedFindEnvVar, "KEY_PATH")?);
+                .map_err(|source| AppError::FailedFindEnvVar { source, key: "KEY_PATH".into() })?);
 
             let http_router = axum::Router::new()
                 .fallback(h::redirect_to_https);
@@ -393,8 +392,9 @@ pub mod tests {
                 //         pretty_assertions::assert_eq!(cfg.http_addr.to_string(), "127.0.0.1:3080");
                 // });
 
-                // Ok(())
-                pretty_assertions::assert_eq!(CONFIG.http_addr.to_string(), "127.0.0.1:3080")
+                pretty_assertions::assert_eq!(CONFIG.http_addr.to_string(), "127.0.0.1:3080");
+
+                Ok(())
             });
         }
 
@@ -414,7 +414,7 @@ pub mod tests {
                 jail.create_file("learnrust.key", &learnrust_key)
                     .expect("Failed to create 'learnrust.key' file!");
 
-                cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedFindEnvVar(_)));
+                cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedFindEnvVar { .. }));
 
                 Ok(())
             });
@@ -439,7 +439,7 @@ pub mod tests {
 
                 cool_asserts::assert_matches!(
                     AppConfig::new(),
-                    Err(AppError::FailedParseSocketAddr(_))
+                    Err(AppError::FailedParseSocketAddr { .. })
                 );
 
                 Ok(())

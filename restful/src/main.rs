@@ -45,6 +45,36 @@ pub mod config {
                 .map_err(|source| AppError::FailedFindEnvVar { source, key: "HTTPS_ADDR".into() })?
                 .parse::<std::net::SocketAddr>()
                 .map_err(|source| AppError::FailedParseSocketAddr { source, key: "HTTPS_ADDR".into() })?;
+// use axum_server::tls_rustls::RustlsConfig;
+// use rustls_pki_types::{CertificateDer, PrivateKeyDer};
+// use rustls_pki_types::pem::PemObject; // Required trait for PEM loading
+
+// async fn create_config(cert_path: &str, key_path: &str) -> RustlsConfig {
+//     // 1. Verify and Load Certificates
+//     // This identifies if the cert file is missing or formatted incorrectly
+//     let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_file_iter(cert_path)
+//         .expect(&format!("Could not open certificate file at {}", cert_path))
+//         .map(|result| result.expect("Invalid PEM formatting in certificate file"))
+//         .collect();
+
+//     if certs.is_empty() {
+//         panic!("No certificates found in {}", cert_path);
+//     }
+
+//     // 2. Verify and Load Private Key
+//     // This identifies if the key file is missing, formatted incorrectly, or encrypted
+//     let key = PrivateKeyDer::from_pem_file(key_path)
+//         .expect(&format!("Failed to load a valid private key from {}", key_path));
+
+//     // 3. Assemble into RustlsConfig
+//     // Since we've verified the files, from_der is unlikely to fail
+//     RustlsConfig::from_der(
+//         certs.into_iter().map(|c| c.to_vec()).collect(),
+//         key.secret_der().to_vec(),
+//     )
+//     .await
+//     .expect("Failed to initialize RustlsConfig from verified DER data")
+// }
 
             let cert_path = std::path::PathBuf::from(std::env::var("CERT_PATH")
                 .map_err(|source| AppError::FailedFindEnvVar { source, key: "CERT_PATH".into() })?);

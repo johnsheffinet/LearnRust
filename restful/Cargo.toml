@@ -18,6 +18,7 @@ futures = "0.3.32"
 get_fields = "0.1.0" # cargo add get_fields
 jsonwebtoken = { version = "10.2.0", features = ["aws_lc_rs"] } # cargo add jsonwebtoken --features aws_lc_rs
 http-body-util = "0.1.3" # cargo add http-body-util
+rustls-pki-types = "1.14.0"
 serde = { version = "1.0.228", features = ["derive"] } # cargo add serde --features derive
 serde_json = "1.0.149" # cargo add serde_json
 thiserror = "2.0.18" # cargo add thiserror
@@ -27,7 +28,6 @@ tower-http = { version = "0.6.8", features = ["cors", "limit", "timeout", "trace
 tracing = { version = "0.1.44", features = ["attributes"] } # cargo add tracing --features attributes
 tracing-subscriber = "0.3.22" # cargo add tracing-subscriber
 validator = { version = "0.20.0", features = ["derive"] } # cargo add validator --features derive
-rustls-pki-types = "1.14.0"
 
 [dev-dependencies]
 assert-json-diff = "2.0.2"

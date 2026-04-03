@@ -1,7 +1,6 @@
 pub mod config {
     use axum_server::tls_rustls::RustlsConfig;
     use rustls_pki_types::pem::PemObject;
-    // use figment::Source;
     use std::sync::LazyLock;
 
     pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().expect("Error: "));

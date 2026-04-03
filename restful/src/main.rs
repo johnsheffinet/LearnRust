@@ -1,5 +1,6 @@
 pub mod config {
     use axum_server::tls_rustls::RustlsConfig;
+    use rustls_pki_types::pem::PemObject;
     // use figment::Source;
     use std::sync::LazyLock;
 
@@ -7,14 +8,17 @@ pub mod config {
 
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
-        #[error("Failed to find '{key}' environment variable! {source}")]
-        FailedFindEnvVar{#[source]source: std::env::VarError, key:String},
+        #[error("Failed to find '{1}' environment variable! {0}")]
+        FailedFindEnvVar(#[source]std::env::VarError, String),
 
-        #[error("Failed to parse '{key}' socket address {source}")]
-        FailedParseSocketAddr{#[source] source: std::net::AddrParseError, key: String},
+        #[error("Failed to parse '{1}' socket address {0}")]
+        FailedParseSocketAddr(#[source] std::net::AddrParseError, String),
 
-        #[error("Failed to read PEM file! {0}")]
-        FailedReadPEMFile(#[from] std::io::Error),
+        #[error("Failed to open {1} PEM file! {0}")]
+        FailedOpenPEMFile(#[source] rustls_pki_types::pem::Error, String),
+
+        #[error("Failed to read {1} PEM file! {0}")]
+        FailedReadPEMFile(#[source] rustls_pki_types::pem::Error, String),
     }
 
     pub type AppResult<T> = Result<T, AppError>;
@@ -35,19 +39,37 @@ pub mod config {
         pub fn new() -> AppResult<AppConfig> {
             use crate::handlers as h;
             use axum::routing::get;
+            use rustls_pki_types::{{CertificateDer, PrivateKeyDer}, pem::PemObject};
 
             let http_addr = std::env::var("HTTP_ADDR")
-                .map_err(|source| AppError::FailedFindEnvVar { source, key: "HTTP_ADDR".into() })?
+                .map_err(|source| AppError::FailedFindEnvVar(source, "HTTP_ADDR".into()))?;
+            let http_addr = http_addr
                 .parse::<std::net::SocketAddr>()
-                .map_err(|source| AppError::FailedParseSocketAddr { source, key: "HTTP_ADDR".into() })?;
+                .map_err(|source| AppError::FailedParseSocketAddr(source, http_addr))?;
 
             let https_addr = std::env::var("HTTPS_ADDR")
-                .map_err(|source| AppError::FailedFindEnvVar { source, key: "HTTPS_ADDR".into() })?
+                .map_err(|source| AppError::FailedFindEnvVar(source, "HTTP_ADDR".into()))?;
+            let https_addr = https_addr
                 .parse::<std::net::SocketAddr>()
-                .map_err(|source| AppError::FailedParseSocketAddr { source, key: "HTTPS_ADDR".into() })?;
+                .map_err(|source| AppError::FailedParseSocketAddr(source, https_addr))?;
+
+            let cert_path = std::env::var("CERT_PATH")
+                .map_err(|source| AppError::FailedFindEnvVar(source, "CERT_PATH".into()))?;
+            let certs: Vec<CertificateDer<'static>> = PemObject::pem_file_iter(cert_path)
+                .map_err(|source| AppError::FailedOpenPEMFile(source, cert_path))?
+                .map(|result| result.map_err(|source| AppError::FailedReadPEMFile(source, cert_path)))  
+                .collect();
+            
+                let cert_path = cert_path
+                .parse::<std::path::PathBuf>()
+                .map_err(|source| AppError::FailedParseSocketAddr(source, cert_path))?;
+
+            let key_path = std::env::var("KEY_PATH")
+                .map_err(|source| AppError::FailedFindEnvVar(source, "KEY_PATH".into()))?;
+            let key_path = key_path
+                .parse::<std::path::PathBuf>()
+                .map_err(|source| AppError::FailedParseSocketAddr(source, key_path))?;
 // use axum_server::tls_rustls::RustlsConfig;
-// use rustls_pki_types::{CertificateDer, PrivateKeyDer};
-// use rustls_pki_types::pem::PemObject; // Required trait for PEM loading
 
 // async fn create_config(cert_path: &str, key_path: &str) -> RustlsConfig {
 //     // 1. Verify and Load Certificates

@@ -1991,6 +1991,7 @@ dependencies = [
  "jsonwebtoken",
  "pretty_assertions",
  "rcgen",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "test-log",

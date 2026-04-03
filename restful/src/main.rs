@@ -16,8 +16,8 @@ pub mod config {
         #[error("Failed to open {1} PEM file! {0}")]
         FailedOpenPEMFile(#[source] rustls_pki_types::pem::Error, String),
 
-        #[error("Failed to read {1} PEM file! {0}")]
-        FailedReadPEMFile(#[source] rustls_pki_types::pem::Error, String),
+        #[error("Failed to parse {1} PEM file! {0}")]
+        FailedParsePEMFile(#[source] rustls_pki_types::pem::Error, String),
     }
 
     pub type AppResult<T> = Result<T, AppError>;
@@ -56,13 +56,9 @@ pub mod config {
                 .map_err(|source| AppError::FailedFindEnvVar(source, "CERT_PATH".into()))?;
             let certs: Vec<CertificateDer<'static>> = PemObject::pem_file_iter(cert_path)
                 .map_err(|source| AppError::FailedOpenPEMFile(source, cert_path))?
-                .map(|result| result.map_err(|source| AppError::FailedReadPEMFile(source, cert_path)))  
+                .map(|result| result.map_err(|source| AppError::FailedParsePEMFile(source, cert_path))?)  
                 .collect();
             
-                let cert_path = cert_path
-                .parse::<std::path::PathBuf>()
-                .map_err(|source| AppError::FailedParseSocketAddr(source, cert_path))?;
-
             let key_path = std::env::var("KEY_PATH")
                 .map_err(|source| AppError::FailedFindEnvVar(source, "KEY_PATH".into()))?;
             let key_path = key_path
@@ -514,7 +510,7 @@ pub mod tests {
 
                 cool_asserts::assert_matches!(
                     AppConfig::new(),
-                    Err(AppError::FailedReadPEMFile(_))
+                    Err(AppError::FailedParsePEMFile(_))
                 );
 
                 Ok(())
@@ -540,7 +536,7 @@ pub mod tests {
 
                 cool_asserts::assert_matches!(
                     AppConfig::new(),
-                    Err(AppError::FailedReadPEMFile(_))
+                    Err(AppError::FailedParsePEMFile(_))
                 );
 
                 Ok(())

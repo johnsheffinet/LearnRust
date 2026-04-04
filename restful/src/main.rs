@@ -43,6 +43,11 @@ pub mod config {
             use axum::routing::get;
             use rustls_pki_types::{{CertificateDer, PrivateKeyDer}, pem::PemObject};
 
+let http_addr_raw = std::env::var("HTTP_ADDR")
+    .map_err(|s| AppError::FailedFindEnvVar(s, "HTTP_ADDR".into()))?;
+let http_addr = http_addr_raw
+    .parse::<std::net::SocketAddr>()
+    .map_err(|s| AppError::FailedParseSocketAddr(s, ))?;
             let http_addr = std::env::var("HTTP_ADDR")
                 .map_err(|source| AppError::FailedFindEnvVar(source, "HTTP_ADDR".into()))?;
             let http_addr = http_addr

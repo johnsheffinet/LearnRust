@@ -1,7 +1,7 @@
 pub mod config {
     use axum_server::tls_rustls::RustlsConfig;
     use rustls_pki_types::pem::PemObject;
-    use std::sync::LazyLock;
+    use std::{path::PathBuf, sync::LazyLock};
 
     pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().unwrap());
 
@@ -14,13 +14,13 @@ pub mod config {
         FailedParseSocketAddr(#[source] std::net::AddrParseError, String),
 
         #[error("Failed to open {1} PEM file! {0}")]
-        FailedOpenPEMFile(#[source] rustls_pki_types::pem::Error, String),
+        FailedOpenPEMFile(#[source] rustls_pki_types::pem::Error, PathBuf),
 
         #[error("Failed to parse {1} PEM file! {0}")]
-        FailedParsePEMFile(#[source] rustls_pki_types::pem::Error, String),
+        FailedParsePEMFile(#[source] rustls_pki_types::pem::Error, PathBuf),
 
         #[error("Failed to find valid certificates in '{0}' PEM file!")]
-        FailedFindCerts(String),
+        FailedFindCerts(PathBuf),
 }
 
     pub type AppResult<T> = Result<T, AppError>;
@@ -58,8 +58,8 @@ pub mod config {
             let cert_path = std::path::PathBuf::from(std::env::var("CERT_PATH")
                 .map_err(|source| AppError::FailedFindEnvVar (source, "CERT_PATH".into()))?);
             let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_file_iter(cert_path)
-                .map_err(|error| AppError::FailedOpenPEMFile(error, cert_path)?
-                .map(|result| result.map_err(|source| AppError::FailedParsePEMFile(source, cert_path))
+                .map_err(|error| AppError::FailedOpenPEMFile(error, cert_path))?
+                .map(|result| result.map_err(|source| AppError::FailedParsePEMFile(source, cert_path))?)
                 .collect::<Result<Vec<_>, _>>()?;
             if certs.is_empty() {
                 return Err(AppError::FailedFindCerts(cert_path));
@@ -68,7 +68,7 @@ pub mod config {
             let key_path = std::path::PathBuf::from(std::env::var("KEY_PATH")
                 .map_err(|source| AppError::FailedFindEnvVar (source, "KEY_PATH".into()))?);
             let key = PrivateKeyDer::from_pem_file(key_path)
-                .map_err(|source| AppError::FailedOpenPEMFile(source, key_path)?;
+                .map_err(|source| AppError::FailedOpenPEMFile(source, key_path))?;
 
             let tls_config =
                 futures::executor::block_on(

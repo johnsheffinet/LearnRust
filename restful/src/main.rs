@@ -3,7 +3,7 @@ pub mod config {
     use rustls_pki_types::pem::PemObject;
     use std::sync::LazyLock;
 
-    pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().expect("Error: "));
+    pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().unwrap());
 
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
@@ -18,7 +18,10 @@ pub mod config {
 
         #[error("Failed to parse {1} PEM file! {0}")]
         FailedParsePEMFile(#[source] rustls_pki_types::pem::Error, String),
-    }
+
+        #[error("Failed to find valid certificates in '{0}' PEM file!")]
+        FailedFindCerts(String),
+}
 
     pub type AppResult<T> = Result<T, AppError>;
 
@@ -28,9 +31,9 @@ pub mod config {
         pub https_addr: std::net::SocketAddr,
         pub cert_path: std::path::PathBuf,
         pub key_path: std::path::PathBuf,
+        pub tls_config: RustlsConfig,
         pub http_router: axum::Router,
         pub https_router: axum::Router,
-        pub tls_config: RustlsConfig,
     }
 
     impl AppConfig {
@@ -52,55 +55,28 @@ pub mod config {
                 .parse::<std::net::SocketAddr>()
                 .map_err(|source| AppError::FailedParseSocketAddr(source, https_addr))?;
 
-            let cert_path = std::env::var("CERT_PATH")
-                .map_err(|source| AppError::FailedFindEnvVar(source, "CERT_PATH".into()))?;
+            let cert_path = std::path::PathBuf::from(std::env::var("CERT_PATH")
+                .map_err(|source| AppError::FailedFindEnvVar (source, "CERT_PATH".into()))?);
             let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_file_iter(cert_path)
-                    .map_err(|e| AppError::FailedOpenPEMFile(e, cert_path.to_string()))?
-                    .map(|result| result.map_err(|e| AppError::FailedReadPEMFile(e, cert_path.to_string())))
-                    .collect::<Result<Vec<_>, _>>()?; // Collects into a Result to catch the first error found
+                .map_err(|error| AppError::FailedOpenPEMFile(error, cert_path)?
+                .map(|result| result.map_err(|source| AppError::FailedParsePEMFile(source, cert_path))
+                .collect::<Result<Vec<_>, _>>()?;
             if certs.is_empty() {
-                return Err(AppError::NoCertificatesFound(cert_path.to_string()));
+                return Err(AppError::FailedFindCerts(cert_path));
             }
             
-            let key_path = std::env::var("KEY_PATH")
-                .map_err(|source| AppError::FailedFindEnvVar(source, "KEY_PATH".into()))?;
-            let key_path = key_path
-                .parse::<std::path::PathBuf>()
-                .map_err(|source| AppError::FailedParseSocketAddr(source, key_path))?;
-// use axum_server::tls_rustls::RustlsConfig;
-
-// async fn create_config(cert_path: &str, key_path: &str) -> RustlsConfig {
-//     // 1. Verify and Load Certificates
-//     // This identifies if the cert file is missing or formatted incorrectly
-//     let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_file_iter(cert_path)
-//         .expect(&format!("Could not open certificate file at {}", cert_path))
-//         .map(|result| result.expect("Invalid PEM formatting in certificate file"))
-//         .collect();
-
-//     if certs.is_empty() {
-//         panic!("No certificates found in {}", cert_path);
-//     }
-
-//     // 2. Verify and Load Private Key
-//     // This identifies if the key file is missing, formatted incorrectly, or encrypted
-//     let key = PrivateKeyDer::from_pem_file(key_path)
-//         .expect(&format!("Failed to load a valid private key from {}", key_path));
-
-//     // 3. Assemble into RustlsConfig
-//     // Since we've verified the files, from_der is unlikely to fail
-//     RustlsConfig::from_der(
-//         certs.into_iter().map(|c| c.to_vec()).collect(),
-//         key.secret_der().to_vec(),
-//     )
-//     .await
-//     .expect("Failed to initialize RustlsConfig from verified DER data")
-// }
-
-            let cert_path = std::path::PathBuf::from(std::env::var("CERT_PATH")
-                .map_err(|source| AppError::FailedFindEnvVar { source, key: "CERT_PATH".into() })?);
-
             let key_path = std::path::PathBuf::from(std::env::var("KEY_PATH")
-                .map_err(|source| AppError::FailedFindEnvVar { source, key: "KEY_PATH".into() })?);
+                .map_err(|source| AppError::FailedFindEnvVar (source, "KEY_PATH".into()))?);
+            let key = PrivateKeyDer::from_pem_file(key_path)
+                .map_err(|source| AppError::FailedOpenPEMFile(source, key_path)?;
+
+            let tls_config =
+                futures::executor::block_on(
+                    RustlsConfig::from_der(
+                        certs.into_iter().map(|cert| cert.to_vec()).collect(),
+                        key.secret_der().to_vec(),
+                    )
+                ).unwrap();
 
             let http_router = axum::Router::new()
                 .fallback(h::redirect_to_https);
@@ -109,17 +85,14 @@ pub mod config {
                 .route("/healthz", get(h::check_app_liveliness))
                 .fallback(h::report_invalid_route);
 
-            let tls_config =
-                futures::executor::block_on(RustlsConfig::from_pem_file(&cert_path, &key_path))?;
-
             Ok(AppConfig {
                 http_addr,
                 https_addr,
                 cert_path,
                 key_path,
+                tls_config,
                 http_router,
                 https_router,
-                tls_config,
             })
         }
     }

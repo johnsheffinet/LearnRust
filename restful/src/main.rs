@@ -54,10 +54,13 @@ pub mod config {
 
             let cert_path = std::env::var("CERT_PATH")
                 .map_err(|source| AppError::FailedFindEnvVar(source, "CERT_PATH".into()))?;
-            let certs: Vec<CertificateDer<'static>> = PemObject::pem_file_iter(cert_path)
-                .map_err(|source| AppError::FailedOpenPEMFile(source, cert_path))?
-                .map(|result| result.map_err(|source| AppError::FailedParsePEMFile(source, cert_path))?)  
-                .collect();
+            let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_file_iter(cert_path)
+                    .map_err(|e| AppError::FailedOpenPEMFile(e, cert_path.to_string()))?
+                    .map(|result| result.map_err(|e| AppError::FailedReadPEMFile(e, cert_path.to_string())))
+                    .collect::<Result<Vec<_>, _>>()?; // Collects into a Result to catch the first error found
+            if certs.is_empty() {
+                return Err(AppError::NoCertificatesFound(cert_path.to_string()));
+            }
             
             let key_path = std::env::var("KEY_PATH")
                 .map_err(|source| AppError::FailedFindEnvVar(source, "KEY_PATH".into()))?;

@@ -416,13 +416,10 @@ pub mod tests {
                 jail.create_file("learnrust.key", &learnrust_key)
                     .expect("Failed to create 'learnrust.key' file!");
 
-                // cool_asserts::assert_matches!(
-                //     AppConfig::new(),
-                //     Ok(cfg) => {
-                //         pretty_assertions::assert_eq!(cfg.http_addr.to_string(), "127.0.0.1:3080");
-                // });
-
-                pretty_assertions::assert_eq!(CONFIG.http_addr.to_string(), "127.0.0.1:3080");
+                pretty_assertions::assert_eq!(
+                    CONFIG.http_addr.to_string(), 
+                    "127.0.0.1:3080"
+                );
 
                 Ok(())
             });
@@ -444,7 +441,10 @@ pub mod tests {
                 jail.create_file("learnrust.key", &learnrust_key)
                     .expect("Failed to create 'learnrust.key' file!");
 
-                cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedFindEnvVar { .. }));
+                cool_asserts::assert_matches!(
+                    AppConfig::new(), 
+                    Err(AppError::FailedFindEnvVar(_))
+                );
 
                 Ok(())
             });
@@ -469,7 +469,7 @@ pub mod tests {
 
                 cool_asserts::assert_matches!(
                     AppConfig::new(),
-                    Err(AppError::FailedParseSocketAddr { .. })
+                    Err(AppError::FailedParseSocketAddr(_))
                 );
 
                 Ok(())

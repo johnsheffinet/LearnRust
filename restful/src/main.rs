@@ -1,6 +1,7 @@
 pub mod config {
     use axum_server::tls_rustls::RustlsConfig;
-    use rustls_pki_types::pem::PemObject;
+    // Fix 1: Single braces for imports
+    use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
     use std::{path::PathBuf, sync::LazyLock};
 
     pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().unwrap());
@@ -8,7 +9,7 @@ pub mod config {
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
         #[error("Failed to find '{1}' environment variable! {0}")]
-        FailedFindEnvVar(#[source]std::env::VarError, String),
+        FailedFindEnvVar(#[source] std::env::VarError, String),
 
         #[error("Failed to parse '{1}' socket address {0}")]
         FailedParseSocketAddr(#[source] std::net::AddrParseError, String),
@@ -21,7 +22,10 @@ pub mod config {
 
         #[error("Failed to find valid certificates in '{0}' PEM file!")]
         FailedFindCerts(PathBuf),
-}
+
+        #[error("Failed to configure TLS from '{1}' file! {0}")]
+        FailedConfigTLS(#[source] std::io::Error, PathBuf),
+    }
 
     pub type AppResult<T> = Result<T, AppError>;
 
@@ -41,47 +45,45 @@ pub mod config {
         pub fn new() -> AppResult<AppConfig> {
             use crate::handlers as h;
             use axum::routing::get;
-            use rustls_pki_types::{{CertificateDer, PrivateKeyDer}, pem::PemObject};
 
-let http_addr_raw = std::env::var("HTTP_ADDR")
-    .map_err(|s| AppError::FailedFindEnvVar(s, "HTTP_ADDR".into()))?;
-let http_addr = http_addr_raw
-    .parse::<std::net::SocketAddr>()
-    .map_err(|s| AppError::FailedParseSocketAddr(s, ))?;
-            let http_addr = std::env::var("HTTP_ADDR")
-                .map_err(|source| AppError::FailedFindEnvVar(source, "HTTP_ADDR".into()))?;
-            let http_addr = http_addr
+            let http_addr_raw = std::env::var("HTTP_ADDR")
+                .map_err(|s| AppError::FailedFindEnvVar(s, "HTTP_ADDR".into()))?;
+            let http_addr = http_addr_raw
                 .parse::<std::net::SocketAddr>()
-                .map_err(|source| AppError::FailedParseSocketAddr(source, http_addr))?;
+                .map_err(|s| AppError::FailedParseSocketAddr(s, http_addr_raw))?;
 
-            let https_addr = std::env::var("HTTPS_ADDR")
-                .map_err(|source| AppError::FailedFindEnvVar(source, "HTTP_ADDR".into()))?;
-            let https_addr = https_addr
+            let https_addr_raw = std::env::var("HTTPS_ADDR")
+                .map_err(|s| AppError::FailedFindEnvVar(s, "HTTPS_ADDR".into()))?;
+            let https_addr = https_addr_raw
                 .parse::<std::net::SocketAddr>()
-                .map_err(|source| AppError::FailedParseSocketAddr(source, https_addr))?;
+                .map_err(|s| AppError::FailedParseSocketAddr(s, https_addr_raw))?;
 
-            let cert_path = std::path::PathBuf::from(std::env::var("CERT_PATH")
-                .map_err(|source| AppError::FailedFindEnvVar (source, "CERT_PATH".into()))?);
-            let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_file_iter(cert_path)
-                .map_err(|error| AppError::FailedOpenPEMFile(error, cert_path))?
-                .map(|result| result.map_err(|source| AppError::FailedParsePEMFile(source, cert_path))?)
+            let cert_path_raw = std::env::var("CERT_PATH")
+                .map_err(|s| AppError::FailedFindEnvVar(s, "CERT_PATH".into()))?;
+            let cert_path = std::path::PathBuf::from(cert_path_raw);
+            
+            let certs = CertificateDer::pem_file_iter(&cert_path)
+                .map_err(|s| AppError::FailedOpenPEMFile(s, cert_path.clone()))?
+                .map(|r| r.map_err(|s| AppError::FailedParsePEMFile(s, cert_path.clone())))
                 .collect::<Result<Vec<_>, _>>()?;
+            
             if certs.is_empty() {
+                // Fix 2: Remove ? when using return Err(...)
                 return Err(AppError::FailedFindCerts(cert_path));
             }
-            
-            let key_path = std::path::PathBuf::from(std::env::var("KEY_PATH")
-                .map_err(|source| AppError::FailedFindEnvVar (source, "KEY_PATH".into()))?);
-            let key = PrivateKeyDer::from_pem_file(key_path)
-                .map_err(|source| AppError::FailedOpenPEMFile(source, key_path))?;
+                        
+            let key_path_raw = std::env::var("KEY_PATH")
+                .map_err(|s| AppError::FailedFindEnvVar(s, "KEY_PATH".into()))?;
+            let key_path = std::path::PathBuf::from(key_path_raw);
+            let key = PrivateKeyDer::from_pem_file(&key_path)
+                .map_err(|s| AppError::FailedOpenPEMFile(s, key_path.clone()))?;
 
-            let tls_config =
-                futures::executor::block_on(
-                    RustlsConfig::from_der(
-                        certs.into_iter().map(|cert| cert.to_vec()).collect(),
-                        key.secret_der().to_vec(),
-                    )
-                ).unwrap();
+            let tls_config = futures::executor::block_on(
+                RustlsConfig::from_der(
+                    certs.into_iter().map(|c| c.to_vec()).collect(),
+                    key.secret_der().to_vec(),
+                )
+            ).map_err(|s| AppError::FailedConfigTLS(s, cert_path.clone()))?;
 
             let http_router = axum::Router::new()
                 .fallback(h::redirect_to_https);

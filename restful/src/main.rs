@@ -443,7 +443,7 @@ pub mod tests {
 
                 cool_asserts::assert_matches!(
                     AppConfig::new(), 
-                    Err(AppError::FailedFindEnvVar(_))
+                    Err(AppError::FailedFindEnvVar(_, _))
                 );
 
                 Ok(())
@@ -469,7 +469,7 @@ pub mod tests {
 
                 cool_asserts::assert_matches!(
                     AppConfig::new(),
-                    Err(AppError::FailedParseSocketAddr(_))
+                    Err(AppError::FailedParseSocketAddr(_, _))
                 );
 
                 Ok(())
@@ -493,7 +493,7 @@ pub mod tests {
 
                 cool_asserts::assert_matches!(
                     AppConfig::new(),
-                    Err(AppError::FailedParsePEMFile(_))
+                    Err(AppError::FailedParsePEMFile(_, _))
                 );
 
                 Ok(())
@@ -519,7 +519,7 @@ pub mod tests {
 
                 cool_asserts::assert_matches!(
                     AppConfig::new(),
-                    Err(AppError::FailedParsePEMFile(_))
+                    Err(AppError::FailedParsePEMFile(_, _))
                 );
 
                 Ok(())

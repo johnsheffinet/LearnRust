@@ -493,7 +493,7 @@ pub mod tests {
 
                 cool_asserts::assert_matches!(
                     AppConfig::new(),
-                    Err(AppError::FailedParsePEMFile(_, _))
+                    Err(AppError::FailedOpenPEMFile(_, _))
                 );
 
                 Ok(())

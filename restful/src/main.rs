@@ -512,7 +512,7 @@ pub mod tests {
                 jail.set_env("CERT_PATH", "learnrust.crt");
                 jail.set_env("KEY_PATH", "learnrust.key");
 
-                jail.create_file("learnrust.crt", "invalid content")
+                jail.create_file("learnrust.crt", "-----BEGIN CERTIFICATE-----")
                     .expect("Failed to create 'learnrust.crt' file!"); // Invalid PEM File
                 jail.create_file("learnrust.key", &learnrust_key)
                     .expect("Failed to create 'learnrust.key' file!");

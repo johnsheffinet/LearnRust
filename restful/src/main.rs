@@ -1,6 +1,5 @@
 pub mod config {
     use axum_server::tls_rustls::RustlsConfig;
-    // Fix 1: Single braces for imports
     use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
     use std::{path::PathBuf, sync::LazyLock};
 
@@ -68,7 +67,6 @@ pub mod config {
                 .collect::<Result<Vec<_>, _>>()?;
             
             if certs.is_empty() {
-                // Fix 2: Remove ? when using return Err(...)
                 return Err(AppError::FailedFindCerts(cert_path));
             }
                         
@@ -388,7 +386,15 @@ pub mod tests {
         Ok(res_params)
     }
     pub mod config {
-        use crate::config::{AppConfig, AppError, CONFIG};
+        use crate::config::{AppConfig, AppError};
+
+        #[test_case("127.0.0.1:3080", "success", "success", Ok(_);                                      "test_create_app_config_success"]
+        #[test_case(None,             "success", "success", Err(AppError::FailedFindEnvVar(_, _));      "test_create_app_config_failure_find_env_var"]
+        #[test_case("127.0.0.1:3080", "success", "success", Err(AppError::FailedParseSocketAddr(_, _)); "test_create_app_config_failure_parse_socket_addr"]
+        #[test_case("127.0.0.1:3080", "success", "success", Err(AppError::FailedOpenPEMFile(_, _));     "test_create_app_config_failure_open_pem_file"]
+        #[test_case("127.0.0.1:3080", "success", "success", Err(AppError::FailedParsePEMFile(_, _));    "test_create_app_config_failure_parse_pem_file"]
+        #[test_case("127.0.0.1:3080", "success", "success", Err(AppError::FailedFindCerts(_, _));       "test_create_app_config_failure_find_certs"]
+        #[test_case("127.0.0.1:3080", "success", "success", Err(AppError::FailedConfigTLS(_, _));       "test_create_app_config_failure_config_tls"]
 
         fn setup_tests() -> (String, String) {
             let learnrust = rcgen::generate_simple_self_signed(vec!["127.0.0.1:3443".into()])
@@ -402,6 +408,14 @@ pub mod tests {
         #[test_log::test(tokio::test)]
         async fn test_create_app_config_success() {
             figment::Jail::expect_with(|jail| {
+                let learnrust = rcgen::generate_simple_self_signed(vec!["127.0.0.1:3443".into()])
+                    .expect("Error: Failed to create self-signed certificate!\n");
+                let learnrust_crt = learnrust.cert.pem();
+                let learnrust_key = learnrust.signing_key.serialize_pem();
+
+            let learnrust = rcgen::generate_simple_self_signed(vec!["127.0.0.1:3443".into()])
+                .expect("Error: Failed to create self-signed certificate!\n");
+            let learnrust_key = learnrust.signing_key.serialize_pem();
                 let (learnrust_crt, learnrust_key) = setup_tests();
 
                 jail.clear_env();

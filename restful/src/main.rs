@@ -389,13 +389,13 @@ pub mod tests {
         use crate::config::{AppConfig, AppError};
         use test_case::test_case;
 
-        #[test_case(Some("127.0.0.1:3080"), Some("success"), "success", Ok(_)                                    ; "test_create_app_config_success")]
-        #[test_case(None,                   Some("success"), "success", Err(AppError::FailedFindEnvVar(_, _))    ; "test_create_app_config_failure_find_env_var")]
-        #[test_case(Some("invalid"),        Some("success"), "success", Err(AppError::FailedParseSocketAddr(_,_)); "test_create_app_config_failure_parse_socket_addr")]
-        #[test_case(Some("127.0.0.1:3080"), None,            "success", Err(AppError::FailedOpenPEMFile(_, _))   ; "test_create_app_config_failure_open_pem_file")]
-        #[test_case(Some("127.0.0.1:3080"), Some("-----"),   "success", Err(AppError::FailedParsePEMFile(_, _))  ; "test_create_app_config_failure_parse_pem_file")]
-        #[test_case(Some("127.0.0.1:3080"), Some("invalid"), "success", Err(AppError::FailedFindCerts(_))        ; "test_create_app_config_failure_find_certs")]
-        #[test_case(Some("127.0.0.1:3080"), Some("success"), "invalid", Err(AppError::FailedConfigTLS(_, _))     ; "test_create_app_config_failure_config_tls")]
+        #[test_case(Some("127.0.0.1:3080"), Some("success"), "success", Ok(AppConfig); "test_create_app_config_success")]
+        #[test_case(None, Some("success"), "success", Err(AppError::FailedFindEnvVar(,)); "test_create_app_config_failure_find_env_var")]
+        #[test_case(Some("invalid"), Some("success"), "success", Err(AppError::FailedParseSocketAddr(,)); "test_create_app_config_failure_parse_socket_addr")]
+        #[test_case(Some("127.0.0.1:3080"), None, "success", Err(AppError::FailedOpenPEMFile(,)); "test_create_app_config_failure_open_pem_file")]
+        #[test_case(Some("127.0.0.1:3080"), Some("-----"), "success", Err(AppError::FailedParsePEMFile(,)); "test_create_app_config_failure_parse_pem_file")]
+        #[test_case(Some("127.0.0.1:3080"), Some("invalid"), "success", Err(AppError::FailedFindCerts()); "test_create_app_config_failure_find_certs")]
+        #[test_case(Some("127.0.0.1:3080"), Some("success"), "invalid", Err(AppError::FailedConfigTLS(,)); "test_create_app_config_failure_config_tls")]
         #[test_log::test(tokio::test)]
         async fn test_create_app_config(
             http_addr: Option<&str>,
@@ -649,6 +649,7 @@ pub mod tests {
     //         pretty_assertions::assert_eq!(actual_params, expected_params);
     //     }
     // }
+    }
 }
 
 #[tokio::main]

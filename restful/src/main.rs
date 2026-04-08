@@ -389,13 +389,13 @@ pub mod tests {
         use crate::config::{AppConfig, AppError, AppResult};
         use test_case::test_case;
 
-        #[test_case(Some("127.0.0.1:3080"), Some("valid"), Some("match") matches Ok(_) ;)]
-        #[test_case(None, Some("valid"), Some("match") matches Err(AppError::FailedFindEnvVar(_, _)) ;)]
-        #[test_case(Some("invalid"), Some("valid"), Some("match") matches Err(AppError::FailedParseSocketAddr(_, _)) ;)]
-        #[test_case(Some("127.0.0.1:3080"), None, Some("match") matches Err(AppError::FailedOpenPEMFile(_, _)) ;)]
-        #[test_case(Some("127.0.0.1:3080"), Some("-----"), Some("match") matches Err(AppError::FailedParsePEMFile(_, _)) ;)]
-        #[test_case(Some("127.0.0.1:3080"), Some("invalid"), Some("match") matches Err(AppError::FailedFindCerts(_)) ;)]
-        #[test_case(Some("127.0.0.1:3080"), Some("valid"), Some("mismatch") matches Err(AppError::FailedConfigTLS(_, _)) ;)]
+        #[test_case(Some("127.0.0.1:3080"), Some("valid"), Some("match") => matches Ok(_) ;)]
+        #[test_case(None, Some("valid"), Some("match") => matches Err(AppError::FailedFindEnvVar(_, _)) ;)]
+        #[test_case(Some("invalid"), Some("valid"), Some("match") => matches Err(AppError::FailedParseSocketAddr(_, _)) ;)]
+        #[test_case(Some("127.0.0.1:3080"), None, Some("match") => matches Err(AppError::FailedOpenPEMFile(_, _)) ;)]
+        #[test_case(Some("127.0.0.1:3080"), Some("-----"), Some("match") => matches Err(AppError::FailedParsePEMFile(_, _)) ;)]
+        #[test_case(Some("127.0.0.1:3080"), Some("invalid"), Some("match") => matches Err(AppError::FailedFindCerts(_)) ;)]
+        #[test_case(Some("127.0.0.1:3080"), Some("valid"), Some("mismatch") => matches Err(AppError::FailedConfigTLS(_, _)) ;)]
         #[test_log::test(tokio::test)]
         async fn test_create_app_config(
             http_addr: Option<&str>,
@@ -420,7 +420,7 @@ pub mod tests {
                 }
 
                 if let Some(param) = key_param {
-                    let data = if param == "match" { pair_a.key_pair.serialize_pem() } else { pair_b.key_pair.serialize_pem() };
+                    let data = if param == "match" { pair_a.signing_key.serialize_pem() } else { pair_b.signing_key.serialize_pem() };
                     jail.create_file("test.key", &data).unwrap();
                 }
 
@@ -644,7 +644,6 @@ pub mod tests {
     //     }
     // }
     }
-}
 
 #[tokio::main]
 async fn main() {

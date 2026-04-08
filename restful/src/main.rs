@@ -389,20 +389,20 @@ pub mod tests {
         use crate::config::{AppConfig, AppError, AppResult};
         use test_case::test_case;
 
-        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("match")    matches Ok(_) ;                                      "success")]
-        #[test_case(None,                   Some("valid"),   Some("match")    matches Err(AppError::FailedFindEnvVar(_, _)) ;      "missing env var")]
-        #[test_case(Some("invalid"),        Some("valid"),   Some("match")    matches Err(AppError::FailedParseSocketAddr(_, _)) ; "invalid env var")]
-        #[test_case(Some("127.0.0.1:3080"), None,            Some("match")    matches Err(AppError::FailedOpenPEMFile(_, _)) ;     "missing pem file")]
-        #[test_case(Some("127.0.0.1:3080"), Some("---"),     Some("match")    matches Err(AppError::FailedParsePEMFile(_, _)) ;    "invalid pem file")]
-        #[test_case(Some("127.0.0.1:3080"), Some(""),        Some("match")    matches Err(AppError::FailedFindCerts(_)) ;          "missing certs")]
-        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("mismatch") matches Err(AppError::FailedConfigTLS(_, _)) ;       "invalid certs")]
+        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("match")    => matches Ok(_) ;                                      "success")]
+        #[test_case(None,                   Some("valid"),   Some("match")    => matches Err(AppError::FailedFindEnvVar(_, _)) ;      "missing env var")]
+        #[test_case(Some("invalid"),        Some("valid"),   Some("match")    => matches Err(AppError::FailedParseSocketAddr(_, _)) ; "invalid env var")]
+        #[test_case(Some("127.0.0.1:3080"), None,            Some("match")    => matches Err(AppError::FailedOpenPEMFile(_, _)) ;     "missing pem file")]
+        #[test_case(Some("127.0.0.1:3080"), Some("---"),     Some("match")    => matches Err(AppError::FailedParsePEMFile(_, _)) ;    "invalid pem file")]
+        #[test_case(Some("127.0.0.1:3080"), Some(""),        Some("match")    => matches Err(AppError::FailedFindCerts(_)) ;          "missing certs")]
+        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("mismatch") => matches Err(AppError::FailedConfigTLS(_, _)) ;       "invalid certs")]
         #[test_log::test(test)]
         fn test_create_app_config(
             http_addr: Option<&str>,
             crt_param: Option<&str>,
             key_param: Option<&str>,
-        ) -> AppResult<AppConfig> {
-            figment::Jail::expect_with(|jail| -> AppResult<AppConfig> {
+        ) -> AppResult<()> {
+            figment::Jail::expect_with(|jail| {
                 let pair_a = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
                 let pair_b = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
     
@@ -433,112 +433,12 @@ pub mod tests {
                     jail.create_file("test.key", &data).unwrap();
                 }
     
-                AppConfig::new()
+                AppConfig::new()?;
+
+                Ok(())
             })
         }
     }  
-    //     #[test_log::test(tokio::test)]
-    //     async fn test_create_app_config_failure_missing_socket_addr() {
-    //         figment::Jail::expect_with(|jail| {
-    //             let (learnrust_crt, learnrust_key) = setup_tests();
-
-    //             jail.clear_env();
-
-    //             jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
-    //             jail.set_env("CERT_PATH", "learnrust.crt");
-    //             jail.set_env("KEY_PATH", "learnrust.key");
-
-    //             jail.create_file("learnrust.crt", &learnrust_crt)
-    //                 .expect("Failed to create 'learnrust.crt' file!");
-    //             jail.create_file("learnrust.key", &learnrust_key)
-    //                 .expect("Failed to create 'learnrust.key' file!");
-
-    //             cool_asserts::assert_matches!(
-    //                 AppConfig::new(), 
-    //                 Err(AppError::FailedFindEnvVar(_, _))
-    //             );
-
-    //             Ok(())
-    //         });
-    //     }
-
-    //     #[test_log::test(tokio::test)]
-    //     async fn test_create_app_config_failure_invalid_socket_addr() {
-    //         figment::Jail::expect_with(|jail| {
-    //             let (learnrust_crt, learnrust_key) = setup_tests();
-
-    //             jail.clear_env();
-
-    //             jail.set_env("HTTP_ADDR", ""); // Invalid SocketAddr
-    //             jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
-    //             jail.set_env("CERT_PATH", "learnrust.crt");
-    //             jail.set_env("KEY_PATH", "learnrust.key");
-
-    //             jail.create_file("learnrust.crt", &learnrust_crt)
-    //                 .expect("Failed to create 'learnrust.crt' file!");
-    //             jail.create_file("learnrust.key", &learnrust_key)
-    //                 .expect("Failed to create 'learnrust.key' file!");
-
-    //             cool_asserts::assert_matches!(
-    //                 AppConfig::new(),
-    //                 Err(AppError::FailedParseSocketAddr(_, _))
-    //             );
-
-    //             Ok(())
-    //         });
-    //     }
-
-    //     #[test_log::test(tokio::test)]
-    //     async fn test_create_app_config_failure_missing_pem_file() {
-    //         figment::Jail::expect_with(|jail| {
-    //             let (_, learnrust_key) = setup_tests();
-
-    //             jail.clear_env();
-
-    //             jail.set_env("HTTP_ADDR", "127.0.0.1:3080");
-    //             jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
-    //             jail.set_env("CERT_PATH", "learnrust.crt"); // Missing PEM File
-    //             jail.set_env("KEY_PATH", "learnrust.key");
-
-    //             jail.create_file("learnrust.key", &learnrust_key)
-    //                 .expect("Failed to create 'learnrust.key' file!");
-
-    //             cool_asserts::assert_matches!(
-    //                 AppConfig::new(),
-    //                 Err(AppError::FailedOpenPEMFile(_, _))
-    //             );
-
-    //             Ok(())
-    //         });
-    //     }
-
-    //     #[test_log::test(tokio::test)]
-    //     async fn test_create_app_config_failure_invalid_pem_file() {
-    //         figment::Jail::expect_with(|jail| {
-    //             let (_, learnrust_key) = setup_tests();
-
-    //             jail.clear_env();
-
-    //             jail.set_env("HTTP_ADDR", "127.0.0.1:3080");
-    //             jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
-    //             jail.set_env("CERT_PATH", "learnrust.crt");
-    //             jail.set_env("KEY_PATH", "learnrust.key");
-
-    //             jail.create_file("learnrust.crt", "-----BEGIN CERTIFICATE-----")
-    //                 .expect("Failed to create 'learnrust.crt' file!"); // Invalid PEM File
-    //             jail.create_file("learnrust.key", &learnrust_key)
-    //                 .expect("Failed to create 'learnrust.key' file!");
-
-    //             cool_asserts::assert_matches!(
-    //                 AppConfig::new(),
-    //                 Err(AppError::FailedParsePEMFile(_, _))
-    //             );
-
-    //             Ok(())
-    //         });
-    //     }
-    // }
-
     // pub mod request {
     //     #[test_log::test(tokio::test)]
     //     async fn test_create_request_from_params_success() {

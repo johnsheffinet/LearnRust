@@ -1,7 +1,7 @@
 pub mod config {
     use axum_server::tls_rustls::RustlsConfig;
     use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
-    use std::{path::PathBuf, sync::LazyLock};
+    use std::sync::LazyLock;
 
     pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().unwrap());
 
@@ -14,16 +14,16 @@ pub mod config {
         FailedParseSocketAddr(#[source] std::net::AddrParseError, String),
 
         #[error("Failed to open {1} PEM file! {0}")]
-        FailedOpenPEMFile(#[source] rustls_pki_types::pem::Error, PathBuf),
+        FailedOpenPEMFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
 
         #[error("Failed to parse {1} PEM file! {0}")]
-        FailedParsePEMFile(#[source] rustls_pki_types::pem::Error, PathBuf),
+        FailedParsePEMFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
 
         #[error("Failed to find valid certificates in '{0}' PEM file!")]
-        FailedFindCerts(PathBuf),
+        FailedFindCerts(std::path::PathBuf),
 
         #[error("Failed to configure TLS from '{1}' file! {0}")]
-        FailedConfigTLS(#[source] std::io::Error, PathBuf),
+        FailedConfigTLS(#[source] std::io::Error, std::path::PathBuf),
     }
 
     pub type AppResult<T> = Result<T, AppError>;
@@ -389,61 +389,54 @@ pub mod tests {
         use crate::config::{AppConfig, AppError, AppResult};
         use test_case::test_case;
 
-// Syntax: #[test_case(args... matches pattern ; "description")]
-    #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("match")    => matches Ok(_) ; "success")]
-    #[test_case(None,                   Some("valid"),   Some("match")    => matches Err(AppError::FailedFindEnvVar(_, _)) ; "missing env var")]
-    #[test_case(Some("invalid"),        Some("valid"),   Some("match")    => matches Err(AppError::FailedParseSocketAddr(_, _)) ; "invalid env var")]
-    #[test_case(Some("127.0.0.1:3080"), None,            Some("match")    => matches Err(AppError::FailedOpenPEMFile(_, _)) ; "missing pem file")]
-    #[test_case(Some("127.0.0.1:3080"), Some("---"),    Some("match")    => matches Err(AppError::FailedParsePEMFile(_, _)) ; "invalid pem file")]
-    #[test_case(Some("127.0.0.1:3080"), Some(""),        Some("match")    => matches Err(AppError::FailedFindCerts(_)) ; "missing certs")]
-    #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("mismatch") => matches Err(AppError::FailedConfigTLS(_, _)) ; "invalid tls config")]
-    #[tokio::test]
-    async fn test_create_app_config(
-        http_addr: Option<&str>,
-        crt_param: Option<&str>,
-        key_param: Option<&str>,
-    ) -> AppResult<AppConfig> {
-        // expect_with returns the result from the closure
-        figment::Jail::expect_with(|jail| {
-            // Generate two distinct pairs to test mismatches
-            let pair_a = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
-            let pair_b = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
-
-            jail.clear_env();
-            
-            // Set up Environment Variables
-            if let Some(addr) = http_addr {
-                jail.set_env("HTTP_ADDR", addr);
-            }
-            jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
-            jail.set_env("CERT_PATH", "test.crt");
-            jail.set_env("KEY_PATH", "test.key");
-
-            // Mock Certificate File
-            if let Some(param) = crt_param {
-                let data = if param == "valid" { 
-                    pair_a.cert.pem() 
-                } else { 
-                    param.to_string() 
-                };
-                jail.create_file("test.crt", &data).unwrap();
-            }
-
-            // Mock Key File
-            if let Some(param) = key_param {
-                // Use key_pair.serialize_pem() for modern rcgen
-                let data = if param == "match" { 
-                    pair_a.key_pair.serialize_pem() 
-                } else { 
-                    pair_b.key_pair.serialize_pem() 
-                };
-                jail.create_file("test.key", &data).unwrap();
-            }
-
-            // Execute production code within the jail context
-            AppConfig::new()
-        })
-    }    }  
+        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("match")    matches Ok(_) ;                                      "success")]
+        #[test_case(None,                   Some("valid"),   Some("match")    matches Err(AppError::FailedFindEnvVar(_, _)) ;      "missing env var")]
+        #[test_case(Some("invalid"),        Some("valid"),   Some("match")    matches Err(AppError::FailedParseSocketAddr(_, _)) ; "invalid env var")]
+        #[test_case(Some("127.0.0.1:3080"), None,            Some("match")    matches Err(AppError::FailedOpenPEMFile(_, _)) ;     "missing pem file")]
+        #[test_case(Some("127.0.0.1:3080"), Some("---"),     Some("match")    matches Err(AppError::FailedParsePEMFile(_, _)) ;    "invalid pem file")]
+        #[test_case(Some("127.0.0.1:3080"), Some(""),        Some("match")    matches Err(AppError::FailedFindCerts(_)) ;          "missing certs")]
+        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("mismatch") matches Err(AppError::FailedConfigTLS(_, _)) ;       "invalid certs")]
+        #[test_log::test(test)]
+        fn test_create_app_config(
+            http_addr: Option<&str>,
+            crt_param: Option<&str>,
+            key_param: Option<&str>,
+        ) -> AppResult<AppConfig> {
+            figment::Jail::expect_with(|jail| -> AppResult<AppConfig> {
+                let pair_a = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
+                let pair_b = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
+    
+                jail.clear_env();
+    
+                if let Some(addr) = http_addr {
+                    jail.set_env("HTTP_ADDR", addr);
+                }
+                jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
+                jail.set_env("CERT_PATH", "test.crt");
+                jail.set_env("KEY_PATH", "test.key");
+    
+                if let Some(param) = crt_param {
+                    let data = if param == "valid" { 
+                        pair_a.cert.pem() 
+                    } else { 
+                        param.to_string() 
+                    };
+                    jail.create_file("test.crt", &data).unwrap();
+                }
+    
+                if let Some(param) = key_param {
+                    let data = if param == "match" { 
+                        pair_a.key_pair.serialize_pem() 
+                    } else { 
+                        pair_b.key_pair.serialize_pem() 
+                    };
+                    jail.create_file("test.key", &data).unwrap();
+                }
+    
+                AppConfig::new()
+            })
+        }
+    }  
     //     #[test_log::test(tokio::test)]
     //     async fn test_create_app_config_failure_missing_socket_addr() {
     //         figment::Jail::expect_with(|jail| {

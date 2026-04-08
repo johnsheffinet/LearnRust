@@ -389,19 +389,19 @@ pub mod tests {
         use crate::config::{AppConfig, AppError, AppResult};
         use test_case::test_case;
 
-        #[test_case(Some("127.0.0.1:3080"), Some("valid"), Some("match") => matches Ok(_) ;)]
-        #[test_case(None, Some("valid"), Some("match") => matches Err(AppError::FailedFindEnvVar(_, _)) ;)]
-        #[test_case(Some("invalid"), Some("valid"), Some("match") => matches Err(AppError::FailedParseSocketAddr(_, _)) ;)]
-        #[test_case(Some("127.0.0.1:3080"), None, Some("match") => matches Err(AppError::FailedOpenPEMFile(_, _)) ;)]
-        #[test_case(Some("127.0.0.1:3080"), Some("-----"), Some("match") => matches Err(AppError::FailedParsePEMFile(_, _)) ;)]
-        #[test_case(Some("127.0.0.1:3080"), Some("invalid"), Some("match") => matches Err(AppError::FailedFindCerts(_)) ;)]
-        #[test_case(Some("127.0.0.1:3080"), Some("valid"), Some("mismatch") => matches Err(AppError::FailedConfigTLS(_, _)) ;)]
+        #[test_case(Some("127.0.0.1:3080"), Some("valid"), Some("match") => matches Ok(_) ; "success")]
+        #[test_case(None, Some("valid"), Some("match") => matches Err(AppError::FailedFindEnvVar(_, _)) ; "missing env var")]
+        #[test_case(Some("invalid"), Some("valid"), Some("match") => matches Err(AppError::FailedParseSocketAddr(_, _)) ; "invalid env var")]
+        #[test_case(Some("127.0.0.1:3080"), None, Some("match") => matches Err(AppError::FailedOpenPEMFile(_, _)) ; "missing pem file")]
+        #[test_case(Some("127.0.0.1:3080"), Some("-----"), Some("match") => matches Err(AppError::FailedParsePEMFile(_, _)) ; "invalid pem file")]
+        #[test_case(Some("127.0.0.1:3080"), Some("invalid"), Some("match") => matches Err(AppError::FailedFindCerts(_)) ; "missing certs")]
+        #[test_case(Some("127.0.0.1:3080"), Some("valid"), Some("mismatch") => matches Err(AppError::FailedConfigTLS(_, _)) ; "invalid tls config")]
         #[test_log::test(tokio::test)]
         async fn test_create_app_config(
             http_addr: Option<&str>,
             crt_param: Option<&str>,
             key_param: Option<&str>,
-        ) -> AppResult<AppConfig> {
+        ) {
             figment::Jail::expect_with(|jail| {
                 let pair_a = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
                 let pair_b = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
@@ -423,8 +423,6 @@ pub mod tests {
                     let data = if param == "match" { pair_a.signing_key.serialize_pem() } else { pair_b.signing_key.serialize_pem() };
                     jail.create_file("test.key", &data).unwrap();
                 }
-
-                AppConfig::new()
             })
         }
     }  

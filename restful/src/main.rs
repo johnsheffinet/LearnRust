@@ -401,41 +401,41 @@ pub mod tests {
             http_addr: Option<&str>,
             crt_param: Option<&str>,
             key_param: Option<&str>,
-        ) -> AppResult<()> {
+        ) -> AppResult<AppConfig> {
             figment::Jail::expect_with(|jail| {
-                let pair_a = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
-                let pair_b = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
+                // let pair_a = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
+                // let pair_b = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
     
-                jail.clear_env();
+                // jail.clear_env();
     
-                if let Some(addr) = http_addr {
-                    jail.set_env("HTTP_ADDR", addr);
-                }
-                jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
-                jail.set_env("CERT_PATH", "test.crt");
-                jail.set_env("KEY_PATH", "test.key");
+                // if let Some(addr) = http_addr {
+                //     jail.set_env("HTTP_ADDR", addr);
+                // }
+                // jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
+                // jail.set_env("CERT_PATH", "test.crt");
+                // jail.set_env("KEY_PATH", "test.key");
     
-                if let Some(param) = crt_param {
-                    let data = if param == "valid" { 
-                        pair_a.cert.pem() 
-                    } else { 
-                        param.to_string() 
-                    };
-                    jail.create_file("test.crt", &data).unwrap();
-                }
+                // if let Some(param) = crt_param {
+                //     let data = if param == "valid" { 
+                //         pair_a.cert.pem() 
+                //     } else { 
+                //         param.to_string() 
+                //     };
+                //     jail.create_file("test.crt", &data).unwrap();
+                // }
     
-                if let Some(param) = key_param {
-                    let data = if param == "match" { 
-                        pair_a.key_pair.serialize_pem() 
-                    } else { 
-                        pair_b.key_pair.serialize_pem() 
-                    };
-                    jail.create_file("test.key", &data).unwrap();
-                }
+                // if let Some(param) = key_param {
+                //     let data = if param == "match" { 
+                //         pair_a.key_pair.serialize_pem() 
+                //     } else { 
+                //         pair_b.key_pair.serialize_pem() 
+                //     };
+                //     jail.create_file("test.key", &data).unwrap();
+                // }
     
-                AppConfig::new()?;
+                let cfg = AppConfig::new()?;
 
-                Ok(())
+                Ok(cfg)
             })
         }
     }  

@@ -390,53 +390,54 @@ pub mod tests {
         use test_case::test_case;
 
         #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("match")    => matches Ok(_) ;                                      "success")]
-        #[test_case(None,                   Some("valid"),   Some("match")    => matches Err(AppError::FailedFindEnvVar(_, _)) ;      "missing env var")]
-        #[test_case(Some("invalid"),        Some("valid"),   Some("match")    => matches Err(AppError::FailedParseSocketAddr(_, _)) ; "invalid env var")]
-        #[test_case(Some("127.0.0.1:3080"), None,            Some("match")    => matches Err(AppError::FailedOpenPEMFile(_, _)) ;     "missing pem file")]
-        #[test_case(Some("127.0.0.1:3080"), Some("---"),     Some("match")    => matches Err(AppError::FailedParsePEMFile(_, _)) ;    "invalid pem file")]
-        #[test_case(Some("127.0.0.1:3080"), Some(""),        Some("match")    => matches Err(AppError::FailedFindCerts(_)) ;          "missing certs")]
-        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("mismatch") => matches Err(AppError::FailedConfigTLS(_, _)) ;       "invalid certs")]
-        #[test_log::test(test)]
-        fn test_create_app_config(
+        #[test_case(None,                   Some("valid"),   Some("match")    => matches Err(AppError::FailedFindEnvVar(_, _)) ;      "failure find env var")]
+        #[test_case(Some("invalid"),        Some("valid"),   Some("match")    => matches Err(AppError::FailedParseSocketAddr(_, _)) ; "failure parse socket addr")]
+        #[test_case(Some("127.0.0.1:3080"), None,            Some("match")    => matches Err(AppError::FailedOpenPEMFile(_, _)) ;     "failure open pem file")]
+        #[test_case(Some("127.0.0.1:3080"), Some("---"),     Some("match")    => matches Err(AppError::FailedParsePEMFile(_, _)) ;    "failure parse pem file")]
+        #[test_case(Some("127.0.0.1:3080"), Some(""),        Some("match")    => matches Err(AppError::FailedFindCerts(_)) ;          "failure find certs")]
+        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("mismatch") => matches Err(AppError::FailedConfigTLS(_, _)) ;       "failure config tls")]
+        #[test_log::test(tokio::test)]
+        async fn test_create_app_config(
             http_addr: Option<&str>,
             crt_param: Option<&str>,
             key_param: Option<&str>,
         ) -> AppResult<AppConfig> {
-            figment::Jail::expect_with(|jail| {
-                // let pair_a = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
-                // let pair_b = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
+            figment::Jail::expect_with(|jail| -> AppResult<AppConfig> {
+                let pair_a = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
+                let pair_b = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
     
-                // jail.clear_env();
+                jail.clear_env();
     
-                // if let Some(addr) = http_addr {
-                //     jail.set_env("HTTP_ADDR", addr);
-                // }
-                // jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
-                // jail.set_env("CERT_PATH", "test.crt");
-                // jail.set_env("KEY_PATH", "test.key");
+                if let Some(addr) = http_addr {
+                    jail.set_env("HTTP_ADDR", addr);
+                }
+                jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
+                jail.set_env("CERT_PATH", "test.crt");
+                jail.set_env("KEY_PATH", "test.key");
     
-                // if let Some(param) = crt_param {
-                //     let data = if param == "valid" { 
-                //         pair_a.cert.pem() 
-                //     } else { 
-                //         param.to_string() 
-                //     };
-                //     jail.create_file("test.crt", &data).unwrap();
-                // }
+                if let Some(param) = crt_param {
+                    let data = if param == "valid" { 
+                        pair_a.cert.pem() 
+                    } else { 
+                        param.to_string() 
+                    };
+                    jail.create_file("test.crt", &data).unwrap();
+                }
     
-                // if let Some(param) = key_param {
-                //     let data = if param == "match" { 
-                //         pair_a.key_pair.serialize_pem() 
-                //     } else { 
-                //         pair_b.key_pair.serialize_pem() 
-                //     };
-                //     jail.create_file("test.key", &data).unwrap();
-                // }
-    
-                let cfg = AppConfig::new()?;
+                if let Some(param) = key_param {
+                    let data = if param == "match" { 
+                        pair_a.signing_key.serialize_pem() 
+                    } else { 
+                        pair_b.signing_key.serialize_pem() 
+                    };
+                    jail.create_file("test.key", &data).unwrap();
+                }
+                
+                let cfg = AppConfig::new();
 
-                Ok(cfg)
-            })
+                cfg
+            });
+            Ok(cfg)
         }
     }  
     // pub mod request {

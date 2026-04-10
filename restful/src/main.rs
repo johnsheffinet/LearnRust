@@ -387,19 +387,19 @@ pub mod tests {
         use crate::config::{AppConfig, AppError, AppResult};
         use test_case::test_case;
 
-        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("match"),    None ;                                        "success")]
-        #[test_case(None,                   Some("valid"),   Some("match"),    Some(AppError::FailedFindEnvVar(_, _)) ;      "failure find env var")]
-        #[test_case(Some("invalid"),        Some("valid"),   Some("match"),    Some(AppError::FailedParseSocketAddr(_, _)) ; "failure parse socket addr")]
-        #[test_case(Some("127.0.0.1:3080"), None,            Some("match"),    Some(AppError::FailedOpenPEMFile(_, _)) ;     "failure open pem file")]
-        #[test_case(Some("127.0.0.1:3080"), Some("---"),     Some("match"),    Some(AppError::FailedParsePEMFile(_, _)) ;    "failure parse pem file")]
-        #[test_case(Some("127.0.0.1:3080"), Some(""),        Some("match"),    Some(AppError::FailedFindCerts(_)) ;          "failure find certs")]
-        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("mismatch"), Some(AppError::FailedConfigTLS(_, _)) ;       "failure config tls")]
+        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("match"),    "Success";               "success")]
+        #[test_case(None,                   Some("valid"),   Some("match"),    "FailedFindEnvVar";      "failure find env var")]
+        #[test_case(Some("invalid"),        Some("valid"),   Some("match"),    "FailedParseSocketAddr"; "failure parse socket addr")]
+        #[test_case(Some("127.0.0.1:3080"), None,            Some("match"),    "FailedOpenPEMFile";     "failure open pem file")]
+        #[test_case(Some("127.0.0.1:3080"), Some("---"),     Some("match"),    "FailedParsePEMFile";    "failure parse pem file")]
+        #[test_case(Some("127.0.0.1:3080"), Some("invalid"), Some("match"),    "FailedFindCerts";       "failure find certs")]
+        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("mismatch"), "FailedConfigTLS";       "failure config tls")]
         #[test_log::test(tokio::test)]
         async fn test_create_app_config(
             http_addr: Option<&str>,
             crt_param: Option<&str>,
             key_param: Option<&str>,
-            expected_error: Option<AppError>,
+            expected: &str,
         ) {
             figment::Jail::expect_with(|jail| {
                 let pair_a = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
@@ -432,26 +432,19 @@ pub mod tests {
                     jail.create_file("test.key", &data).unwrap();
                 }
 
-                let result = AppConfig::new();
-                match expected_error {
-                    None => assert!(
-                        result.is_ok(),
-                        "Expected Ok(), but got Err({:?})!", result.err()
-                    ),
-                    Some(expected) => {
-                        let err = result.unwrap_err();
-                        assert_eq!(
-                            std::mem::discriminant(&expected),
-                            std::mem::discriminant(&err),
-                            "Expected {:?}, but got {:?}",
-                            expected,
-                            err
-                        );
-                    }
+                match expected {
+                    "Success" => cool_asserts::assert_matches!(AppConfig::new(), Ok(_)),
+                    "FailedFindEnvVar" => cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedFindEnvVar(_, _))),
+                    "FailedParseSocketAddr" => cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedParseSocketAddr(_, _))),
+                    "FailedOpenPEMFile" => cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedOpenPEMFile(_, _))),
+                    "FailedParsePEMFile" => cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedParsePEMFile(_, _))),
+                    "FailedFindCerts" => cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedFindCerts(_))),
+                    "FailedConfigTLS" => cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedConfigTLS(_, _))),
+                    _ => panic!("Did not expect {:?}!", expected),
                 }
 
                 Ok(())
-            });
+            })
         }
     }
     // pub mod request {

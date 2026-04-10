@@ -60,31 +60,29 @@ pub mod config {
             let cert_path_raw = std::env::var("CERT_PATH")
                 .map_err(|s| AppError::FailedFindEnvVar(s, "CERT_PATH".into()))?;
             let cert_path = std::path::PathBuf::from(cert_path_raw);
-            
+
             let certs = CertificateDer::pem_file_iter(&cert_path)
                 .map_err(|s| AppError::FailedOpenPEMFile(s, cert_path.clone()))?
                 .map(|r| r.map_err(|s| AppError::FailedParsePEMFile(s, cert_path.clone())))
                 .collect::<Result<Vec<_>, _>>()?;
-            
+
             if certs.is_empty() {
                 return Err(AppError::FailedFindCerts(cert_path));
             }
-                        
+
             let key_path_raw = std::env::var("KEY_PATH")
                 .map_err(|s| AppError::FailedFindEnvVar(s, "KEY_PATH".into()))?;
             let key_path = std::path::PathBuf::from(key_path_raw);
             let key = PrivateKeyDer::from_pem_file(&key_path)
                 .map_err(|s| AppError::FailedOpenPEMFile(s, key_path.clone()))?;
 
-            let tls_config = futures::executor::block_on(
-                RustlsConfig::from_der(
-                    certs.into_iter().map(|c| c.to_vec()).collect(),
-                    key.secret_der().to_vec(),
-                )
-            ).map_err(|s| AppError::FailedConfigTLS(s, cert_path.clone()))?;
+            let tls_config = futures::executor::block_on(RustlsConfig::from_der(
+                certs.into_iter().map(|c| c.to_vec()).collect(),
+                key.secret_der().to_vec(),
+            ))
+            .map_err(|s| AppError::FailedConfigTLS(s, cert_path.clone()))?;
 
-            let http_router = axum::Router::new()
-                .fallback(h::redirect_to_https);
+            let http_router = axum::Router::new().fallback(h::redirect_to_https);
 
             let https_router = axum::Router::new()
                 .route("/healthz", get(h::check_app_liveliness))
@@ -385,16 +383,16 @@ pub mod tests {
 
         Ok(res_params)
     }
-pub mod config {
+    pub mod config {
         use crate::config::{AppConfig, AppError, AppResult};
         use test_case::test_case;
 
-        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("match"), None ;                                      "success")]
-        #[test_case(None,                   Some("valid"),   Some("match"), Some(AppError::FailedFindEnvVar(_, _)) ;      "failure find env var")]
-        #[test_case(Some("invalid"),        Some("valid"),   Some("match"), Some(AppError::FailedParseSocketAddr(_, _)) ; "failure parse socket addr")]
-        #[test_case(Some("127.0.0.1:3080"), None,            Some("match"), Some(AppError::FailedOpenPEMFile(_, _)) ;     "failure open pem file")]
-        #[test_case(Some("127.0.0.1:3080"), Some("---"),     Some("match"), Some(AppError::FailedParsePEMFile(_, _)) ;    "failure parse pem file")]
-        #[test_case(Some("127.0.0.1:3080"), Some(""),        Some("match"), Some(AppError::FailedFindCerts(_)) ;          "failure find certs")]
+        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("match"),    None ;                                        "success")]
+        #[test_case(None,                   Some("valid"),   Some("match"),    Some(AppError::FailedFindEnvVar(_, _)) ;      "failure find env var")]
+        #[test_case(Some("invalid"),        Some("valid"),   Some("match"),    Some(AppError::FailedParseSocketAddr(_, _)) ; "failure parse socket addr")]
+        #[test_case(Some("127.0.0.1:3080"), None,            Some("match"),    Some(AppError::FailedOpenPEMFile(_, _)) ;     "failure open pem file")]
+        #[test_case(Some("127.0.0.1:3080"), Some("---"),     Some("match"),    Some(AppError::FailedParsePEMFile(_, _)) ;    "failure parse pem file")]
+        #[test_case(Some("127.0.0.1:3080"), Some(""),        Some("match"),    Some(AppError::FailedFindCerts(_)) ;          "failure find certs")]
         #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("mismatch"), Some(AppError::FailedConfigTLS(_, _)) ;       "failure config tls")]
         #[test_log::test(tokio::test)]
         async fn test_create_app_config(
@@ -406,43 +404,55 @@ pub mod config {
             figment::Jail::expect_with(|jail| {
                 let pair_a = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
                 let pair_b = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
-    
+
                 jail.clear_env();
-    
+
                 if let Some(addr) = http_addr {
                     jail.set_env("HTTP_ADDR", addr);
                 }
                 jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
                 jail.set_env("CERT_PATH", "test.crt");
                 jail.set_env("KEY_PATH", "test.key");
-    
+
                 if let Some(crt) = crt_param {
-                    let data = if crt == "valid" { 
-                        pair_a.cert.pem() 
-                    } else { 
-                        param.to_string() 
+                    let data = if crt == "valid" {
+                        pair_a.cert.pem()
+                    } else {
+                        crt.to_string()
                     };
                     jail.create_file("test.crt", &data).unwrap();
                 }
-    
+
                 if let Some(key) = key_param {
-                    let data = if key == "match" { 
-                        pair_a.signing_key.serialize_pem() 
-                    } else { 
-                        pair_b.signing_key.serialize_pem() 
+                    let data = if key == "match" {
+                        pair_a.signing_key.serialize_pem()
+                    } else {
+                        pair_b.signing_key.serialize_pem()
                     };
                     jail.create_file("test.key", &data).unwrap();
                 }
-                
+
                 let result = AppConfig::new();
                 match expected_error {
-                    None => cool_asserts::assert!(result.is_ok(), "Expected Ok(), but got {:?}!", result),
-                    Some(expected) => cool_asserts::assert_matches!(result, expected, "Expected {:?}, but got {:?}!", expected, result),
+                    None => assert!(
+                        result.is_ok(),
+                        "Expected Ok(), but got Err({:?})!", result.err()
+                    ),
+                    Some(expected) => {
+                        let err = result.unwrap_err();
+                        assert_eq!(
+                            std::mem::discriminant(&expected),
+                            std::mem::discriminant(&err),
+                            "Expected {:?}, but got {:?}",
+                            expected,
+                            err
+                        );
+                    }
                 }
 
                 Ok(())
-           });
-       }
+            });
+        }
     }
     // pub mod request {
     //     #[test_log::test(tokio::test)]
@@ -557,7 +567,7 @@ pub mod config {
     //         pretty_assertions::assert_eq!(actual_params, expected_params);
     //     }
     // }
-    }
+}
 
 #[tokio::main]
 async fn main() {

@@ -385,24 +385,25 @@ pub mod tests {
 
         Ok(res_params)
     }
-    pub mod config {
+pub mod config {
         use crate::config::{AppConfig, AppError, AppResult};
         use test_case::test_case;
 
-        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("match")    => matches Ok(_) ;                                      "success")]
-        #[test_case(None,                   Some("valid"),   Some("match")    => matches Err(AppError::FailedFindEnvVar(_, _)) ;      "failure find env var")]
-        #[test_case(Some("invalid"),        Some("valid"),   Some("match")    => matches Err(AppError::FailedParseSocketAddr(_, _)) ; "failure parse socket addr")]
-        #[test_case(Some("127.0.0.1:3080"), None,            Some("match")    => matches Err(AppError::FailedOpenPEMFile(_, _)) ;     "failure open pem file")]
-        #[test_case(Some("127.0.0.1:3080"), Some("---"),     Some("match")    => matches Err(AppError::FailedParsePEMFile(_, _)) ;    "failure parse pem file")]
-        #[test_case(Some("127.0.0.1:3080"), Some(""),        Some("match")    => matches Err(AppError::FailedFindCerts(_)) ;          "failure find certs")]
-        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("mismatch") => matches Err(AppError::FailedConfigTLS(_, _)) ;       "failure config tls")]
+        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("match"), None ;                                      "success")]
+        #[test_case(None,                   Some("valid"),   Some("match"), Some(AppError::FailedFindEnvVar(_, _)) ;      "failure find env var")]
+        #[test_case(Some("invalid"),        Some("valid"),   Some("match"), Some(AppError::FailedParseSocketAddr(_, _)) ; "failure parse socket addr")]
+        #[test_case(Some("127.0.0.1:3080"), None,            Some("match"), Some(AppError::FailedOpenPEMFile(_, _)) ;     "failure open pem file")]
+        #[test_case(Some("127.0.0.1:3080"), Some("---"),     Some("match"), Some(AppError::FailedParsePEMFile(_, _)) ;    "failure parse pem file")]
+        #[test_case(Some("127.0.0.1:3080"), Some(""),        Some("match"), Some(AppError::FailedFindCerts(_)) ;          "failure find certs")]
+        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("mismatch"), Some(AppError::FailedConfigTLS(_, _)) ;       "failure config tls")]
         #[test_log::test(tokio::test)]
         async fn test_create_app_config(
             http_addr: Option<&str>,
             crt_param: Option<&str>,
             key_param: Option<&str>,
-        ) -> AppResult<AppConfig> {
-            figment::Jail::expect_with(|jail| -> AppResult<AppConfig> {
+            expected_error: Option<AppError>,
+        ) {
+            figment::Jail::expect_with(|jail| {
                 let pair_a = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
                 let pair_b = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
     
@@ -415,8 +416,8 @@ pub mod tests {
                 jail.set_env("CERT_PATH", "test.crt");
                 jail.set_env("KEY_PATH", "test.key");
     
-                if let Some(param) = crt_param {
-                    let data = if param == "valid" { 
+                if let Some(crt) = crt_param {
+                    let data = if crt == "valid" { 
                         pair_a.cert.pem() 
                     } else { 
                         param.to_string() 
@@ -424,8 +425,8 @@ pub mod tests {
                     jail.create_file("test.crt", &data).unwrap();
                 }
     
-                if let Some(param) = key_param {
-                    let data = if param == "match" { 
+                if let Some(key) = key_param {
+                    let data = if key == "match" { 
                         pair_a.signing_key.serialize_pem() 
                     } else { 
                         pair_b.signing_key.serialize_pem() 
@@ -433,13 +434,16 @@ pub mod tests {
                     jail.create_file("test.key", &data).unwrap();
                 }
                 
-                let cfg = AppConfig::new();
+                let result = AppConfig::new();
+                match expected_error {
+                    None => cool_asserts::assert!(result.is_ok(), "Expected Ok(), but got {:?}!", result),
+                    Some(expected) => cool_asserts::assert_matches!(result, expected, "Expected {:?}, but got {:?}!", expected, result),
+                }
 
-                cfg
-            });
-            Ok(cfg)
-        }
-    }  
+                Ok(())
+           });
+       }
+    }
     // pub mod request {
     //     #[test_log::test(tokio::test)]
     //     async fn test_create_request_from_params_success() {

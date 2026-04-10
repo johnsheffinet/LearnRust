@@ -384,15 +384,15 @@ pub mod tests {
         Ok(res_params)
     }
     pub mod config {
-        use crate::config::{AppConfig, AppError, AppResult};
+        use crate::config::{AppConfig, AppError};
         use test_case::test_case;
 
         #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("match"),    "Success";               "success")]
         #[test_case(None,                   Some("valid"),   Some("match"),    "FailedFindEnvVar";      "failure find env var")]
         #[test_case(Some("invalid"),        Some("valid"),   Some("match"),    "FailedParseSocketAddr"; "failure parse socket addr")]
         #[test_case(Some("127.0.0.1:3080"), None,            Some("match"),    "FailedOpenPEMFile";     "failure open pem file")]
-        #[test_case(Some("127.0.0.1:3080"), Some("---"),     Some("match"),    "FailedParsePEMFile";    "failure parse pem file")]
-        #[test_case(Some("127.0.0.1:3080"), Some("invalid"), Some("match"),    "FailedFindCerts";       "failure find certs")]
+        #[test_case(Some("127.0.0.1:3080"), Some("malformed"), Some("match"),    "FailedParsePEMFile";    "failure parse pem file")]
+        #[test_case(Some("127.0.0.1:3080"), Some("-----"), Some("match"),    "FailedFindCerts";       "failure find certs")]
         #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("mismatch"), "FailedConfigTLS";       "failure config tls")]
         #[test_log::test(tokio::test)]
         async fn test_create_app_config(
@@ -415,10 +415,11 @@ pub mod tests {
                 jail.set_env("KEY_PATH", "test.key");
 
                 if let Some(crt) = crt_param {
-                    let data = if crt == "valid" {
-                        pair_a.cert.pem()
-                    } else {
-                        crt.to_string()
+                    let data = match crt {
+                        "valid" => pair_a.cert.pem(),
+                        "invalid" => pair_b.signing_key.serialize_pem(),
+                        "malformed" => "--- NOT A PEM ---".to_string(), // Triggers a parsing error
+                        _ => crt.to_string(),
                     };
                     jail.create_file("test.crt", &data).unwrap();
                 }

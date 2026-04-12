@@ -280,7 +280,7 @@ pub mod tests {
         #[tracing::instrument(skip_all, err)]
         async fn from_request(
             req: axum::extract::Request,
-            state: &S,
+            _state: &S,
         ) -> Result<Self, Self::Rejection> {
             let method = req.method().clone();
 
@@ -383,20 +383,20 @@ pub mod tests {
 
         Ok(res_params)
     }
-    pub mod config {
+    mod config {
         use crate::config::{AppConfig, AppError};
         use test_case::test_case;
 
-        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("match"),    "Success";               "success")]
-        #[test_case(None,                   Some("valid"),   Some("match"),    "FailedFindEnvVar";      "failure find env var")]
-        #[test_case(Some("invalid"),        Some("valid"),   Some("match"),    "FailedParseSocketAddr"; "failure parse socket addr")]
-        #[test_case(Some("127.0.0.1:3080"), None,            Some("match"),    "FailedOpenPEMFile";     "failure open pem file")]
-        #[test_case(Some("127.0.0.1:3080"), Some("malformed"), Some("match"),    "FailedParsePEMFile";    "failure parse pem file")]
-        #[test_case(Some("127.0.0.1:3080"), Some("-----"), Some("match"),    "FailedFindCerts";       "failure find certs")]
-        #[test_case(Some("127.0.0.1:3080"), Some("valid"),   Some("mismatch"), "FailedConfigTLS";       "failure config tls")]
+        #[test_case(Some("valid"),   Some("valid"),   Some("valid"),   "Success";               "success")]
+        #[test_case(None,            Some("valid"),   Some("valid"),   "FailedFindEnvVar";      "failure find env var")]
+        #[test_case(Some("invalid"), Some("valid"),   Some("valid"),   "FailedParseSocketAddr"; "failure parse socket addr")]
+        #[test_case(Some("valid"),   None,            Some("valid"),   "FailedOpenPEMFile";     "failure open pem file")]
+        #[test_case(Some("valid"),   Some("bad_pem"), Some("valid"),   "FailedParsePEMFile";    "failure parse pem file")]
+        #[test_case(Some("valid"),   Some("no_cert"), Some("valid"),   "FailedFindCerts";       "failure find certs")]
+        #[test_case(Some("valid"),   Some("valid"),   Some("invalid"), "FailedConfigTLS";       "failure config tls")]
         #[test_log::test(tokio::test)]
         async fn test_create_app_config(
-            http_addr: Option<&str>,
+            addr_param: Option<&str>,
             crt_param: Option<&str>,
             key_param: Option<&str>,
             expected: &str,
@@ -407,8 +407,13 @@ pub mod tests {
 
                 jail.clear_env();
 
-                if let Some(addr) = http_addr {
-                    jail.set_env("HTTP_ADDR", addr);
+                if let Some(addr) = addr_param {
+                    let data = match addr {
+                        "valid" => "127.0.0.1:3080",
+                        "invalid" => "",
+                        _ => panic!("Did not expect {:?}!", addr),
+                    };
+                    jail.set_env("HTTP_ADDR", &data);
                 }
                 jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
                 jail.set_env("CERT_PATH", "test.crt");
@@ -417,30 +422,48 @@ pub mod tests {
                 if let Some(crt) = crt_param {
                     let data = match crt {
                         "valid" => pair_a.cert.pem(),
-                        "invalid" => pair_b.signing_key.serialize_pem(),
-                        "malformed" => "--- NOT A PEM ---".to_string(), // Triggers a parsing error
-                        _ => crt.to_string(),
+                        "bad_pem" => "-----BEGIN PUBLIC KEY-----".to_string(),
+                        "no_cert" => "".to_string(),
+                        _ => panic!("Did not expect {:?}!", crt),
                     };
-                    jail.create_file("test.crt", &data).unwrap();
+                    jail.create_file("test.crt", &data)?;
                 }
 
                 if let Some(key) = key_param {
-                    let data = if key == "match" {
-                        pair_a.signing_key.serialize_pem()
-                    } else {
-                        pair_b.signing_key.serialize_pem()
+                    let data = match key {
+                        "valid" => pair_a.signing_key.serialize_pem(),
+                        "invalid" => pair_b.signing_key.serialize_pem(),
+                        _ => panic!("Did not expect {:?}!", key),
                     };
-                    jail.create_file("test.key", &data).unwrap();
+                    jail.create_file("test.key", &data)?;
                 }
 
                 match expected {
                     "Success" => cool_asserts::assert_matches!(AppConfig::new(), Ok(_)),
-                    "FailedFindEnvVar" => cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedFindEnvVar(_, _))),
-                    "FailedParseSocketAddr" => cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedParseSocketAddr(_, _))),
-                    "FailedOpenPEMFile" => cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedOpenPEMFile(_, _))),
-                    "FailedParsePEMFile" => cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedParsePEMFile(_, _))),
-                    "FailedFindCerts" => cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedFindCerts(_))),
-                    "FailedConfigTLS" => cool_asserts::assert_matches!(AppConfig::new(), Err(AppError::FailedConfigTLS(_, _))),
+                    "FailedFindEnvVar" => cool_asserts::assert_matches!(
+                        AppConfig::new(),
+                        Err(AppError::FailedFindEnvVar(_, _))
+                    ),
+                    "FailedParseSocketAddr" => cool_asserts::assert_matches!(
+                        AppConfig::new(),
+                        Err(AppError::FailedParseSocketAddr(_, _))
+                    ),
+                    "FailedOpenPEMFile" => cool_asserts::assert_matches!(
+                        AppConfig::new(),
+                        Err(AppError::FailedOpenPEMFile(_, _))
+                    ),
+                    "FailedParsePEMFile" => cool_asserts::assert_matches!(
+                        AppConfig::new(),
+                        Err(AppError::FailedParsePEMFile(_, _))
+                    ),
+                    "FailedFindCerts" => cool_asserts::assert_matches!(
+                        AppConfig::new(),
+                        Err(AppError::FailedFindCerts(_))
+                    ),
+                    "FailedConfigTLS" => cool_asserts::assert_matches!(
+                        AppConfig::new(),
+                        Err(AppError::FailedConfigTLS(_, _))
+                    ),
                     _ => panic!("Did not expect {:?}!", expected),
                 }
 

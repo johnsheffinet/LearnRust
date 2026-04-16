@@ -160,33 +160,6 @@ pub mod handlers {
         Ok((status, body).into_response())
     }
 }
-// pub mod tls {
-//     use crate::handlers as h;
-
-//     pub async fn get_rustls_config() -> axum_server::tls_rustls::RustlsConfig {
-//         use crate::config::CONFIG;
-
-//         axum_server::tls_rustls::RustlsConfig::from_pem_file(&CONFIG.cert_path, &CONFIG.key_path)
-//             .await
-//             .expect(&format!(
-//                 "Failed to load '{:?}' or '{:?}' pem file!",
-//                 CONFIG.cert_path, CONFIG.key_path
-//             ))
-//     }
-
-//     pub async fn get_http_router() -> axum::Router {
-//         axum::Router::new().fallback(h::redirect_to_https)
-//     }
-
-//     pub async fn get_https_router() -> axum::Router {
-//         use axum::routing::get;
-
-//         axum::Router::new()
-//             .route("healthz", get(h::check_app_liveliness))
-//             .fallback(h::report_invalid_route)
-//     }
-// }
-
 #[cfg(test)]
 pub mod tests {
     use axum::extract::FromRequest;

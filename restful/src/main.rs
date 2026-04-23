@@ -160,45 +160,44 @@ pub mod handlers {
         Ok((status, body).into_response())
     }
 }
-#[cfg(test)]
-pub mod tests {
+pub mod tools {
     use axum::extract::FromRequest;
 
     #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
     pub enum AppError {
         #[error("Failed to serialize payload parameter into request body! {0}")]
         #[status(axum::http::StatusCode::BAD_REQUEST)]
-        FailedSerializePayloadIntoRequestBody(serde_json::Error),
+        FailedSerializePayloadIntoRequest(#[source] serde_json::Error),
 
         #[error("Failed to serialize payload parameter from request body! {0}")]
         #[status(axum::http::StatusCode::BAD_REQUEST)]
-        FailedSerializePayloadFromRequestBody(serde_json::Error),
+        FailedSerializePayloadFromRequest(#[source] serde_json::Error),
 
         #[error("Failed to build request body from payload parameter! {0}")]
         #[status(axum::http::StatusCode::BAD_REQUEST)]
-        FailedBuildRequestBodyFromPayload(axum::http::Error),
+        FailedBuildRequestFromPayload(#[source] axum::http::Error),
 
-        #[error("Failed to extract request body into payload parameter! {0}")]
+        #[error("Failed to parse request body into payload parameter! {0}")]
         #[status(axum::http::StatusCode::BAD_REQUEST)]
-        FailedExtractRequestBodyIntoPayload(axum::Error),
+        FailedParseRequestIntoPayload(#[source] axum::Error),
 
         #[error("Failed to serialize payload parameter into response body! {0}")]
         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedSerializePayloadIntoResponseBody(serde_json::Error),
+        FailedSerializePayloadIntoResponse(#[source] serde_json::Error),
 
         #[error("Failed to serialize payload parameter from response body! {0}")]
         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedSerializePayloadFromResponseBody(serde_json::Error),
+        FailedSerializePayloadFromResponse(#[source] serde_json::Error),
 
         #[error("Failed to build response body from payload parameter! {0}")]
         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedBuildResponseBodyFromPayload(axum::http::Error),
+        FailedBuildResponseFromPayload(#[source] axum::http::Error),
 
-        #[error("Failed to extract response body into payload parameter! {0}")]
+        #[error("Failed to parse response body into payload parameter! {0}")]
         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedExtractResponseBodyIntoPayload(axum::Error),
+        FailedParseResponseIntoPayload(#[source] axum::Error),
 
-        #[error("Failed to get router response parameters fro request parameters! {0}")]
+        #[error("Failed to get router response parameters from request parameters! {0}")]
         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
         FailedGetRouterResponse(String),
     }
@@ -211,7 +210,7 @@ pub mod tests {
         pub path: String,
         pub query: String,
         pub version: axum::http::Version,
-        pub headers: axum::http::header::HeaderMap,
+        pub headers: axum::http::headers::HeaderMap,
         pub payload: serde_json::Value,
     }
 
@@ -236,11 +235,11 @@ pub mod tests {
             }
 
             let body = serde_json::to_vec(&params.payload)
-                .map_err(AppError::FailedSerializePayloadIntoRequestBody)?;
+                .map_err(AppError::FailedSerializePayloadIntoRequest)?;
 
             builder
                 .body(axum::body::Body::from(body))
-                .map_err(AppError::FailedBuildRequestBodyFromPayload)
+                .map_err(AppError::FailedBuildRequestFromPayload)
         }
     }
 
@@ -269,10 +268,9 @@ pub mod tests {
 
             let body = axum::body::to_bytes(req.into_body(), 2 * 1024 * 1024)
                 .await
-                .map_err(AppError::FailedExtractRequestBodyIntoPayload)?;
-
+                .map_err(AppError::FailedParseRequestIntoPayload)?;
             let payload = serde_json::from_slice(&body)
-                .map_err(AppError::FailedSerializePayloadFromRequestBody)?;
+                .map_err(AppError::FailedSerializePayloadFromRequest)?;
 
             Ok(RequestParams {
                 method,
@@ -289,7 +287,7 @@ pub mod tests {
     pub struct ResponseParams {
         pub version: axum::http::Version,
         pub status: axum::http::StatusCode,
-        pub headers: axum::http::header::HeaderMap,
+        pub headers: axum::http::headers:HeaderMap,
         pub payload: serde_json::Value,
     }
 
@@ -339,7 +337,7 @@ pub mod tests {
         }
     }
 
-    pub async fn get_router_response_params_from_request_params(
+    pub async fn get_router_response_params(
         router: axum::Router,
         req_params: RequestParams,
     ) -> AppResult<ResponseParams> {
@@ -356,6 +354,203 @@ pub mod tests {
 
         Ok(res_params)
     }
+}
+#[cfg(test)]
+pub mod tests {
+    // use axum::extract::FromRequest;
+
+    // #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
+    // pub enum AppError {
+    //     #[error("Failed to serialize payload parameter into request body! {0}")]
+    //     #[status(axum::http::StatusCode::BAD_REQUEST)]
+    //     FailedSerializePayloadIntoReques(serde_json::Error),
+
+    //     #[error("Failed to serialize payload parameter from request body! {0}")]
+    //     #[status(axum::http::StatusCode::BAD_REQUEST)]
+    //     FailedSerializePayloadFromRequestBody(serde_json::Error),
+
+    //     #[error("Failed to build request body from payload parameter! {0}")]
+    //     #[status(axum::http::StatusCode::BAD_REQUEST)]
+    //     FailedBuildRequestBodyFromPayload(axum::http::Error),
+
+    //     #[error("Failed to parse request body into payload parameter! {0}")]
+    //     #[status(axum::http::StatusCode::BAD_REQUEST)]
+    //     FailedParseRequestBodyIntoPayload(axum::Error),
+
+    //     #[error("Failed to serialize payload parameter into response body! {0}")]
+    //     #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+    //     FailedSerializePayloadIntoResponseBody(serde_json::Error),
+
+    //     #[error("Failed to serialize payload parameter from response body! {0}")]
+    //     #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+    //     FailedSerializePayloadFromResponseBody(serde_json::Error),
+
+    //     #[error("Failed to build response body from payload parameter! {0}")]
+    //     #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+    //     FailedBuildResponseBodyFromPayload(axum::http::Error),
+
+    //     #[error("Failed to extract response body into payload parameter! {0}")]
+    //     #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+    //     FailedExtractResponseBodyIntoPayload(axum::Error),
+
+    //     #[error("Failed to get router response parameters fro request parameters! {0}")]
+    //     #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+    //     FailedGetRouterResponse(String),
+    // }
+
+    // pub type AppResult<T> = Result<T, AppError>;
+
+    // #[derive(Debug, Clone, PartialEq)]
+    // pub struct RequestParams {
+    //     pub method: axum::http::Method,
+    //     pub path: String,
+    //     pub query: String,
+    //     pub version: axum::http::Version,
+    //     pub headers: axum::http::header::HeaderMap,
+    //     pub payload: serde_json::Value,
+    // }
+
+    // impl TryFrom<RequestParams> for axum::extract::Request {
+    //     type Error = AppError;
+
+    //     #[tracing::instrument(skip_all, err)]
+    //     fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
+    //         let params_uri = if params.query.is_empty() {
+    //             params.path
+    //         } else {
+    //             format!("{}?{}", params.path, params.query)
+    //         };
+
+    //         let mut builder = axum::extract::Request::builder()
+    //             .method(params.method)
+    //             .uri(params_uri)
+    //             .version(params.version);
+
+    //         if let Some(headers) = builder.headers_mut() {
+    //             headers.extend(params.headers);
+    //         }
+
+    //         let body = serde_json::to_vec(&params.payload)
+    //             .map_err(AppError::FailedSerializePayloadIntoRequestBody)?;
+
+    //         builder
+    //             .body(axum::body::Body::from(body))
+    //             .map_err(AppError::FailedBuildRequestBodyFromPayload)
+    //     }
+    // }
+
+    // impl<S> FromRequest<S> for RequestParams
+    // where
+    //     S: Send + Sync,
+    // {
+    //     type Rejection = AppError;
+
+    //     #[tracing::instrument(skip_all, err)]
+    //     async fn from_request(
+    //         req: axum::extract::Request,
+    //         _state: &S,
+    //     ) -> Result<Self, Self::Rejection> {
+    //         let method = req.method().clone();
+
+    //         let uri = req.uri().clone();
+
+    //         let path = uri.path().to_string();
+
+    //         let query = uri.query().unwrap_or("").to_string();
+
+    //         let version = req.version();
+
+    //         let headers = req.headers().clone();
+
+    //         let body = axum::body::to_bytes(req.into_body(), 2 * 1024 * 1024)
+    //             .await
+    //             .map_err(AppError::FailedParseRequestIntoPayload)?;
+
+    //         let payload = serde_json::from_slice(&body)
+    //             .map_err(AppError::FailedSerializePayloadFromRequestBody)?;
+
+    //         Ok(RequestParams {
+    //             method,
+    //             path,
+    //             query,
+    //             version,
+    //             headers,
+    //             payload,
+    //         })
+    //     }
+    // }
+
+    // #[derive(Debug, Clone, PartialEq)]
+    // pub struct ResponseParams {
+    //     pub version: axum::http::Version,
+    //     pub status: axum::http::StatusCode,
+    //     pub headers: axum::http::header::HeaderMap,
+    //     pub payload: serde_json::Value,
+    // }
+
+    // impl TryFrom<ResponseParams> for axum::response::Response {
+    //     type Error = AppError;
+
+    //     #[tracing::instrument(skip_all, err)]
+    //     fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
+    //         let mut builder = axum::response::Response::builder()
+    //             .version(params.version)
+    //             .status(params.status);
+
+    //         if let Some(headers) = builder.headers_mut() {
+    //             headers.extend(params.headers);
+    //         }
+
+    //         let body = serde_json::to_vec(&params.payload)
+    //             .map_err(AppError::FailedSerializePayloadIntoResponseBody)?;
+
+    //         builder
+    //             .body(axum::body::Body::from(body))
+    //             .map_err(AppError::FailedBuildResponseBodyFromPayload)
+    //     }
+    // }
+
+    // impl ResponseParams {
+    //     #[tracing::instrument(skip_all, err)]
+    //     pub async fn from_response(res: axum::response::Response) -> AppResult<Self> {
+    //         let version = res.version();
+
+    //         let status = res.status();
+
+    //         let headers = res.headers().clone();
+
+    //         let body = axum::body::to_bytes(res.into_body(), 2 * 1024 * 1024)
+    //             .await
+    //             .map_err(AppError::FailedExtractResponseBodyIntoPayload)?;
+    //         let payload = serde_json::from_slice(&body)
+    //             .map_err(AppError::FailedSerializePayloadFromResponseBody)?;
+
+    //         Ok(ResponseParams {
+    //             version,
+    //             status,
+    //             headers,
+    //             payload,
+    //         })
+    //     }
+    // }
+
+    // pub async fn get_router_response_params_from_request_params(
+    //     router: axum::Router,
+    //     req_params: RequestParams,
+    // ) -> AppResult<ResponseParams> {
+    //     use tower::util::ServiceExt;
+
+    //     let req = axum::extract::Request::try_from(req_params)?;
+
+    //     let res = router
+    //         .oneshot(req)
+    //         .await
+    //         .map_err(|err| AppError::FailedGetRouterResponse(err.to_string()))?;
+
+    //     let res_params = ResponseParams::from_response(res).await?;
+
+    //     Ok(res_params)
+    // }
     mod config {
         use crate::config::{AppConfig, AppError};
         use test_case::test_case;

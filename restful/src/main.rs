@@ -210,7 +210,7 @@ pub mod tools {
         pub path: String,
         pub query: String,
         pub version: axum::http::Version,
-        pub headers: axum::http::headers::HeaderMap,
+        pub headers: axum::http::HeaderMap,
         pub payload: serde_json::Value,
     }
 
@@ -287,7 +287,7 @@ pub mod tools {
     pub struct ResponseParams {
         pub version: axum::http::Version,
         pub status: axum::http::StatusCode,
-        pub headers: axum::http::headers:HeaderMap,
+        pub headers: axum::http::HeaderMap,
         pub payload: serde_json::Value,
     }
 
@@ -305,11 +305,11 @@ pub mod tools {
             }
 
             let body = serde_json::to_vec(&params.payload)
-                .map_err(AppError::FailedSerializePayloadIntoResponseBody)?;
+                .map_err(AppError::FailedSerializePayloadIntoResponse)?;
 
             builder
                 .body(axum::body::Body::from(body))
-                .map_err(AppError::FailedBuildResponseBodyFromPayload)
+                .map_err(AppError::FailedBuildResponseFromPayload)
         }
     }
 
@@ -324,9 +324,9 @@ pub mod tools {
 
             let body = axum::body::to_bytes(res.into_body(), 2 * 1024 * 1024)
                 .await
-                .map_err(AppError::FailedExtractResponseBodyIntoPayload)?;
+                .map_err(AppError::FailedParseResponseIntoPayload)?;
             let payload = serde_json::from_slice(&body)
-                .map_err(AppError::FailedSerializePayloadFromResponseBody)?;
+                .map_err(AppError::FailedSerializePayloadFromResponse)?;
 
             Ok(ResponseParams {
                 version,

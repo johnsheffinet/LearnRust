@@ -446,21 +446,24 @@ pub mod tests {
         }
     }
     pub mod tools {
+        use crate::tools::{AppError, RequestParams, ResponseParams};
+        use axum::extract::FromRequest;
+
         #[test_log::test(tokio::test)]
         async fn test_create_request_from_params_success() {
             use axum::http::header::{CONTENT_TYPE, HeaderValue};
 
             let method = axum::http::Method::GET;
-            
+
             let path = "/".to_string();
-            
+
             let query = "key1=value1&key2=value2".to_string();
-            
+
             let version = axum::http::Version::HTTP_11;
-            
+
             let mut headers = axum::http::header::HeaderMap::new();
             headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-            
+
             let payload = serde_json::json!({ "key1": "value1", "key2": "value2" });
 
             let expected_params = RequestParams {
@@ -478,95 +481,99 @@ pub mod tests {
 
             pretty_assertions::assert_eq!(actual_params, expected_params);
         }
-        
+
+        #[test_log::test(tokio::test)]
+        async fn test_create_request_from_params_failure_invalid_path() {
+            use axum::http::header::{CONTENT_TYPE, HeaderValue};
+
+            let method = axum::http::Method::GET;
+
+            let path = "/invalid path".to_string();
+
+            let query = "".to_string();
+
+            let version = axum::http::Version::HTTP_11;
+
+            let mut headers = axum::http::header::HeaderMap::new();
+
+            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+            let payload = serde_json::json!({});
+
+            let expected_params = RequestParams {
+                method,
+                path,
+                query,
+                version,
+                headers,
+                payload,
+            };
+
+            cool_asserts::assert_matches!(
+                axum::extract::Request::try_from(expected_params.clone()),
+                Err(AppError::FailedBuildRequestFromPayload(_))
+            );
+        }
+
+        #[test_log::test(tokio::test)]
+        async fn test_create_request_from_params_failure_invalid_query() {
+            use axum::http::header::{CONTENT_TYPE, HeaderValue};
+
+            let method = axum::http::Method::GET;
+
+            let path = "/".to_string();
+
+            let query = "invalid query".to_string();
+
+            let version = axum::http::Version::HTTP_11;
+
+            let mut headers = axum::http::header::HeaderMap::new();
+            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+            let payload = serde_json::json!({});
+
+            let expected_params = RequestParams {
+                method,
+                path,
+                query,
+                version,
+                headers,
+                payload,
+            };
+
+            cool_asserts::assert_matches!(axum::extract::Request::try_from(expected_params.clone()), Err(AppError::FailedBuildRequestFromPayload(ref err)) => {
+                pretty_assertions::assert_eq!(err.to_string(), "invalid uri character");
+            });
+        }
+
+        #[test_log::test(tokio::test)]
+        async fn test_create_response_from_params_success() {
+            let version = axum::http::Version::HTTP_11;
+
+            let status = axum::http::StatusCode::OK;
+
+            let mut headers = axum::http::header::HeaderMap::new();
+            headers.insert(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::header::HeaderValue::from_static("application/json"),
+            );
+
+            let payload = serde_json::json!({ "key": "value" });
+
+            let expected_params = ResponseParams {
+                version,
+                status,
+                headers,
+                payload,
+            };
+
+            let res = cool_asserts::assert_matches!(axum::response::Response::try_from(expected_params.clone()), Ok(res) => res);
+
+            let actual_params = cool_asserts::assert_matches!(ResponseParams::from_response(res).await, Ok(actual_params) => actual_params);
+
+            pretty_assertions::assert_eq!(actual_params, expected_params);
+        }
     }
-    
-    // pub mod request {
-
-    //     #[test_log::test(tokio::test)]
-    //     async fn test_create_request_from_params_failure_invalid_path() {
-    //         use axum::http::header::{CONTENT_TYPE, HeaderValue};
-
-    //         let method = axum::http::Method::GET;
-    //         let path = "/invalid path".to_string();
-    //         let query = "".to_string();
-    //         let version = axum::http::Version::HTTP_11;
-    //         let mut headers = axum::http::header::HeaderMap::new();
-    //         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    //         let payload = serde_json::json!({});
-
-    //         let expected_params = RequestParams {
-    //             method,
-    //             path,
-    //             query,
-    //             version,
-    //             headers,
-    //             payload,
-    //         };
-
-    //         cool_asserts::assert_matches!(
-    //             axum::extract::Request::try_from(expected_params.clone()),
-    //             Err(AppError::FailedBuildRequestFromPayload(_))
-    //         );
-    //     }
-
-    //     #[test_log::test(tokio::test)]
-    //     async fn test_create_request_from_params_failure_invalid_query() {
-    //         use axum::http::header::{CONTENT_TYPE, HeaderValue};
-
-    //         let method = axum::http::Method::GET;
-    //         let path = "/".to_string();
-    //         let query = "invalid query".to_string();
-    //         let version = axum::http::Version::HTTP_11;
-    //         let mut headers = axum::http::header::HeaderMap::new();
-    //         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    //         let payload = serde_json::json!({});
-
-    //         let expected_params = RequestParams {
-    //             method,
-    //             path,
-    //             query,
-    //             version,
-    //             headers,
-    //             payload,
-    //         };
-
-    //         cool_asserts::assert_matches!(axum::extract::Request::try_from(expected_params.clone()), Err(AppError::FailedBuildRequestFromPayload(ref err)) => {
-    //             pretty_assertions::assert_eq!(err.to_string(), "invalid uri character");
-    //         });
-    //     }
-    // }
-    // pub mod response {
-    //     use crate::handlers::response::ResponseParams;
-
-    //     #[test_log::test(tokio::test)]
-    //     async fn test_create_response_from_params_success() {
-    //         let version = axum::http::Version::HTTP_11;
-
-    //         let status = axum::http::StatusCode::OK;
-
-    //         let mut headers = axum::http::header::HeaderMap::new();
-    //         headers.insert(
-    //             axum::http::header::CONTENT_TYPE,
-    //             axum::http::header::HeaderValue::from_static("application/json"),
-    //         );
-
-    //         let payload = serde_json::json!({ "key": "value" });
-
-    //         let expected_params = ResponseParams {
-    //             version,
-    //             status,
-    //             headers,
-    //             payload,
-    //         };
-
-    //         let res = cool_asserts::assert_matches!(axum::response::Response::try_from(expected_params.clone()), Ok(res) => res);
-
-    //         let actual_params = cool_asserts::assert_matches!(ResponseParams::from_response(res).await, Ok(actual_params) => actual_params);
-
-    //         pretty_assertions::assert_eq!(actual_params, expected_params);
-    //     }
-    // }
 }
 
 #[tokio::main]

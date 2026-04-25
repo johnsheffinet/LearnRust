@@ -574,6 +574,48 @@ pub mod tests {
             pretty_assertions::assert_eq!(actual_params, expected_params);
         }
     }
+    mod handlers {
+        #[test_log::test(tokio::test)]
+        async fn test_redirect_to_https_success() {
+            use crate::config::CONFIG;
+            use crate::tools::get_response_params;
+            use axum::http::header::{CONTENT_TYPE, HeaderValue};
+
+            let router = CONFIG.http_router;
+
+            let method = axum::http::Method::GET;
+
+            let path = "/healthz".to_string();
+
+            let query = "".to_string();
+
+            let version = axum::http::Version::HTTP_11;
+
+            let mut headers = axum::http::header::HeaderMap::new();
+            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+            let payload = serde_json::json!({ });
+
+            let req_params = RequestParams {
+                method,
+                path,
+                query,
+                version,
+                headers,
+                payload,
+            };
+
+            let expected_params = ResponseParams {}
+            
+            let actual_params = 
+            let req = cool_asserts::assert_matches!(axum::extract::Request::try_from(expected_params.clone()), Ok(req) => req);
+
+            let actual_params = cool_asserts::assert_matches!(RequestParams::from_request(req, &()).await, Ok(actual_params) => actual_params);
+
+            pretty_assertions::assert_eq!(actual_params, expected_params);
+            
+        }
+    }
 }
 
 #[tokio::main]

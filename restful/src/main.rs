@@ -160,72 +160,44 @@ pub mod handlers {
         Ok((status, body).into_response())
     }
 }
-// pub mod tls {
-//     use crate::handlers as h;
-
-//     pub async fn get_rustls_config() -> axum_server::tls_rustls::RustlsConfig {
-//         use crate::config::CONFIG;
-
-//         axum_server::tls_rustls::RustlsConfig::from_pem_file(&CONFIG.cert_path, &CONFIG.key_path)
-//             .await
-//             .expect(&format!(
-//                 "Failed to load '{:?}' or '{:?}' pem file!",
-//                 CONFIG.cert_path, CONFIG.key_path
-//             ))
-//     }
-
-//     pub async fn get_http_router() -> axum::Router {
-//         axum::Router::new().fallback(h::redirect_to_https)
-//     }
-
-//     pub async fn get_https_router() -> axum::Router {
-//         use axum::routing::get;
-
-//         axum::Router::new()
-//             .route("healthz", get(h::check_app_liveliness))
-//             .fallback(h::report_invalid_route)
-//     }
-// }
-
-#[cfg(test)]
-pub mod tests {
+pub mod tools {
     use axum::extract::FromRequest;
 
     #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
     pub enum AppError {
         #[error("Failed to serialize payload parameter into request body! {0}")]
         #[status(axum::http::StatusCode::BAD_REQUEST)]
-        FailedSerializePayloadIntoRequestBody(serde_json::Error),
+        FailedSerializePayloadIntoRequest(#[source] serde_json::Error),
 
         #[error("Failed to serialize payload parameter from request body! {0}")]
         #[status(axum::http::StatusCode::BAD_REQUEST)]
-        FailedSerializePayloadFromRequestBody(serde_json::Error),
+        FailedSerializePayloadFromRequest(#[source] serde_json::Error),
 
         #[error("Failed to build request body from payload parameter! {0}")]
         #[status(axum::http::StatusCode::BAD_REQUEST)]
-        FailedBuildRequestBodyFromPayload(axum::http::Error),
+        FailedBuildRequestFromPayload(#[source] axum::http::Error),
 
-        #[error("Failed to extract request body into payload parameter! {0}")]
+        #[error("Failed to parse request body into payload parameter! {0}")]
         #[status(axum::http::StatusCode::BAD_REQUEST)]
-        FailedExtractRequestBodyIntoPayload(axum::Error),
+        FailedParseRequestIntoPayload(#[source] axum::Error),
 
         #[error("Failed to serialize payload parameter into response body! {0}")]
         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedSerializePayloadIntoResponseBody(serde_json::Error),
+        FailedSerializePayloadIntoResponse(#[source] serde_json::Error),
 
         #[error("Failed to serialize payload parameter from response body! {0}")]
         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedSerializePayloadFromResponseBody(serde_json::Error),
+        FailedSerializePayloadFromResponse(#[source] serde_json::Error),
 
         #[error("Failed to build response body from payload parameter! {0}")]
         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedBuildResponseBodyFromPayload(axum::http::Error),
+        FailedBuildResponseFromPayload(#[source] axum::http::Error),
 
-        #[error("Failed to extract response body into payload parameter! {0}")]
+        #[error("Failed to parse response body into payload parameter! {0}")]
         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedExtractResponseBodyIntoPayload(axum::Error),
+        FailedParseResponseIntoPayload(#[source] axum::Error),
 
-        #[error("Failed to get router response parameters fro request parameters! {0}")]
+        #[error("Failed to get router response parameters from request parameters! {0}")]
         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
         FailedGetRouterResponse(String),
     }
@@ -238,7 +210,7 @@ pub mod tests {
         pub path: String,
         pub query: String,
         pub version: axum::http::Version,
-        pub headers: axum::http::header::HeaderMap,
+        pub headers: axum::http::HeaderMap,
         pub payload: serde_json::Value,
     }
 
@@ -263,11 +235,11 @@ pub mod tests {
             }
 
             let body = serde_json::to_vec(&params.payload)
-                .map_err(AppError::FailedSerializePayloadIntoRequestBody)?;
+                .map_err(AppError::FailedSerializePayloadIntoRequest)?;
 
             builder
                 .body(axum::body::Body::from(body))
-                .map_err(AppError::FailedBuildRequestBodyFromPayload)
+                .map_err(AppError::FailedBuildRequestFromPayload)
         }
     }
 
@@ -296,10 +268,9 @@ pub mod tests {
 
             let body = axum::body::to_bytes(req.into_body(), 2 * 1024 * 1024)
                 .await
-                .map_err(AppError::FailedExtractRequestBodyIntoPayload)?;
-
+                .map_err(AppError::FailedParseRequestIntoPayload)?;
             let payload = serde_json::from_slice(&body)
-                .map_err(AppError::FailedSerializePayloadFromRequestBody)?;
+                .map_err(AppError::FailedSerializePayloadFromRequest)?;
 
             Ok(RequestParams {
                 method,
@@ -316,7 +287,7 @@ pub mod tests {
     pub struct ResponseParams {
         pub version: axum::http::Version,
         pub status: axum::http::StatusCode,
-        pub headers: axum::http::header::HeaderMap,
+        pub headers: axum::http::HeaderMap,
         pub payload: serde_json::Value,
     }
 
@@ -334,11 +305,11 @@ pub mod tests {
             }
 
             let body = serde_json::to_vec(&params.payload)
-                .map_err(AppError::FailedSerializePayloadIntoResponseBody)?;
+                .map_err(AppError::FailedSerializePayloadIntoResponse)?;
 
             builder
                 .body(axum::body::Body::from(body))
-                .map_err(AppError::FailedBuildResponseBodyFromPayload)
+                .map_err(AppError::FailedBuildResponseFromPayload)
         }
     }
 
@@ -353,9 +324,9 @@ pub mod tests {
 
             let body = axum::body::to_bytes(res.into_body(), 2 * 1024 * 1024)
                 .await
-                .map_err(AppError::FailedExtractResponseBodyIntoPayload)?;
+                .map_err(AppError::FailedParseResponseIntoPayload)?;
             let payload = serde_json::from_slice(&body)
-                .map_err(AppError::FailedSerializePayloadFromResponseBody)?;
+                .map_err(AppError::FailedSerializePayloadFromResponse)?;
 
             Ok(ResponseParams {
                 version,
@@ -366,7 +337,7 @@ pub mod tests {
         }
     }
 
-    pub async fn get_router_response_params_from_request_params(
+    pub async fn get_router_response_params(
         router: axum::Router,
         req_params: RequestParams,
     ) -> AppResult<ResponseParams> {
@@ -383,6 +354,9 @@ pub mod tests {
 
         Ok(res_params)
     }
+}
+#[cfg(test)]
+pub mod tests {
     mod config {
         use crate::config::{AppConfig, AppError};
         use test_case::test_case;
@@ -471,119 +445,135 @@ pub mod tests {
             })
         }
     }
-    // pub mod request {
-    //     #[test_log::test(tokio::test)]
-    //     async fn test_create_request_from_params_success() {
-    //         use axum::http::header::{CONTENT_TYPE, HeaderValue};
+    pub mod tools {
+        use crate::tools::{AppError, RequestParams, ResponseParams};
+        use axum::extract::FromRequest;
 
-    //         let method = axum::http::Method::GET;
-    //         let path = "/".to_string();
-    //         let query = "key1=value1&key2=value2".to_string();
-    //         let version = axum::http::Version::HTTP_11;
-    //         let mut headers = axum::http::header::HeaderMap::new();
-    //         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    //         let payload = serde_json::json!({ "key1": "value1", "key2": "value2" });
+        #[test_log::test(tokio::test)]
+        async fn test_create_request_from_params_success() {
+            use axum::http::header::{CONTENT_TYPE, HeaderValue};
 
-    //         let expected_params = RequestParams {
-    //             method,
-    //             path,
-    //             query,
-    //             version,
-    //             headers,
-    //             payload,
-    //         };
+            let method = axum::http::Method::GET;
 
-    //         let req = cool_asserts::assert_matches!(axum::extract::Request::try_from(expected_params.clone()), Ok(req) => req);
+            let path = "/".to_string();
 
-    //         let actual_params = cool_asserts::assert_matches!(RequestParams::from_request(req, &()).await, Ok(actual_params) => actual_params);
+            let query = "key1=value1&key2=value2".to_string();
 
-    //         pretty_assertions::assert_eq!(actual_params, expected_params);
-    //     }
+            let version = axum::http::Version::HTTP_11;
 
-    //     #[test_log::test(tokio::test)]
-    //     async fn test_create_request_from_params_failure_invalid_path() {
-    //         use axum::http::header::{CONTENT_TYPE, HeaderValue};
+            let mut headers = axum::http::header::HeaderMap::new();
+            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-    //         let method = axum::http::Method::GET;
-    //         let path = "/invalid path".to_string();
-    //         let query = "".to_string();
-    //         let version = axum::http::Version::HTTP_11;
-    //         let mut headers = axum::http::header::HeaderMap::new();
-    //         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    //         let payload = serde_json::json!({});
+            let payload = serde_json::json!({ "key1": "value1", "key2": "value2" });
 
-    //         let expected_params = RequestParams {
-    //             method,
-    //             path,
-    //             query,
-    //             version,
-    //             headers,
-    //             payload,
-    //         };
+            let expected_params = RequestParams {
+                method,
+                path,
+                query,
+                version,
+                headers,
+                payload,
+            };
 
-    //         cool_asserts::assert_matches!(
-    //             axum::extract::Request::try_from(expected_params.clone()),
-    //             Err(AppError::FailedBuildRequestFromPayload(_))
-    //         );
-    //     }
+            let req = cool_asserts::assert_matches!(axum::extract::Request::try_from(expected_params.clone()), Ok(req) => req);
 
-    //     #[test_log::test(tokio::test)]
-    //     async fn test_create_request_from_params_failure_invalid_query() {
-    //         use axum::http::header::{CONTENT_TYPE, HeaderValue};
+            let actual_params = cool_asserts::assert_matches!(RequestParams::from_request(req, &()).await, Ok(actual_params) => actual_params);
 
-    //         let method = axum::http::Method::GET;
-    //         let path = "/".to_string();
-    //         let query = "invalid query".to_string();
-    //         let version = axum::http::Version::HTTP_11;
-    //         let mut headers = axum::http::header::HeaderMap::new();
-    //         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    //         let payload = serde_json::json!({});
+            pretty_assertions::assert_eq!(actual_params, expected_params);
+        }
 
-    //         let expected_params = RequestParams {
-    //             method,
-    //             path,
-    //             query,
-    //             version,
-    //             headers,
-    //             payload,
-    //         };
+        #[test_log::test(tokio::test)]
+        async fn test_create_request_from_params_failure_invalid_path() {
+            use axum::http::header::{CONTENT_TYPE, HeaderValue};
 
-    //         cool_asserts::assert_matches!(axum::extract::Request::try_from(expected_params.clone()), Err(AppError::FailedBuildRequestFromPayload(ref err)) => {
-    //             pretty_assertions::assert_eq!(err.to_string(), "invalid uri character");
-    //         });
-    //     }
-    // }
-    // pub mod response {
-    //     use crate::handlers::response::ResponseParams;
+            let method = axum::http::Method::GET;
 
-    //     #[test_log::test(tokio::test)]
-    //     async fn test_create_response_from_params_success() {
-    //         let version = axum::http::Version::HTTP_11;
+            let path = "/invalid path".to_string();
 
-    //         let status = axum::http::StatusCode::OK;
+            let query = "".to_string();
 
-    //         let mut headers = axum::http::header::HeaderMap::new();
-    //         headers.insert(
-    //             axum::http::header::CONTENT_TYPE,
-    //             axum::http::header::HeaderValue::from_static("application/json"),
-    //         );
+            let version = axum::http::Version::HTTP_11;
 
-    //         let payload = serde_json::json!({ "key": "value" });
+            let mut headers = axum::http::header::HeaderMap::new();
 
-    //         let expected_params = ResponseParams {
-    //             version,
-    //             status,
-    //             headers,
-    //             payload,
-    //         };
+            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-    //         let res = cool_asserts::assert_matches!(axum::response::Response::try_from(expected_params.clone()), Ok(res) => res);
+            let payload = serde_json::json!({});
 
-    //         let actual_params = cool_asserts::assert_matches!(ResponseParams::from_response(res).await, Ok(actual_params) => actual_params);
+            let expected_params = RequestParams {
+                method,
+                path,
+                query,
+                version,
+                headers,
+                payload,
+            };
 
-    //         pretty_assertions::assert_eq!(actual_params, expected_params);
-    //     }
-    // }
+            cool_asserts::assert_matches!(
+                axum::extract::Request::try_from(expected_params.clone()),
+                Err(AppError::FailedBuildRequestFromPayload(_))
+            );
+        }
+
+        #[test_log::test(tokio::test)]
+        async fn test_create_request_from_params_failure_invalid_query() {
+            use axum::http::header::{CONTENT_TYPE, HeaderValue};
+
+            let method = axum::http::Method::GET;
+
+            let path = "/".to_string();
+
+            let query = "invalid query".to_string();
+
+            let version = axum::http::Version::HTTP_11;
+
+            let mut headers = axum::http::header::HeaderMap::new();
+            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+            let payload = serde_json::json!({});
+
+            let expected_params = RequestParams {
+                method,
+                path,
+                query,
+                version,
+                headers,
+                payload,
+            };
+
+            cool_asserts::assert_matches!(axum::extract::Request::try_from(expected_params.clone()), Err(AppError::FailedBuildRequestFromPayload(ref err)) => {
+                pretty_assertions::assert_eq!(err.to_string(), "invalid uri character");
+            });
+        }
+
+        #[test_log::test(tokio::test)]
+        async fn test_create_response_from_params_success() {
+            let version = axum::http::Version::HTTP_11;
+
+            let status = axum::http::StatusCode::OK;
+
+            let mut headers = axum::http::header::HeaderMap::new();
+            headers.insert(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::header::HeaderValue::from_static("application/json"),
+            );
+
+            let payload = serde_json::json!({ "key": "value" });
+
+            let expected_params = ResponseParams {
+                version,
+                status,
+                headers,
+                payload,
+            };
+
+            let res = cool_asserts::assert_matches!(axum::response::Response::try_from(expected_params.clone()), Ok(res) => res);
+
+            let actual_params = cool_asserts::assert_matches!(ResponseParams::from_response(res).await, Ok(actual_params) => actual_params);
+
+            pretty_assertions::assert_eq!(actual_params, expected_params);
+        }
+    }
 }
 
 #[tokio::main]

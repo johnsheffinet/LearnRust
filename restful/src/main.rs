@@ -445,34 +445,43 @@ pub mod tests {
             })
         }
     }
+    pub mod tools {
+        #[test_log::test(tokio::test)]
+        async fn test_create_request_from_params_success() {
+            use axum::http::header::{CONTENT_TYPE, HeaderValue};
+
+            let method = axum::http::Method::GET;
+            
+            let path = "/".to_string();
+            
+            let query = "key1=value1&key2=value2".to_string();
+            
+            let version = axum::http::Version::HTTP_11;
+            
+            let mut headers = axum::http::header::HeaderMap::new();
+            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+            
+            let payload = serde_json::json!({ "key1": "value1", "key2": "value2" });
+
+            let expected_params = RequestParams {
+                method,
+                path,
+                query,
+                version,
+                headers,
+                payload,
+            };
+
+            let req = cool_asserts::assert_matches!(axum::extract::Request::try_from(expected_params.clone()), Ok(req) => req);
+
+            let actual_params = cool_asserts::assert_matches!(RequestParams::from_request(req, &()).await, Ok(actual_params) => actual_params);
+
+            pretty_assertions::assert_eq!(actual_params, expected_params);
+        }
+        
+    }
+    
     // pub mod request {
-    //     #[test_log::test(tokio::test)]
-    //     async fn test_create_request_from_params_success() {
-    //         use axum::http::header::{CONTENT_TYPE, HeaderValue};
-
-    //         let method = axum::http::Method::GET;
-    //         let path = "/".to_string();
-    //         let query = "key1=value1&key2=value2".to_string();
-    //         let version = axum::http::Version::HTTP_11;
-    //         let mut headers = axum::http::header::HeaderMap::new();
-    //         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    //         let payload = serde_json::json!({ "key1": "value1", "key2": "value2" });
-
-    //         let expected_params = RequestParams {
-    //             method,
-    //             path,
-    //             query,
-    //             version,
-    //             headers,
-    //             payload,
-    //         };
-
-    //         let req = cool_asserts::assert_matches!(axum::extract::Request::try_from(expected_params.clone()), Ok(req) => req);
-
-    //         let actual_params = cool_asserts::assert_matches!(RequestParams::from_request(req, &()).await, Ok(actual_params) => actual_params);
-
-    //         pretty_assertions::assert_eq!(actual_params, expected_params);
-    //     }
 
     //     #[test_log::test(tokio::test)]
     //     async fn test_create_request_from_params_failure_invalid_path() {

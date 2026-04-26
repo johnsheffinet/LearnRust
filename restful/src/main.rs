@@ -133,7 +133,7 @@ pub mod handlers {
         .map_err(AppError::FailedCreateHeader)?;
 
         let body = axum::Json(
-            serde_json::json!({ "status": format!("Temporarily redirecting to {:?}.", location) }),
+            serde_json::json!({ "status": format!("Temporarily redirecting to '{:?}'.", location) }),
         );
 
         Ok((status, [(LOCATION, location)], body).into_response())
@@ -575,45 +575,77 @@ pub mod tests {
         }
     }
     mod handlers {
+        use test_case::test_case;
+        use axum::http::{header::{HeaderMap, HeaderName, HeaderValue}, Method, Version, StatusCode};
+        use serde_json::{json, Value};
+        use std::str::FromStr;
+    
+        #[test_case(
+            "HTTP", // Router selection
+            Method::GET,
+            "/healthz",
+            "",
+            Version::HTTP_11,
+            vec![("Content-Type", "application/json")],
+            json!({}),
+            StatusCode::TEMPORARY_REDIRECT,
+            vec![("Location", "127.0.0.1:3443/healthz")],
+            json!("Temporarily redirecting to '127.0.0.1:3443/healthz'.")
+            ; "redirect to https success"
+        )]
         #[test_log::test(tokio::test)]
-        async fn test_redirect_to_https_success() {
-            use crate::config::CONFIG;
-            use crate::tools::get_response_params;
-            use axum::http::header::{CONTENT_TYPE, HeaderValue};
-
-            let router = CONFIG.http_router;
-
-            let method = axum::http::Method::GET;
-
-            let path = "/healthz".to_string();
-
-            let query = "".to_string();
-
-            let version = axum::http::Version::HTTP_11;
-
-            let mut headers = axum::http::header::HeaderMap::new();
-            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-
-            let payload = serde_json::json!({ });
-
+        async fn test_redirect_to_https_success(
+            router_type: &'static str,
+            method: Method,
+            path: &'static str,
+            query: &'static str,
+            version: Version,
+            req_headers: Vec<(&'static str, &'static str)>,
+            req_payload: Value,
+            status: StatusCode,
+            res_headers: Vec<(&'static str, &'static str)>,
+            res_payload: Value,
+        ) {
+            // Select the router based on the string input
+            let router = match router_type {
+                "HTTP" => crate::config::CONFIG.http_router.clone(),
+                "HTTPS" => crate::config::CONFIG.https_router.clone(),
+                _ => panic!("Invalid router type provided: {}", router_type),
+            };
+    
+            let to_header_map = |headers: Vec<(&str, &str)>| -> HeaderMap {
+                headers
+                    .into_iter()
+                    .map(|(k, v)| {
+                        (
+                            HeaderName::from_str(k).expect("Invalid header name"),
+                            HeaderValue::from_str(v).expect("Invalid header value")
+                        )
+                    })
+                    .collect()
+            };
+            
             let req_params = RequestParams {
                 method,
-                path,
-                query,
+                path: path.to_string(),
+                query: query.to_string(),
                 version,
-                headers,
-                payload,
+                req_headers: to_header_map(req_headers),
+                req_payload,
             };
-
-            let expected_params = ResponseParams {}
+    
+            let actual_res_params = crate::tools::get_response_params(router, req_params)
+                .await
+                .expect("Request failed");
+                
+            let expected_res_params = ResponseParams {
+                version,
+                status,
+                res_headers: to_header_map(res_headers),
+                res_payload,
+            };
             
-            let actual_params = 
-            let req = cool_asserts::assert_matches!(axum::extract::Request::try_from(expected_params.clone()), Ok(req) => req);
-
-            let actual_params = cool_asserts::assert_matches!(RequestParams::from_request(req, &()).await, Ok(actual_params) => actual_params);
-
-            pretty_assertions::assert_eq!(actual_params, expected_params);
-            
+            pretty_assertions::assert_eq!(actual_res_params, expected_res_params);
         }
     }
 }

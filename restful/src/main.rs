@@ -335,6 +335,7 @@ pub mod tools {
         }
     }
 
+    #[tracing::instrument(skip_all, err)]
     pub async fn get_router_response_params(
         router: axum::Router,
         req_params: RequestParams,

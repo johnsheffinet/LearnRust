@@ -126,14 +126,13 @@ pub mod handlers {
             .path_and_query()
             .map(|pq| pq.as_str())
             .unwrap_or("/");
-        let location = axum::http::HeaderValue::try_from(format!(
-            "https://{}{}",
-            CONFIG.https_addr, path_query
-        ))
-        .map_err(AppError::FailedCreateHeader)?;
+        let https_addr = CONFIG.https_addr;
+        let location =
+            axum::http::HeaderValue::try_from(&format!("https://{https_addr}{path_query}"))
+                .map_err(AppError::FailedCreateHeader)?;
 
         let body = axum::Json(
-            serde_json::json!({ "status": format!("Temporarily redirecting to {:?}.", location) }),
+            serde_json::json!({ "status": format!("Temporarily redirecting to {location:?}.") }),
         );
 
         Ok((status, [(LOCATION, location)], body).into_response())
@@ -149,13 +148,12 @@ pub mod handlers {
     }
 
     #[tracing::instrument(skip_all, err)]
-    pub async fn report_invalid_route(
-        axum::extract::Path(path): axum::extract::Path<String>,
-    ) -> AppResult<axum::response::Response> {
+    pub async fn report_invalid_route(uri: axum::http::Uri) -> AppResult<axum::response::Response> {
         let status = axum::http::StatusCode::NOT_FOUND;
 
+        let path = uri.path();
         let body =
-            axum::Json(serde_json::json!({ "status": format!("'{}' route is invalid!", path) }));
+            axum::Json(serde_json::json!({ "status": format!("'{path}' route is invalid!") }));
 
         Ok((status, body).into_response())
     }
@@ -337,6 +335,7 @@ pub mod tools {
         }
     }
 
+    #[tracing::instrument(skip_all, err)]
     pub async fn get_router_response_params(
         router: axum::Router,
         req_params: RequestParams,
@@ -356,7 +355,7 @@ pub mod tools {
     }
 }
 #[cfg(test)]
-pub mod tests {
+mod tests {
     mod config {
         use crate::config::{AppConfig, AppError};
         use test_case::test_case;
@@ -445,7 +444,7 @@ pub mod tests {
             })
         }
     }
-    pub mod tools {
+    mod tools {
         use crate::tools::{AppError, RequestParams, ResponseParams};
         use axum::extract::FromRequest;
 
@@ -572,6 +571,104 @@ pub mod tests {
             let actual_params = cool_asserts::assert_matches!(ResponseParams::from_response(res).await, Ok(actual_params) => actual_params);
 
             pretty_assertions::assert_eq!(actual_params, expected_params);
+        }
+    }
+    mod handlers {
+        use std::str::FromStr;
+
+        #[test_case::test_case(
+            "Http",
+            axum::http::Method::GET,
+            "/healthz",
+            "",
+            axum::http::Version::HTTP_11,
+            vec![("Content-Type", "application/json")],
+            serde_json::json!({}),
+            axum::http::StatusCode::TEMPORARY_REDIRECT,
+            vec![("Content-Type", "application/json"), ("Location", "https://127.0.0.1:3443/healthz"), ("Content-Length", "75")],
+            serde_json::json!({ "status": format!("Temporarily redirecting to {:?}.", "https://127.0.0.1:3443/healthz") });
+            "redirect to https success"
+        )]
+        #[test_case::test_case(
+            "Https",
+            axum::http::Method::GET,
+            "/healthz",
+            "",
+            axum::http::Version::HTTP_11,
+            vec![],
+            serde_json::json!({}),
+            axum::http::StatusCode::OK,
+            vec![("Content-Type", "application/json"), ("Content-Length", "27")],
+            serde_json::json!({ "status": "App is lively." });
+            "check app liveliness success"
+        )]
+        #[test_case::test_case(
+            "Https",
+            axum::http::Method::GET,
+            "/invalid",
+            "",
+            axum::http::Version::HTTP_11,
+            vec![],
+            serde_json::json!({}),
+            axum::http::StatusCode::NOT_FOUND,
+            vec![("Content-Type", "application/json"), ("Content-Length", "41")],
+            serde_json::json!({ "status": "'/invalid' route is invalid!" });
+            "report invalid route success"
+        )]
+        #[test_log::test(tokio::test)]
+        async fn test_handlers(
+            router_type: &'static str,
+            method: axum::http::Method,
+            path: &'static str,
+            query: &'static str,
+            version: axum::http::Version,
+            req_headers: Vec<(&'static str, &'static str)>,
+            req_payload: serde_json::Value,
+            status: axum::http::StatusCode,
+            res_headers: Vec<(&'static str, &'static str)>,
+            res_payload: serde_json::Value,
+        ) {
+            let router = match router_type {
+                "Http" => crate::config::CONFIG.http_router.clone(),
+                "Https" => crate::config::CONFIG.https_router.clone(),
+                _ => panic!("Didn't expect {} router type!", router_type),
+            };
+
+            let into_headermap = |headers: Vec<(&str, &str)>| -> axum::http::header::HeaderMap {
+                headers
+                    .into_iter()
+                    .map(|(k, v)| {
+                        (
+                            axum::http::header::HeaderName::from_str(k)
+                                .expect(&format!("Failed to parse '{k}' key into header name!")),
+                            axum::http::header::HeaderValue::from_str(v)
+                                .expect(&format!("Failed to parse '{v}' value into header value!")),
+                        )
+                    })
+                    .collect()
+            };
+
+            let req_params = crate::tools::RequestParams {
+                method,
+                path: path.to_string(),
+                query: query.to_string(),
+                version,
+                headers: into_headermap(req_headers),
+                payload: req_payload,
+            };
+
+            let actual_res_params = crate::tools::get_router_response_params(router, req_params)
+                .await
+                .expect("Failed to get response parameters!");
+
+            let expected_res_params = crate::tools::ResponseParams {
+                version,
+                status,
+                headers: into_headermap(res_headers),
+                payload: res_payload,
+            };
+
+            pretty_assertions::assert_eq!(actual_res_params, expected_res_params);
         }
     }
 }

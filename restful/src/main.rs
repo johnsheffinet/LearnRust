@@ -575,51 +575,47 @@ pub mod tests {
         }
     }
     mod handlers {
-        use test_case::test_case;
-        use axum::http::{header::{HeaderMap, HeaderName, HeaderValue}, Method, Version, StatusCode};
-        use serde_json::{json, Value};
         use std::str::FromStr;
     
-        #[test_case(
-            "HTTP", // Router selection
-            Method::GET,
+        #[test_case::test_case(
+            "Http",
+            axum::http::Method::GET,
             "/healthz",
             "",
-            Version::HTTP_11,
+            axum::http::Version::HTTP_11,
             vec![("Content-Type", "application/json")],
-            json!({}),
-            StatusCode::TEMPORARY_REDIRECT,
+            serde_json::json!({}),
+            axum::http::StatusCode::TEMPORARY_REDIRECT,
             vec![("Location", "127.0.0.1:3443/healthz")],
-            json!("Temporarily redirecting to '127.0.0.1:3443/healthz'.")
-            ; "redirect to https success"
+            serde_json::json!("Temporarily redirecting to '127.0.0.1:3443/healthz'.");
+            "redirect to https success"
         )]
         #[test_log::test(tokio::test)]
-        async fn test_redirect_to_https_success(
+        async fn test(
             router_type: &'static str,
-            method: Method,
+            method: axum::http::Method,
             path: &'static str,
             query: &'static str,
-            version: Version,
+            version: axum::http::Version,
             req_headers: Vec<(&'static str, &'static str)>,
-            req_payload: Value,
-            status: StatusCode,
+            req_payload: serde_json::Value,
+            status: axum::http::StatusCode,
             res_headers: Vec<(&'static str, &'static str)>,
-            res_payload: Value,
+            res_payload: serde_json::Value,
         ) {
-            // Select the router based on the string input
             let router = match router_type {
-                "HTTP" => crate::config::CONFIG.http_router.clone(),
-                "HTTPS" => crate::config::CONFIG.https_router.clone(),
-                _ => panic!("Invalid router type provided: {}", router_type),
+                "Http" => crate::config::CONFIG.http_router.clone(),
+                "Https" => crate::config::CONFIG.https_router.clone(),
+                _ => panic!("Didn't expect {} router type!", router_type),
             };
     
-            let to_header_map = |headers: Vec<(&str, &str)>| -> HeaderMap {
+            let into_headermap = |headers: Vec<(&str, &str)>| -> axum::http::header::HeaderMap {
                 headers
                     .into_iter()
                     .map(|(k, v)| {
                         (
-                            HeaderName::from_str(k).expect("Invalid header name"),
-                            HeaderValue::from_str(v).expect("Invalid header value")
+                            axum::http::header::HeaderName::from_str(k).expect(&format!("Failed to parse '{}' key into header name!", k)),
+                            axum::http::header::HeaderValue::from_str(v).expect(&format!("Failed to parse '{}' value into header value!", v))
                         )
                     })
                     .collect()
@@ -630,18 +626,18 @@ pub mod tests {
                 path: path.to_string(),
                 query: query.to_string(),
                 version,
-                req_headers: to_header_map(req_headers),
+                req_headers: into_headermap(req_headers),
                 req_payload,
             };
     
             let actual_res_params = crate::tools::get_response_params(router, req_params)
                 .await
-                .expect("Request failed");
+                .expect("Failed to get respone parameters!");
                 
             let expected_res_params = ResponseParams {
                 version,
                 status,
-                res_headers: to_header_map(res_headers),
+                res_headers: into_headermap(res_headers),
                 res_payload,
             };
             

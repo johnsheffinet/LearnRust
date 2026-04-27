@@ -133,7 +133,7 @@ pub mod handlers {
         .map_err(AppError::FailedCreateHeader)?;
 
         let body = axum::Json(
-            serde_json::json!({ "status": format!("Temporarily redirecting to '{:?}'.", location) }),
+            serde_json::json!({ "status": format!("Temporarily redirecting to {:?}.", location) }),
         );
 
         Ok((status, [(LOCATION, location)], body).into_response())
@@ -356,7 +356,7 @@ pub mod tools {
     }
 }
 #[cfg(test)]
-pub mod tests {
+mod tests {
     mod config {
         use crate::config::{AppConfig, AppError};
         use test_case::test_case;
@@ -445,7 +445,7 @@ pub mod tests {
             })
         }
     }
-    pub mod tools {
+    mod tools {
         use crate::tools::{AppError, RequestParams, ResponseParams};
         use axum::extract::FromRequest;
 
@@ -576,7 +576,7 @@ pub mod tests {
     }
     mod handlers {
         use std::str::FromStr;
-    
+
         #[test_case::test_case(
             "Http",
             axum::http::Method::GET,
@@ -586,8 +586,8 @@ pub mod tests {
             vec![("Content-Type", "application/json")],
             serde_json::json!({}),
             axum::http::StatusCode::TEMPORARY_REDIRECT,
-            vec![("Location", "127.0.0.1:3443/healthz")],
-            serde_json::json!("Temporarily redirecting to '127.0.0.1:3443/healthz'.");
+            vec![("Content-Type", "application/json"), ("Location", "https://127.0.0.1:3443/healthz"), ("Content-Length", "75")],
+            serde_json::json!({ "status": "Temporarily redirecting to \"https://127.0.0.1:3443/healthz.\"" });
             "redirect to https success"
         )]
         #[test_log::test(tokio::test)]
@@ -608,39 +608,41 @@ pub mod tests {
                 "Https" => crate::config::CONFIG.https_router.clone(),
                 _ => panic!("Didn't expect {} router type!", router_type),
             };
-    
+
             let into_headermap = |headers: Vec<(&str, &str)>| -> axum::http::header::HeaderMap {
                 headers
                     .into_iter()
                     .map(|(k, v)| {
                         (
-                            axum::http::header::HeaderName::from_str(k).expect(&format!("Failed to parse '{}' key into header name!", k)),
-                            axum::http::header::HeaderValue::from_str(v).expect(&format!("Failed to parse '{}' value into header value!", v))
+                            axum::http::header::HeaderName::from_str(k)
+                                .expect(&format!("Failed to parse '{}' key into header name!", k)),
+                            axum::http::header::HeaderValue::from_str(v)
+                                .expect(&format!("Failed to parse '{}' value into header value!", v)),
                         )
                     })
                     .collect()
             };
-            
-            let req_params = RequestParams {
+
+            let req_params = crate::tools::RequestParams {
                 method,
                 path: path.to_string(),
                 query: query.to_string(),
                 version,
-                req_headers: into_headermap(req_headers),
-                req_payload,
+                headers: into_headermap(req_headers),
+                payload: req_payload,
             };
-    
-            let actual_res_params = crate::tools::get_response_params(router, req_params)
+
+            let actual_res_params = crate::tools::get_router_response_params(router, req_params)
                 .await
                 .expect("Failed to get respone parameters!");
-                
-            let expected_res_params = ResponseParams {
+
+            let expected_res_params = crate::tools::ResponseParams {
                 version,
                 status,
-                res_headers: into_headermap(res_headers),
-                res_payload,
+                headers: into_headermap(res_headers),
+                payload: res_payload,
             };
-            
+
             pretty_assertions::assert_eq!(actual_res_params, expected_res_params);
         }
     }

@@ -126,14 +126,13 @@ pub mod handlers {
             .path_and_query()
             .map(|pq| pq.as_str())
             .unwrap_or("/");
-        let location = axum::http::HeaderValue::try_from(format!(
-            "https://{}{}",
-            CONFIG.https_addr, path_query
-        ))
-        .map_err(AppError::FailedCreateHeader)?;
+        let https_addr = CONFIG.https_addr;
+        let location =
+            axum::http::HeaderValue::try_from(&format!("https://{https_addr}{path_query}"))
+                .map_err(AppError::FailedCreateHeader)?;
 
         let body = axum::Json(
-            serde_json::json!({ "status": format!("Temporarily redirecting to {:?}.", location) }),
+            serde_json::json!({ "status": format!("Temporarily redirecting to {location:?}.") }),
         );
 
         Ok((status, [(LOCATION, location)], body).into_response())
@@ -149,13 +148,12 @@ pub mod handlers {
     }
 
     #[tracing::instrument(skip_all, err)]
-    pub async fn report_invalid_route(
-        axum::extract::Path(path): axum::extract::Path<String>,
-    ) -> AppResult<axum::response::Response> {
+    pub async fn report_invalid_route(uri: axum::http::Uri) -> AppResult<axum::response::Response> {
         let status = axum::http::StatusCode::NOT_FOUND;
 
+        let path = uri.path();
         let body =
-            axum::Json(serde_json::json!({ "status": format!("'{}' route is invalid!", path) }));
+            axum::Json(serde_json::json!({ "status": format!("'{path}' route is invalid!") }));
 
         Ok((status, body).into_response())
     }
@@ -587,11 +585,37 @@ mod tests {
             serde_json::json!({}),
             axum::http::StatusCode::TEMPORARY_REDIRECT,
             vec![("Content-Type", "application/json"), ("Location", "https://127.0.0.1:3443/healthz"), ("Content-Length", "75")],
-            serde_json::json!({ "status": "Temporarily redirecting to \"https://127.0.0.1:3443/healthz.\"" });
+            serde_json::json!({ "status": format!("Temporarily redirecting to {:?}.", "https://127.0.0.1:3443/healthz") });
             "redirect to https success"
         )]
+        #[test_case::test_case(
+            "Https",
+            axum::http::Method::GET,
+            "/healthz",
+            "",
+            axum::http::Version::HTTP_11,
+            vec![],
+            serde_json::json!({}),
+            axum::http::StatusCode::OK,
+            vec![("Content-Type", "application/json"), ("Content-Length", "27")],
+            serde_json::json!({ "status": "App is lively." });
+            "check app liveliness success"
+        )]
+        #[test_case::test_case(
+            "Https",
+            axum::http::Method::GET,
+            "/invalid",
+            "",
+            axum::http::Version::HTTP_11,
+            vec![],
+            serde_json::json!({}),
+            axum::http::StatusCode::NOT_FOUND,
+            vec![("Content-Type", "application/json"), ("Content-Length", "41")],
+            serde_json::json!({ "status": "'/invalid' route is invalid!" });
+            "report invalid route success"
+        )]
         #[test_log::test(tokio::test)]
-        async fn test(
+        async fn test_handlers(
             router_type: &'static str,
             method: axum::http::Method,
             path: &'static str,
@@ -615,9 +639,9 @@ mod tests {
                     .map(|(k, v)| {
                         (
                             axum::http::header::HeaderName::from_str(k)
-                                .expect(&format!("Failed to parse '{}' key into header name!", k)),
+                                .expect(&format!("Failed to parse '{k}' key into header name!")),
                             axum::http::header::HeaderValue::from_str(v)
-                                .expect(&format!("Failed to parse '{}' value into header value!", v)),
+                                .expect(&format!("Failed to parse '{v}' value into header value!")),
                         )
                     })
                     .collect()
@@ -634,7 +658,7 @@ mod tests {
 
             let actual_res_params = crate::tools::get_router_response_params(router, req_params)
                 .await
-                .expect("Failed to get respone parameters!");
+                .expect("Failed to get response parameters!");
 
             let expected_res_params = crate::tools::ResponseParams {
                 version,

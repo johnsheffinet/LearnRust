@@ -158,6 +158,55 @@ pub mod handlers {
         Ok((status, body).into_response())
     }
 }
+pub mod items {
+    #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
+    pub enum AppError {}
+
+    pub type AppResult<T> = Result<T, AppError>;
+
+    #[derive(Debug, Clone, validator::Validate)]
+    pub struct AppStore {}
+
+    #[derive(Debug, Clone, validator::Validate)]
+    pub struct CreatePayload {}
+
+    #[derive(Debug, Clone, validator::Validate)]
+    pub struct SelectQuery {}
+
+    #[derive(debug, Clone, validator::Validate)]
+    pub struct UpdatePayload {}
+
+    #[tracing::instrument(skip_all, err)]
+    pub async fn create(
+        Json(payload): Json<CreatePayload>,
+        State(app_state): State<AppState>,
+    ) -> AppResult<axum::response::Response> {}
+
+    #[tracing::instrument(skip_all, err)]
+    pub async fn delete(
+        Path(id): Path<uuid::Uuid>,
+        State(app_state): State<AppState>,
+    ) -> AppResult<axum::response::Response> {}
+
+    #[tracing::instrument(skip_all, err)]
+    pub async fn select_all(
+        Query(query): Query<SelectQuery>,
+        State(app_state): State<AppState>,
+    ) -> AppResult<axum::response::Response> {}
+
+    #[tracing::instrument(skip_all, err)]
+    pub async fn select_one(
+        Path(id): Path<uuid::Uuid>,
+        State(app_state): State<AppState>,
+    ) -> AppResult<axum::response::Response> {}
+
+    #[tracing::instrument(skip_all, err)]
+    pub async fn update(
+        Path(id): Path<uuid::Uuid>,
+        Json(payload): Json<UpdatePayload>,
+        State(app_state): State<Appstate>,
+    ) -> AppResult<axum::response::Response> {} 
+}
 pub mod tools {
     use axum::extract::FromRequest;
 

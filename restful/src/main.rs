@@ -160,15 +160,28 @@ pub mod handlers {
 }
 pub mod items {
     #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
-    pub enum AppError {}
+    pub enum AppError {
+        #[error("Failed to validate! {0}")]
+        #[status(axum::http::StatusCode::UNPROCESSABLE_ENTITY)]
+        FailedValidate(#[source] validator::ValidationErrors),
+    }
 
     pub type AppResult<T> = Result<T, AppError>;
 
     #[derive(Debug, Clone, validator::Validate)]
-    pub struct AppStore {}
+    pub struct AppStore {
+        id: uuid::Uuid,
+        #[validate(length(min = 1, message = "key field for item store is empty!"))]
+        key: String,
+        #[validate(length(min = 1, message = "val field for item store is empty!"))]
+        val: String,
+    }
 
     #[derive(Debug, Clone, validator::Validate)]
-    pub struct CreatePayload {}
+    pub struct CreatePayload {
+        #[validate(length(min = 1, ))]key: String,
+        val: String,
+    }
 
     #[derive(Debug, Clone, validator::Validate)]
     pub struct SelectQuery {}

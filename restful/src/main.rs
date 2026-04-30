@@ -203,11 +203,58 @@ pub mod items {
         desc: Option<String>,
     }
 
+    use std::collections::HashMap;
+    use validator::ValidationErrors;
+    
+    async fn into_hashmap(errors: ValidationErrors) -> HashMap<String, Vec<String>> {
+        errors
+            .field_errors()
+            .into_iter()
+            .map(|(field, field_errors)| {
+                let messages = field_errors
+                    .into_iter()
+                    .map(|error| {
+                        error.message
+                            .map(|m| m.into_owned())
+                            .unwrap_or_else(|| format!("Failed to parse {field}!"))
+                    })
+                    .collect();
+                (field.to_string(), messages)
+            })
+            .collect()
+    })
+    
     #[tracing::instrument(skip_all, err)]
     pub async fn create(
         Json(payload): Json<CreatePayload>,
         State(app_state): State<AppState>,
-    ) -> AppResult<axum::response::Response> {}
+    ) -> AppResult<axum::response::Response> {
+        payload.validate().map_err(AppError::FailedValidate)?;
+        // Validate the request
+        if let Err(errors) = payload.validate() {
+        // Respond with 422 status and errors in JSON format
+            return 
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(serde_json::json!({"errors": validation_errors_to_map(errors)})),
+            );
+        }
+        // Lock the database for write
+        let mut db = db.write().await;
+        // Create new item
+        let item = Item {
+            id: Uuid::new_v4(),
+            name: payload.name,
+            desc: payload.value,
+        };
+        // Insert the item into the database
+        db.insert(item.id, item.clone());
+        // Respond with 201 status and item in JSON format
+        (
+            StatusCode::CREATED, 
+            Json(serde_json::to_value(item).expect("Failed to serialize created item!"))
+        )
+    }
 
     #[tracing::instrument(skip_all, err)]
     pub async fn delete(

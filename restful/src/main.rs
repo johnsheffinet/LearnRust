@@ -161,33 +161,47 @@ pub mod handlers {
 pub mod items {
     #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
     pub enum AppError {
-        #[error("Failed to validate! {0}")]
+        #[error("{0}")]
         #[status(axum::http::StatusCode::UNPROCESSABLE_ENTITY)]
         FailedValidate(#[source] validator::ValidationErrors),
     }
 
     pub type AppResult<T> = Result<T, AppError>;
 
-    #[derive(Debug, Clone, validator::Validate)]
+    pub type AppState = Arc::new(Rwlock::new(HashMap<uuid::Uuid, AppStore));
+    
+    #[derive(Debug, Clone)]
     pub struct AppStore {
         id: uuid::Uuid,
-        #[validate(length(min = 1, message = "key field for item store is empty!"))]
-        key: String,
-        #[validate(length(min = 1, message = "val field for item store is empty!"))]
-        val: String,
+        name: String,
+        desc: String,
     }
 
     #[derive(Debug, Clone, validator::Validate)]
     pub struct CreatePayload {
-        #[validate(length(min = 1, ))]key: String,
-        val: String,
+        #[validate(length(min = 1, message = "Failed to validate name field in create item payload!"))]
+        name: String,
+        #[validate(length(min = 1, message = "Failed to validate desc field in create item payload!"))]
+        desc: String,
     }
 
     #[derive(Debug, Clone, validator::Validate)]
-    pub struct SelectQuery {}
+    pub struct SelectQuery {
+        id: uuid::Uuid,
+        #[validate(length(min = 1, message = "Failed to validate name field in select items query!"))]
+        name: Option<String>,
+        #[validate(length(min = 1, message = "Failed to validate desc field in select items query!"))]
+        desc: Option<String>,
+    }
 
     #[derive(debug, Clone, validator::Validate)]
-    pub struct UpdatePayload {}
+    pub struct UpdatePayload {
+        id: uuid::Uuid,
+        #[validate(length(min = 1, message = "Failed to validate name field in update item payload!"))]
+        name: Option<String>,
+        #[validate(length(min = 1, message = "Failed to validate desc field in update item payload!"))]
+        desc: Option<String>,
+    }
 
     #[tracing::instrument(skip_all, err)]
     pub async fn create(

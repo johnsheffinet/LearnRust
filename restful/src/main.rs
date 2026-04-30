@@ -159,16 +159,16 @@ pub mod handlers {
     }
 }
 pub mod items {
-    #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
+    #[derive(Debug, thiserror::Error, axum_thiserror::ErrorResponse)]
     pub enum AppError {
         #[error("{0}")]
         #[status(axum::http::StatusCode::UNPROCESSABLE_ENTITY)]
-        FailedValidate(#[source] validator::ValidationErrors),
+        FailedValidate(#[from] validator::ValidationErrors),
     }
 
     pub type AppResult<T> = Result<T, AppError>;
 
-    pub type AppState = Arc::new(Rwlock::new(HashMap<uuid::Uuid, AppStore));
+    pub type AppState = Arc::Rwlock::HashMap<uuid::Uuid, AppStore>;
     
     #[derive(Debug, Clone)]
     pub struct AppStore {
@@ -206,54 +206,41 @@ pub mod items {
     use std::collections::HashMap;
     use validator::ValidationErrors;
     
-    async fn into_hashmap(errors: ValidationErrors) -> HashMap<String, Vec<String>> {
-        errors
-            .field_errors()
-            .into_iter()
-            .map(|(field, field_errors)| {
-                let messages = field_errors
-                    .into_iter()
-                    .map(|error| {
-                        error.message
-                            .map(|m| m.into_owned())
-                            .unwrap_or_else(|| format!("Failed to parse {field}!"))
-                    })
-                    .collect();
-                (field.to_string(), messages)
-            })
-            .collect()
-    })
+    // async fn into_hashmap(errors: ValidationErrors) -> HashMap<String, Vec<String>> {
+    //     errors
+    //         .field_errors()
+    //         .into_iter()
+    //         .map(|(field, field_errors)| {
+    //             let messages = field_errors
+    //                 .into_iter()
+    //                 .map(|error| {
+    //                     error.message
+    //                         .map(|m| m.into_owned())
+    //                         .unwrap_or_else(|| format!("Failed to parse {field}!"))
+    //                 })
+    //                 .collect();
+    //             (field.to_string(), messages)
+    //         })
+    //         .collect()
+    // })
     
     #[tracing::instrument(skip_all, err)]
     pub async fn create(
         Json(payload): Json<CreatePayload>,
         State(app_state): State<AppState>,
     ) -> AppResult<axum::response::Response> {
-        payload.validate().map_err(AppError::FailedValidate)?;
-        // Validate the request
-        if let Err(errors) = payload.validate() {
-        // Respond with 422 status and errors in JSON format
-            return 
-            (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(serde_json::json!({"errors": validation_errors_to_map(errors)})),
-            );
-        }
-        // Lock the database for write
-        let mut db = db.write().await;
-        // Create new item
-        let item = Item {
+        payload.validate()?;
+
+        let app_store = AppStore {
             id: Uuid::new_v4(),
             name: payload.name,
             desc: payload.value,
         };
-        // Insert the item into the database
-        db.insert(item.id, item.clone());
-        // Respond with 201 status and item in JSON format
-        (
-            StatusCode::CREATED, 
-            Json(serde_json::to_value(item).expect("Failed to serialize created item!"))
-        )
+
+        app_state.write().await;
+        app_state.insert(app_store.id, app_store.clone());
+
+        Ok((axum::http::StatusCode::CREATED, axum::Json(app_store)).into_response())
     }
 
     #[tracing::instrument(skip_all, err)]

@@ -159,20 +159,26 @@ pub mod handlers {
     }
 }
 pub mod items {
+    use axum::{extract::{Json, Path, Query, State}, http::StatusCode, response::{IntoResponse, Response},};
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+    use std::collections::HashMap;
+    use uuid::Uuid;
+    
     #[derive(Debug, thiserror::Error, axum_thiserror::ErrorResponse)]
     pub enum AppError {
         #[error("{0}")]
-        #[status(axum::http::StatusCode::UNPROCESSABLE_ENTITY)]
+        #[status(StatusCode::UNPROCESSABLE_ENTITY)]
         FailedValidate(#[from] validator::ValidationErrors),
     }
 
     pub type AppResult<T> = Result<T, AppError>;
 
-    pub type AppState = Arc::Rwlock::HashMap<uuid::Uuid, AppStore>;
+    pub type AppState = Arc<Rwlock<HashMap<Uuid, AppStore>>>;
     
     #[derive(Debug, Clone)]
     pub struct AppStore {
-        id: uuid::Uuid,
+        id: Uuid,
         name: String,
         desc: String,
     }
@@ -187,7 +193,7 @@ pub mod items {
 
     #[derive(Debug, Clone, validator::Validate)]
     pub struct SelectQuery {
-        id: uuid::Uuid,
+        id: Uuid,
         #[validate(length(min = 1, message = "Failed to validate name field in select items query!"))]
         name: Option<String>,
         #[validate(length(min = 1, message = "Failed to validate desc field in select items query!"))]
@@ -196,15 +202,15 @@ pub mod items {
 
     #[derive(debug, Clone, validator::Validate)]
     pub struct UpdatePayload {
-        id: uuid::Uuid,
+        id: Uuid,
         #[validate(length(min = 1, message = "Failed to validate name field in update item payload!"))]
         name: Option<String>,
         #[validate(length(min = 1, message = "Failed to validate desc field in update item payload!"))]
         desc: Option<String>,
     }
 
-    use std::collections::HashMap;
-    use validator::ValidationErrors;
+    // use std::collections::HashMap;
+    // use validator::ValidationErrors;
     
     // async fn into_hashmap(errors: ValidationErrors) -> HashMap<String, Vec<String>> {
     //     errors
@@ -228,7 +234,7 @@ pub mod items {
     pub async fn create(
         Json(payload): Json<CreatePayload>,
         State(app_state): State<AppState>,
-    ) -> AppResult<axum::response::Response> {
+    ) -> AppResult<Response> {
         payload.validate()?;
 
         let app_store = AppStore {
@@ -237,15 +243,15 @@ pub mod items {
             desc: payload.value,
         };
 
-        app_state.write().await;
-        app_state.insert(app_store.id, app_store.clone());
+        let db = app_state.write().await;
+        db.insert(app_store.id, app_store.clone());
 
-        Ok((axum::http::StatusCode::CREATED, axum::Json(app_store)).into_response())
+        Ok((StatusCode::CREATED, Json(app_store)).into_response())
     }
 
     #[tracing::instrument(skip_all, err)]
     pub async fn delete(
-        Path(id): Path<uuid::Uuid>,
+        Path(id): Path<Uuid>,
         State(app_state): State<AppState>,
     ) -> AppResult<axum::response::Response> {}
 
@@ -257,13 +263,13 @@ pub mod items {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn select_one(
-        Path(id): Path<uuid::Uuid>,
+        Path(id): Path<Uuid>,
         State(app_state): State<AppState>,
     ) -> AppResult<axum::response::Response> {}
 
     #[tracing::instrument(skip_all, err)]
     pub async fn update(
-        Path(id): Path<uuid::Uuid>,
+        Path(id): Path<Uuid>,
         Json(payload): Json<UpdatePayload>,
         State(app_state): State<Appstate>,
     ) -> AppResult<axum::response::Response> {} 

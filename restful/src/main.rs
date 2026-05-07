@@ -160,54 +160,63 @@ pub mod handlers {
 }
 pub mod items {
     use axum::{extract::{Json, Path, Query, State}, http::StatusCode, response::{IntoResponse, Response},};
-    use std::sync::Arc;
-    use tokio::sync::RwLock;
-    use std::collections::HashMap;
-    use uuid::Uuid;
+    use axum_valid::Valid;
+    // use std::sync::Arc;
+    // use tokio::sync::RwLock;
+    // use std::collections::HashMap;
+    // use uuid::Uuid;
     
-    #[derive(Debug, thiserror::Error, axum_thiserror::ErrorResponse)]
+    #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
     pub enum AppError {
-        #[error("{0}")]
-        #[status(StatusCode::UNPROCESSABLE_ENTITY)]
+        #[error("Failed to validate!")]
+        #[status_code("422")]
+        #[code("FAILED_VALIDATE")]
         FailedValidate(#[from] validator::ValidationErrors),
     }
 
     pub type AppResult<T> = Result<T, AppError>;
 
-    pub type AppState = Arc<Rwlock<HashMap<Uuid, AppStore>>>;
+    // pub type AppState = Arc<Rwlock<HashMap<Uuid, AppStore>>>;
     
-    #[derive(Debug, Clone)]
-    pub struct AppStore {
-        id: Uuid,
+    #[derive(Debug, serde::Serialize, serde::Deserialize)]
+    pub struct Item {
+        id: uuid::Uuid,
         name: String,
         desc: String,
     }
 
-    #[derive(Debug, Clone, validator::Validate)]
-    pub struct CreatePayload {
-        #[validate(length(min = 1, message = "Failed to validate name field in create item payload!"))]
+    #[derive(Debug, serde::Deserialize, validator::Validate)]
+    pub struct CreateBody {
+        #[validate(length(min = 1, message = "Name field in create body is missing!"))]
         name: String,
-        #[validate(length(min = 1, message = "Failed to validate desc field in create item payload!"))]
+        #[validate(length(min = 1, message = "Desc field in create body is missing!"))]
         desc: String,
     }
 
-    #[derive(Debug, Clone, validator::Validate)]
-    pub struct SelectQuery {
-        id: Uuid,
-        #[validate(length(min = 1, message = "Failed to validate name field in select items query!"))]
+    #[derive(Debug, serde::Deserialize, validator::Validate)]
+    pub struct UpdateBody {
+        #[validate(length(min = 1, message = "Name field in update body is missing!"))]
         name: Option<String>,
-        #[validate(length(min = 1, message = "Failed to validate desc field in select items query!"))]
+        #[validate(length(min = 1, message = "Desc field in update body is missing!"))]
         desc: Option<String>,
     }
 
-    #[derive(debug, Clone, validator::Validate)]
-    pub struct UpdatePayload {
-        id: Uuid,
-        #[validate(length(min = 1, message = "Failed to validate name field in update item payload!"))]
+    #[derive(Debug, serde::Deserialize, validator::Validate)]
+    pub struct SelectAllQuery {
+        #[validate(length(min = 1, message = "Name field in selectall query parameters is missing!"))]
         name: Option<String>,
-        #[validate(length(min = 1, message = "Failed to validate desc field in update item payload!"))]
+        #[validate(length(min = 1, message = "Desc field in selectall query parameters is missing!"))]
         desc: Option<String>,
     }
+
+    #[derive(Debug, serde::Deserialize, validator::Validate)]
+    pub struct IdPath {
+        #[validate(custom(fn = "", message = "Id field in path parameter is invalid!")]
+        id: uuid::Uuid,
+    }
+
+    
+
 
     // use std::collections::HashMap;
     // use validator::ValidationErrors;

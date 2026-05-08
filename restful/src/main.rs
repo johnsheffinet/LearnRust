@@ -211,11 +211,30 @@ pub mod items {
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
     pub struct IdPath {
-        #[validate(custom(fn = "", message = "Id field in path parameter is invalid!")]
+        #[validate(
+            custom(function = "IdPath::validate_is_v4"),
+            custom(function = "IdPath::validate_not_nil"),
+        )]
         id: uuid::Uuid,
     }
 
-    
+    impl IdPath {
+        fn validate_is_v4(id: &uuid::Uuid) -> Result<(), validator::ValidationError> {
+            if id.get_version_num() != 4 {
+                Err(validator::ValidationError::new("Id field in path parameter is invalid!"))
+            }
+
+            Ok(())
+        }
+
+        fn validate_not_nil(id: &uuid::Uuid) -> Result<(), validator::ValidationError> {
+            if id.is_nil() {
+                Err(validator::ValidationError::new("Id field in path parameter is nil!"))
+            }
+
+            Ok(())
+        }
+    }
 
 
     // use std::collections::HashMap;

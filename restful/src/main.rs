@@ -174,7 +174,7 @@ pub mod items {
         FailedValidate(#[from] validator::ValidationErrors),
     }
 
-    pub type AppResult<T> = Result<T, AppError>;
+    // pub type AppResult<T> = Result<T, AppError>;
 
     // pub type AppState = Arc<Rwlock<HashMap<Uuid, AppStore>>>;
     
@@ -186,10 +186,10 @@ pub mod items {
     }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
-    pub struct CreateBody {
-        #[validate(length(min = 1, message = "Name field in create body is missing!"))]
+    pub struct CreateJsonPayload {
+        #[validate(length(min = 1, message = "Name field in create payload is missing!"))]
         name: String,
-        #[validate(length(min = 1, message = "Desc field in create body is missing!"))]
+        #[validate(length(min = 1, message = "Desc field in create payload is missing!"))]
         desc: String,
     }
 

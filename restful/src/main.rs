@@ -170,8 +170,18 @@ pub mod items {
     pub enum AppError {
         #[error("Failed to validate!")]
         #[status_code("422")]
-        #[code("FAILED_VALIDATE")]
-        FailedValidate(#[from] validator::ValidationErrors),
+        #[code("UNPROCESSABLE_ENTITY")]
+        UnprocessableEntity(#[from] validator::ValidationErrors),
+
+        #[error("Failed to find {0} id!")]
+        #[status_code("404")]
+        #[code("NOT_FOUND")]
+        NotFound(String),
+
+        #[error("")]
+        #[status_code("500")]
+        #[code("INTERNAL_SERVER_ERROR")]
+        InternalServerError(),
     }
 
     // pub type AppResult<T> = Result<T, AppError>;
@@ -187,55 +197,43 @@ pub mod items {
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
     pub struct CreateJsonPayload {
-        #[validate(length(min = 1, message = "Name field in create payload is missing!"))]
+        #[validate(length(min = 1, message = "Field in create payload is missing!"))]
         name: String,
-        #[validate(length(min = 1, message = "Desc field in create payload is missing!"))]
+        #[validate(length(min = 1, message = "Field in create payload is missing!"))]
         desc: String,
     }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
-    pub struct UpdateBody {
-        #[validate(length(min = 1, message = "Name field in update body is missing!"))]
+    pub struct SelectAllQueryParams {
+        #[validate(length(min = 1, message = "Field in selectall query parameters is missing!"))]
         name: Option<String>,
-        #[validate(length(min = 1, message = "Desc field in update body is missing!"))]
+        #[validate(length(min = 1, message = "Field in selectall query parameters is missing!"))]
         desc: Option<String>,
     }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
-    pub struct SelectAllQuery {
-        #[validate(length(min = 1, message = "Name field in selectall query parameters is missing!"))]
-        name: Option<String>,
-        #[validate(length(min = 1, message = "Desc field in selectall query parameters is missing!"))]
-        desc: Option<String>,
-    }
-
-    #[derive(Debug, serde::Deserialize, validator::Validate)]
-    pub struct IdPath {
-        #[validate(
-            custom(function = "IdPath::validate_is_v4"),
-            custom(function = "IdPath::validate_not_nil"),
-        )]
+    pub struct PathId {
+        #[validate(custom(function = "IdPath::validate_is_v4", message = "Field in path id is invalid!"))]
         id: uuid::Uuid,
     }
 
-    impl IdPath {
+    impl PathId {
         fn validate_is_v4(id: &uuid::Uuid) -> Result<(), validator::ValidationError> {
             if id.get_version_num() != 4 {
-                Err(validator::ValidationError::new("Id field in path parameter is invalid!"))
-            }
-
-            Ok(())
-        }
-
-        fn validate_not_nil(id: &uuid::Uuid) -> Result<(), validator::ValidationError> {
-            if id.is_nil() {
-                Err(validator::ValidationError::new("Id field in path parameter is nil!"))
+                Err(validator::ValidationError::new())
             }
 
             Ok(())
         }
     }
 
+    #[derive(Debug, serde::Deserialize, validator::Validate)]
+    pub struct UpdateJsonPayload {
+        #[validate(length(min = 1, message = "Field in update json payload is missing!"))]
+        name: Option<String>,
+        #[validate(length(min = 1, message = "Field in update json payload is missing!"))]
+        desc: Option<String>,
+    }
 
     // use std::collections::HashMap;
     // use validator::ValidationErrors;
@@ -258,6 +256,10 @@ pub mod items {
     //         .collect()
     // })
     
+    #[tracing::instrument(skip_all, err)]
+    pub async fn create(
+        Json(payload): Json<CreateJsonPayload>,
+    ) -> impl Response {}
     #[tracing::instrument(skip_all, err)]
     pub async fn create(
         Json(payload): Json<CreatePayload>,

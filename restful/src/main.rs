@@ -161,6 +161,7 @@ pub mod handlers {
 pub mod items {
     use axum::{extract::{Json, Path, Query, State}, http::StatusCode, response::{IntoResponse, Response},};
     use axum_valid::Valid;
+    use create::tools::AppState;
     // use std::sync::Arc;
     // use tokio::sync::RwLock;
     // use std::collections::HashMap;
@@ -188,7 +189,7 @@ pub mod items {
 
     // pub type AppState = Arc<Rwlock<HashMap<Uuid, AppStore>>>;
     
-    #[derive(Debug, serde::Serialize, serde::Deserialize)]
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
     pub struct Item {
         id: uuid::Uuid,
         name: String,
@@ -197,9 +198,9 @@ pub mod items {
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
     pub struct CreateJsonPayload {
-        #[validate(length(min = 1, message = "Field in create payload is missing!"))]
+        #[validate(length(min = 1, message = "Field in create json payload is missing!"))]
         name: String,
-        #[validate(length(min = 1, message = "Field in create payload is missing!"))]
+        #[validate(length(min = 1, message = "Field in create json payload is missing!"))]
         desc: String,
     }
 
@@ -259,6 +260,7 @@ pub mod items {
     #[tracing::instrument(skip_all, err)]
     pub async fn create(
         Json(payload): Json<CreateJsonPayload>,
+        State(app_state): State<AppState<Item>>
     ) -> impl Response {}
     #[tracing::instrument(skip_all, err)]
     pub async fn create(
@@ -347,6 +349,8 @@ pub mod tools {
     }
 
     pub type AppResult<T> = Result<T, AppError>;
+
+    pub type AppState<T> = Arc<Rwlock<HashMap<Uuid, T>>>;
 
     #[derive(Debug, Clone, PartialEq)]
     pub struct RequestParams {

@@ -1,9 +1,9 @@
 pub mod config {
     use axum_server::tls_rustls::RustlsConfig;
     use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
-    use std::sync::LazyLock;
+    // use std::sync::LazyLock;
 
-    pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().unwrap());
+    // pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().unwrap());
 
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
@@ -30,14 +30,34 @@ pub mod config {
 
     pub type AppState<T> = Arc<RwLock<HashMap<Uuid, T>>>;
 
-    impl<T> AppState<T> {
-        fn new<T>() -> AppState<T> {
-            Arc::new(RwLock::new(HashMap::<Uuid, T>::new()))
+    // impl<T> AppState<T> {
+    //     fn new<T>() -> AppState<T> {
+    //         Arc::new(RwLock::new(HashMap::<Uuid, T>::new()))
+    //     }
+    // }
+
+    #[derive(Clone)]
+    pub struct AppStates {
+        items: AppState<items::Item>,
+    }
+
+    impl AppStates {
+        fn new() -> Self {
+            items: Arc::new(RwLock::new(HashMap::new())),
+        }
+
+        fn new_test() -> Self {
+            items: {
+                let x = Arc::new(RwLock::new(HashMap::new()));
+                x.insert(Uuid::new_v4(), {name: "Test", desc: "test"});
+            }
         }
     }
 
-    pub struct AppStates {
-        items: AppState<items::Item>,
+    impl FromRef<AppStates> for AppState<Item> {
+        fn from_ref(app_states: &AppStates) -> Self {
+            app_states.items.clone()
+        } 
     }
 
     #[derive(Debug)]
@@ -98,7 +118,7 @@ pub mod config {
                 .fallback(handlers::redirect_to_https);
 
             let app_states = AppStates {
-                AppState::<items:Item>::new(),
+                items: AppState::<items:Item>::new(),
             }
 
             let https_router = axum::Router::new()

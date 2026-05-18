@@ -28,6 +28,18 @@ pub mod config {
 
     pub type AppResult<T> = Result<T, AppError>;
 
+    pub type AppState<T> = Arc<RwLock<HashMap<Uuid, T>>>;
+
+    impl<T> AppState<T> {
+        fn new<T>() -> AppState<T> {
+            Arc::new(RwLock::new(HashMap::<Uuid, T>::new()))
+        }
+    }
+
+    pub struct AppStates {
+        items: AppState<items::Item>,
+    }
+
     #[derive(Debug)]
     pub struct AppConfig {
         pub http_addr: std::net::SocketAddr,
@@ -42,7 +54,7 @@ pub mod config {
     impl AppConfig {
         #[tracing::instrument(skip_all, err)]
         pub fn new() -> AppResult<AppConfig> {
-            use crate::handlers as h;
+            use crate::handlers;
             use axum::routing::get;
 
             let http_addr_raw = std::env::var("HTTP_ADDR")
@@ -82,11 +94,18 @@ pub mod config {
             ))
             .map_err(|s| AppError::FailedConfigTLS(s, cert_path.clone()))?;
 
-            let http_router = axum::Router::new().fallback(h::redirect_to_https);
+            let http_router = axum::Router::new()
+                .fallback(handlers::redirect_to_https);
+
+            let app_states = AppStates {
+                AppState::<items:Item>::new(),
+            }
 
             let https_router = axum::Router::new()
+                .merge(items::routes)
+                .with_state(app_states);
                 .route("/healthz", get(h::check_app_liveliness))
-                .fallback(h::report_invalid_route);
+                .fallback(handlers::report_invalid_route);
 
             Ok(AppConfig {
                 http_addr,

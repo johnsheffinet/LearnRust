@@ -1,9 +1,12 @@
 pub mod config {
+    use crate::{handlers, items::{self, Item}};
+    use axum::extract::FromRef;
     use axum_server::tls_rustls::RustlsConfig;
     use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
-    // use std::sync::LazyLock;
-
-    // pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().unwrap());
+    use std::{collections::HashMap, sync::{Arc, LazyLock, RwLock}};
+    use uuid::Uuid;
+    
+    pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().unwrap());
 
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
@@ -30,26 +33,26 @@ pub mod config {
 
     pub type AppState<T> = Arc<RwLock<HashMap<Uuid, T>>>;
 
-    // impl<T> AppState<T> {
-    //     fn new<T>() -> AppState<T> {
-    //         Arc::new(RwLock::new(HashMap::<Uuid, T>::new()))
-    //     }
-    // }
-
     #[derive(Clone)]
     pub struct AppStates {
-        items: AppState<items::Item>,
+        items: AppState<Item>,
     }
 
     impl AppStates {
-        fn new() -> Self {
-            items: Arc::new(RwLock::new(HashMap::new())),
+        pub fn new() -> Self {
+            Self {
+                items: Arc::new(RwLock::new(HashMap::new())),
+            }
         }
 
-        fn new_test() -> Self {
-            items: {
-                let x = Arc::new(RwLock::new(HashMap::new()));
-                x.insert(Uuid::new_v4(), {name: "Test", desc: "test"});
+        pub fn new_test() -> Self {
+            let x = Arc::new(RwLock::new(HashMap::new()));            
+            x.write().unwrap().insert(Uuid::nil(), Item {
+                name: "Test".to_string(),
+                desc: "This is a test.".to_string(),
+            });
+            Self {
+                items: x
             }
         }
     }
@@ -67,16 +70,11 @@ pub mod config {
         pub cert_path: std::path::PathBuf,
         pub key_path: std::path::PathBuf,
         pub tls_config: RustlsConfig,
-        pub http_router: axum::Router,
-        pub https_router: axum::Router,
     }
 
     impl AppConfig {
         #[tracing::instrument(skip_all, err)]
         pub fn new() -> AppResult<AppConfig> {
-            use crate::handlers;
-            use axum::routing::get;
-
             let http_addr_raw = std::env::var("HTTP_ADDR")
                 .map_err(|s| AppError::FailedFindEnvVar(s, "HTTP_ADDR".into()))?;
             let http_addr = http_addr_raw
@@ -114,29 +112,30 @@ pub mod config {
             ))
             .map_err(|s| AppError::FailedConfigTLS(s, cert_path.clone()))?;
 
-            let http_router = axum::Router::new()
-                .fallback(handlers::redirect_to_https);
-
-            let app_states = AppStates {
-                items: AppState::<items:Item>::new(),
-            }
-
-            let https_router = axum::Router::new()
-                .merge(items::routes)
-                .with_state(app_states);
-                .route("/healthz", get(h::check_app_liveliness))
-                .fallback(handlers::report_invalid_route);
-
             Ok(AppConfig {
                 http_addr,
                 https_addr,
                 cert_path,
                 key_path,
                 tls_config,
-                http_router,
-                https_router,
             })
+        }            
+        
+        pub fn build_http_router() -> axum::Router {
+            axum::Router::new()
+                .fallback(handlers::redirect_to_https)
         }
+
+        pub fn build_https_router(app_states: AppStates) -> axum::Router {
+            use axum::routing::get;
+
+            axum::Router::new()
+                .merge(items::routes())
+                .route("/healthz", get(handlers::check_app_liveliness))
+                .fallback(handlers::report_invalid_route)
+                .with_state(app_states)
+    }
+
     }
 }
 pub mod handlers {
@@ -200,11 +199,6 @@ pub mod handlers {
 pub mod items {
     use axum::{extract::{Json, Path, Query, State}, http::StatusCode, response::{IntoResponse, Response},};
     use axum_valid::Valid;
-    use create::tools::AppState;
-    // use std::sync::Arc;
-    // use tokio::sync::RwLock;
-    // use std::collections::HashMap;
-    // use uuid::Uuid;
     
     #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
     pub enum AppError {

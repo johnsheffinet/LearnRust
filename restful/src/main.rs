@@ -134,8 +134,7 @@ pub mod config {
                 .route("/healthz", get(handlers::check_app_liveliness))
                 .fallback(handlers::report_invalid_route)
                 .with_state(app_states)
-    }
-
+        }
     }
 }
 pub mod handlers {

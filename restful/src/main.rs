@@ -223,7 +223,6 @@ pub mod items {
     
     #[derive(Debug, serde::Deserialize, serde::Serialize)]
     pub struct Item {
-        id: uuid::Uuid,
         name: String,
         desc: String,
     }
@@ -237,7 +236,7 @@ pub mod items {
     }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
-    pub struct SelectAllQueryParams {
+    pub struct SelectQueryParams {
         #[validate(length(min = 1, message = "Field in selectall query parameters is missing!"))]
         name: Option<String>,
         #[validate(length(min = 1, message = "Field in selectall query parameters is missing!"))]
@@ -245,12 +244,12 @@ pub mod items {
     }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
-    pub struct PathId {
+    pub struct GetPathId {
         #[validate(custom(function = "IdPath::validate_is_v4", message = "Field in path id is invalid!"))]
         id: uuid::Uuid,
     }
 
-    impl PathId {
+    impl GetPathId {
         fn validate_is_v4(id: &uuid::Uuid) -> Result<(), validator::ValidationError> {
             if id.get_version_num() != 4 {
                 Err(validator::ValidationError::new())
@@ -288,55 +287,90 @@ pub mod items {
     //         })
     //         .collect()
     // })
-    
+
     #[tracing::instrument(skip_all, err)]
     pub async fn create(
-        Json(payload): Json<CreateJsonPayload>,
-        State(app_state): State<AppState<Item>>
-    ) -> impl Response {}
-    #[tracing::instrument(skip_all, err)]
-    pub async fn create(
-        Json(payload): Json<CreatePayload>,
-        State(app_state): State<AppState>,
-    ) -> AppResult<Response> {
-        payload.validate()?;
-
-        let app_store = AppStore {
-            id: Uuid::new_v4(),
-            name: payload.name,
-            desc: payload.value,
-        };
-
-        let db = app_state.write().await;
-        db.insert(app_store.id, app_store.clone());
-
-        Ok((StatusCode::CREATED, Json(app_store)).into_response())
-    }
+        Valid(Json(payload): Valid<Json<CreateJsonPayload>>,
+        State(state): State<AppState<Item>>
+    ) -> impl IntoResponse {}
 
     #[tracing::instrument(skip_all, err)]
     pub async fn delete(
-        Path(id): Path<Uuid>,
-        State(app_state): State<AppState>,
-    ) -> AppResult<axum::response::Response> {}
+        Valid(Path(id)): Valid<Path<GetPathId>>,
+        State(state): State<AppState<Item>>
+    ) -> impl IntoResponse {}
 
     #[tracing::instrument(skip_all, err)]
-    pub async fn select_all(
-        Query(query): Query<SelectQuery>,
-        State(app_state): State<AppState>,
-    ) -> AppResult<axum::response::Response> {}
+    pub async fn select(
+        Query(params): Valid<Query<SelectQueryParams>>,
+        State(state): State<AppState<Item>>,
+    ) -> impl IntoResponse {}
 
     #[tracing::instrument(skip_all, err)]
-    pub async fn select_one(
-        Path(id): Path<Uuid>,
-        State(app_state): State<AppState>,
-    ) -> AppResult<axum::response::Response> {}
+    pub async fn get(
+        Valid(Path(id)): Valid<Path<GetPathId>>,
+        State(state): State<AppState<Item>>,
+    ) -> impl IntoResponse {}
 
-    #[tracing::instrument(skip_all, err)]
+    #[tracing::instrument(skip_all, err]
     pub async fn update(
-        Path(id): Path<Uuid>,
-        Json(payload): Json<UpdatePayload>,
-        State(app_state): State<Appstate>,
-    ) -> AppResult<axum::response::Response> {} 
+        Valid(Path(id)): Valid<Path<GetPathId>>,
+        Valid(Json(payload)): Valid<Json<UpdateJsonPayload>>, 
+        State(state): State<AppState<Item>>
+    ) -> impl IntoResponse {}
+    
+    pub fn routes<S>() -> Router<S>
+    where
+        AppState<Item>: FromRef<S>,
+        S: Clone + Send + Sync + 'static,
+    {
+        Router::new()
+            .route("/items", axum::routing::get(select).post(create))
+            .route("/items/{id}", axum::routing::get(get).delete(delete).put(update))
+    }
+    // #[tracing::instrument(skip_all, err)]
+    // pub async fn create(
+    //     Json(payload): Json<CreatePayload>,
+    //     State(app_state): State<AppState>,
+    // ) -> AppResult<Response> {
+    //     payload.validate()?;
+
+    //     let app_store = AppStore {
+    //         id: Uuid::new_v4(),
+    //         name: payload.name,
+    //         desc: payload.value,
+    //     };
+
+    //     let db = app_state.write().await;
+    //     db.insert(app_store.id, app_store.clone());
+
+    //     Ok((StatusCode::CREATED, Json(app_store)).into_response())
+    // }
+
+    // #[tracing::instrument(skip_all, err)]
+    // pub async fn delete(
+    //     Path(id): Path<Uuid>,
+    //     State(app_state): State<AppState>,
+    // ) -> AppResult<axum::response::Response> {}
+
+    // #[tracing::instrument(skip_all, err)]
+    // pub async fn select_all(
+    //     Query(query): Query<SelectQuery>,
+    //     State(app_state): State<AppState>,
+    // ) -> AppResult<axum::response::Response> {}
+
+    // #[tracing::instrument(skip_all, err)]
+    // pub async fn select_one(
+    //     Path(id): Path<Uuid>,
+    //     State(app_state): State<AppState>,
+    // ) -> AppResult<axum::response::Response> {}
+
+    // #[tracing::instrument(skip_all, err)]
+    // pub async fn update(
+    //     Path(id): Path<Uuid>,
+    //     Json(payload): Json<UpdatePayload>,
+    //     State(app_state): State<Appstate>,
+    // ) -> AppResult<axum::response::Response> {} 
 }
 pub mod tools {
     use axum::extract::FromRequest;

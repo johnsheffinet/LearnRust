@@ -216,10 +216,6 @@ pub mod items {
         #[code("INTERNAL_SERVER_ERROR")]
         InternalServerError(),
     }
-
-    // pub type AppResult<T> = Result<T, AppError>;
-
-    // pub type AppState = Arc<Rwlock<HashMap<Uuid, AppStore>>>;
     
     #[derive(Debug, serde::Deserialize, serde::Serialize)]
     pub struct Item {
@@ -267,27 +263,6 @@ pub mod items {
         desc: Option<String>,
     }
 
-    // use std::collections::HashMap;
-    // use validator::ValidationErrors;
-    
-    // async fn into_hashmap(errors: ValidationErrors) -> HashMap<String, Vec<String>> {
-    //     errors
-    //         .field_errors()
-    //         .into_iter()
-    //         .map(|(field, field_errors)| {
-    //             let messages = field_errors
-    //                 .into_iter()
-    //                 .map(|error| {
-    //                     error.message
-    //                         .map(|m| m.into_owned())
-    //                         .unwrap_or_else(|| format!("Failed to parse {field}!"))
-    //                 })
-    //                 .collect();
-    //             (field.to_string(), messages)
-    //         })
-    //         .collect()
-    // })
-
     #[tracing::instrument(skip_all, err)]
     pub async fn create(
         Valid(Json(payload): Valid<Json<CreateJsonPayload>>,
@@ -328,49 +303,6 @@ pub mod items {
             .route("/items", axum::routing::get(select).post(create))
             .route("/items/{id}", axum::routing::get(get).delete(delete).put(update))
     }
-    // #[tracing::instrument(skip_all, err)]
-    // pub async fn create(
-    //     Json(payload): Json<CreatePayload>,
-    //     State(app_state): State<AppState>,
-    // ) -> AppResult<Response> {
-    //     payload.validate()?;
-
-    //     let app_store = AppStore {
-    //         id: Uuid::new_v4(),
-    //         name: payload.name,
-    //         desc: payload.value,
-    //     };
-
-    //     let db = app_state.write().await;
-    //     db.insert(app_store.id, app_store.clone());
-
-    //     Ok((StatusCode::CREATED, Json(app_store)).into_response())
-    // }
-
-    // #[tracing::instrument(skip_all, err)]
-    // pub async fn delete(
-    //     Path(id): Path<Uuid>,
-    //     State(app_state): State<AppState>,
-    // ) -> AppResult<axum::response::Response> {}
-
-    // #[tracing::instrument(skip_all, err)]
-    // pub async fn select_all(
-    //     Query(query): Query<SelectQuery>,
-    //     State(app_state): State<AppState>,
-    // ) -> AppResult<axum::response::Response> {}
-
-    // #[tracing::instrument(skip_all, err)]
-    // pub async fn select_one(
-    //     Path(id): Path<Uuid>,
-    //     State(app_state): State<AppState>,
-    // ) -> AppResult<axum::response::Response> {}
-
-    // #[tracing::instrument(skip_all, err)]
-    // pub async fn update(
-    //     Path(id): Path<Uuid>,
-    //     Json(payload): Json<UpdatePayload>,
-    //     State(app_state): State<Appstate>,
-    // ) -> AppResult<axum::response::Response> {} 
 }
 pub mod tools {
     use axum::extract::FromRequest;

@@ -197,73 +197,142 @@ pub mod handlers {
 }
 pub mod items {
     use crate::config::AppState;
-    use axum::{extract::{FromRef, Json, Path, Query, State}, http::StatusCode, response::IntoResponse};
+    use axum::{extract::{Json, Path, Query, State}, http::StatusCode, response::IntoResponse};
     use axum_valid::Valid;
-    
+
     #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
     pub enum AppError {
-        #[error("Failed to validate request!")]
-        #[status_code("422")]
+        #[error("Failed to validate request! {0}")]
+        #[status_code(StatusCode::UNPROCESSABLE_ENTITY)]
         #[code("UNPROCESSABLE_ENTITY")]
         UnprocessableEntity(#[from] validator::ValidationErrors),
 
-        #[error("Failed to find {0} id in path!")]
-        #[status_code("404")]
+        #[error("Failed to find {0} id in request path!")]
+        #[status_code(StatusCode::NOT_FOUND)]
         #[code("NOT_FOUND")]
         NotFound(String),
 
-        #[error("Failed to process request!")]
-        #[status_code("500")]
+        #[error("Failed to process request! {0}")]
+        #[status_code(StatusCode::INTERNAL_SERVER_ERROR)]
         #[code("INTERNAL_SERVER_ERROR")]
-        InternalServerError(),
+        InternalServerError(String),
     }
-    
-    #[derive(Debug, serde::Deserialize, serde::Serialize)]
+
+    #[tracing::instrument(skip_all, err)]
+    pub async fn create(
+        Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,
+        State(state): State<AppState<Item>>,
+    ) -> impl IntoResponse {
+        let id = uuid::Uuid::new_v4();
+
+        let item = Item{
+            name: payload.name.to_string(),
+            desc: payload.desc.to_string(),
+        }
+
+        state
+            .write()
+            .map_err(|e| {AppError::InternalServerError(e.to_string())})
+            .insert(id, item);
+
+        let item_response = ItemResponse {
+            id,
+            item,
+        }
+
+        Ok(StatusCode::CREATED, Json(item_response))
+    }
+
+    #[tracing::instrument(skip_all, err)]
+    pub async fn delete(
+        Valid(Path(id)): Valid<Path<GetPathId>>,
+        State(state): State<AppState<Item>>,
+    ) -> impl IntoResponse {}
+
+    #[tracing::instrument(skip_all, err)]
+    pub async fn get(
+        Valid(Path(id)): Valid<Path<GetPathId>>,
+        State(state): State<AppState<Item>>,
+    ) -> impl IntoResponse {}
+
+    #[tracing::instrument(skip_all, err)]
+    pub async fn select(
+        Valid(Query(params)): Valid<Query<SelectQueryParams>>,
+        State(state): State<AppState<Item>>,
+    ) -> impl IntoResponse {}
+
+    #[tracing::instrument(skip_all, err)]
+    pub async fn update(
+        Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,
+        Valid(Path(id)): Valid<Path<GetPathId>>,
+        State(state): State<AppState<Item>>,
+    ) -> impl IntoResponse {}
+
+    #[tracing::instrument(skip_all, err)]
+    pub async fn routes<S>() -> axum::Router<S> 
+    where
+        AppState<Item>: axum::extract::FromRef<S>,
+        S: Clone + Send + Sync + 'static,
+    {
+        axum::Router::new()
+            .route("/items", axum::routing::get(select).post(create))
+            .route("/items/{id}", axum::routing::get(get).delete(delete).put(update))
+    }
+
+    #[derive(Debug, serde::Deserialize)]
     pub struct Item {
         name: String,
         desc: String,
     }
 
+    #[derive(Debug, serde::Serialize)]
+    pub struct ItemResponse {
+        id: uuid::Uuid,
+        item: Item,
+    }
+
     #[derive(Debug, serde::Deserialize, validator::Validate)]
     pub struct CreateJsonPayload {
-        #[validate(length(min = 1, message = "Field in create json payload is missing!"))]
+        #[validate(length(min = 1, message = "field in create json payload is missing!"))]
         name: String,
-        #[validate(length(min = 1, message = "Field in create json payload is missing!"))]
+        #[validate(length(min = 1, message = "field in create json payload is missing!"))]
         desc: String,
     }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
-    pub struct SelectQueryParams {
-        #[validate(length(min = 1, message = "Field in selectall query parameters is missing!"))]
-        name: Option<String>,
-        #[validate(length(min = 1, message = "Field in selectall query parameters is missing!"))]
-        desc: Option<String>,
-    }
-
-    #[derive(Debug, serde::Deserialize, validator::Validate)]
     pub struct GetPathId {
-        #[validate(custom(function = "GetPathId::validate_is_v4", message = "Field in path id is invalid!"))]
+        #[validate(custom(function = "GetPathId::validate_is_v4", message = "field in path is invalid!"))]
         id: uuid::Uuid,
     }
 
     impl GetPathId {
         fn validate_is_v4(id: &uuid::Uuid) -> Result<(), validator::ValidationError> {
-            if id.get_version_num() != 4 {
-                Err(validator::ValidationError::new())
-            } else {
+            if id.get_version_num() == 4 {
                 Ok(())
+            } else {
+                Err(validator::ValidationError::new())
             }
         }
     }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
-    pub struct UpdateJsonPayload {
-        #[validate(length(min = 1, message = "Field in update json payload is missing!"))]
+    pub struct SelectQueryParams {
+        #[validate(length(min = 1, message = "field in select query params is missing!"))]
         name: Option<String>,
-        #[validate(length(min = 1, message = "Field in update json payload is missing!"))]
+        #[validate(length(min = 1, message = "field in select query params is missing!"))]
         desc: Option<String>,
     }
 
+    #[derive(Debug, serde::Deserialize, validator::Validate)]
+    pub struct UpdateJsonPayload {
+        #[validate(length(min = 1, message = "field in update json payload is missing!"))]
+        name: Option<String>,
+        #[validate(length(min = 1, message = "field in update json payload is missing!"))]
+        desc: Option<String>,
+    }
+}
+
+pub mod items {
     #[tracing::instrument(skip_all, err)]
     pub async fn create(
         Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,

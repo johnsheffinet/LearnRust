@@ -268,7 +268,14 @@ pub mod items {
     pub async fn create(
         Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,
         State(state): State<AppState<Item>>,
-    ) -> impl IntoResponse {}
+    ) -> impl IntoResponse {
+        state.write().unwrap().insert(Uuid::new_v4(), Item {
+            name: payload.name.to_string(),
+            desc: payload.desc.to_string(),            
+        });
+
+        Ok(StatusCode::CREATED, Json())
+    }
 
     #[tracing::instrument(skip_all, err)]
     pub async fn delete(

@@ -196,22 +196,23 @@ pub mod handlers {
     }
 }
 pub mod items {
-    use axum::{extract::{Json, Path, Query, State}, http::StatusCode, response::{IntoResponse, Response},};
+    use crate::config::AppState;
+    use axum::{extract::{FromRef, Json, Path, Query, State}, http::StatusCode, response::IntoResponse};
     use axum_valid::Valid;
     
     #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
     pub enum AppError {
-        #[error("Failed to validate!")]
+        #[error("Failed to validate request!")]
         #[status_code("422")]
         #[code("UNPROCESSABLE_ENTITY")]
         UnprocessableEntity(#[from] validator::ValidationErrors),
 
-        #[error("Failed to find {0} id!")]
+        #[error("Failed to find {0} id in path!")]
         #[status_code("404")]
         #[code("NOT_FOUND")]
         NotFound(String),
 
-        #[error("")]
+        #[error("Failed to process request!")]
         #[status_code("500")]
         #[code("INTERNAL_SERVER_ERROR")]
         InternalServerError(),
@@ -241,7 +242,7 @@ pub mod items {
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
     pub struct GetPathId {
-        #[validate(custom(function = "IdPath::validate_is_v4", message = "Field in path id is invalid!"))]
+        #[validate(custom(function = "GetPathId::validate_is_v4", message = "Field in path id is invalid!"))]
         id: uuid::Uuid,
     }
 
@@ -249,9 +250,9 @@ pub mod items {
         fn validate_is_v4(id: &uuid::Uuid) -> Result<(), validator::ValidationError> {
             if id.get_version_num() != 4 {
                 Err(validator::ValidationError::new())
+            } else {
+                Ok(())
             }
-
-            Ok(())
         }
     }
 
@@ -265,19 +266,19 @@ pub mod items {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn create(
-        Valid(Json(payload): Valid<Json<CreateJsonPayload>>,
-        State(state): State<AppState<Item>>
+        Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,
+        State(state): State<AppState<Item>>,
     ) -> impl IntoResponse {}
 
     #[tracing::instrument(skip_all, err)]
     pub async fn delete(
         Valid(Path(id)): Valid<Path<GetPathId>>,
-        State(state): State<AppState<Item>>
+        State(state): State<AppState<Item>>,
     ) -> impl IntoResponse {}
 
     #[tracing::instrument(skip_all, err)]
     pub async fn select(
-        Query(params): Valid<Query<SelectQueryParams>>,
+        Valid(Query(params)): Valid<Query<SelectQueryParams>>,
         State(state): State<AppState<Item>>,
     ) -> impl IntoResponse {}
 
@@ -287,19 +288,19 @@ pub mod items {
         State(state): State<AppState<Item>>,
     ) -> impl IntoResponse {}
 
-    #[tracing::instrument(skip_all, err]
+    #[tracing::instrument(skip_all, err)]
     pub async fn update(
         Valid(Path(id)): Valid<Path<GetPathId>>,
         Valid(Json(payload)): Valid<Json<UpdateJsonPayload>>, 
-        State(state): State<AppState<Item>>
+        State(state): State<AppState<Item>>,
     ) -> impl IntoResponse {}
     
-    pub fn routes<S>() -> Router<S>
+    pub fn routes<S>() -> axum::Router<S>
     where
         AppState<Item>: FromRef<S>,
         S: Clone + Send + Sync + 'static,
     {
-        Router::new()
+        axum::Router::new()
             .route("/items", axum::routing::get(select).post(create))
             .route("/items/{id}", axum::routing::get(get).delete(delete).put(update))
     }

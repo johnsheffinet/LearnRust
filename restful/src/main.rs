@@ -3,8 +3,7 @@ pub mod config {
     use axum::extract::FromRef;
     use axum_server::tls_rustls::RustlsConfig;
     use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
-    use std::{collections::HashMap, sync::{Arc, LazyLock, RwLock}};
-    use uuid::Uuid;
+    use std::sync::{Arc, LazyLock};
     
     pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().unwrap());
 
@@ -31,38 +30,6 @@ pub mod config {
 
     pub type AppResult<T> = Result<T, AppError>;
 
-    pub type AppState<T> = Arc<RwLock<HashMap<Uuid, T>>>;
-
-    #[derive(Clone)]
-    pub struct AppStates {
-        items: AppState<Item>,
-    }
-
-    impl AppStates {
-        pub fn new() -> Self {
-            Self {
-                items: Arc::new(RwLock::new(HashMap::new())),
-            }
-        }
-
-        pub fn new_test() -> Self {
-            let x = Arc::new(RwLock::new(HashMap::new()));            
-            x.write().unwrap().insert(Uuid::nil(), Item {
-                name: "Test".to_string(),
-                desc: "This is a test.".to_string(),
-            });
-            Self {
-                items: x
-            }
-        }
-    }
-
-    impl FromRef<AppStates> for AppState<Item> {
-        fn from_ref(app_states: &AppStates) -> Self {
-            app_states.items.clone()
-        } 
-    }
-
     #[derive(Debug)]
     pub struct AppConfig {
         pub http_addr: std::net::SocketAddr,
@@ -76,24 +43,24 @@ pub mod config {
         #[tracing::instrument(skip_all, err)]
         pub fn new() -> AppResult<AppConfig> {
             let http_addr_raw = std::env::var("HTTP_ADDR")
-                .map_err(|s| AppError::FailedFindEnvVar(s, "HTTP_ADDR".into()))?;
+                .map_err(|src| AppError::FailedFindEnvVar(src, "HTTP_ADDR".into()))?;
             let http_addr = http_addr_raw
                 .parse::<std::net::SocketAddr>()
-                .map_err(|s| AppError::FailedParseSocketAddr(s, http_addr_raw))?;
+                .map_err(|src| AppError::FailedParseSocketAddr(src, http_addr_raw))?;
 
             let https_addr_raw = std::env::var("HTTPS_ADDR")
-                .map_err(|s| AppError::FailedFindEnvVar(s, "HTTPS_ADDR".into()))?;
+                .map_err(|src| AppError::FailedFindEnvVar(src, "HTTPS_ADDR".into()))?;
             let https_addr = https_addr_raw
                 .parse::<std::net::SocketAddr>()
-                .map_err(|s| AppError::FailedParseSocketAddr(s, https_addr_raw))?;
+                .map_err(|src| AppError::FailedParseSocketAddr(src, https_addr_raw))?;
 
             let cert_path_raw = std::env::var("CERT_PATH")
-                .map_err(|s| AppError::FailedFindEnvVar(s, "CERT_PATH".into()))?;
+                .map_err(|src| AppError::FailedFindEnvVar(src, "CERT_PATH".into()))?;
             let cert_path = std::path::PathBuf::from(cert_path_raw);
 
             let certs = CertificateDer::pem_file_iter(&cert_path)
-                .map_err(|s| AppError::FailedOpenPEMFile(s, cert_path.clone()))?
-                .map(|r| r.map_err(|s| AppError::FailedParsePEMFile(s, cert_path.clone())))
+                .map_err(|src| AppError::FailedOpenPEMFile(src, cert_path.clone()))?
+                .map(|rsl| rsl.map_err(|src| AppError::FailedParsePEMFile(src, cert_path.clone())))
                 .collect::<Result<Vec<_>, _>>()?;
 
             if certs.is_empty() {
@@ -101,16 +68,21 @@ pub mod config {
             }
 
             let key_path_raw = std::env::var("KEY_PATH")
-                .map_err(|s| AppError::FailedFindEnvVar(s, "KEY_PATH".into()))?;
+                .map_err(|src| AppError::FailedFindEnvVar(src, "KEY_PATH".into()))?;
             let key_path = std::path::PathBuf::from(key_path_raw);
             let key = PrivateKeyDer::from_pem_file(&key_path)
-                .map_err(|s| AppError::FailedOpenPEMFile(s, key_path.clone()))?;
+                .map_err(|src| AppError::FailedOpenPEMFile(src, key_path.clone()))?;
 
             let tls_config = futures::executor::block_on(RustlsConfig::from_der(
-                certs.into_iter().map(|c| c.to_vec()).collect(),
-                key.secret_der().to_vec(),
+                certs
+                    .into_iter()
+                    .map(|cert| cert.to_vec())
+                    .collect(),
+                key
+                    .secret_der()
+                    .to_vec(),
             ))
-            .map_err(|s| AppError::FailedConfigTLS(s, cert_path.clone()))?;
+                .map_err(|src| AppError::FailedConfigTLS(src, cert_path.clone()))?;
 
             Ok(AppConfig {
                 http_addr,
@@ -119,22 +91,52 @@ pub mod config {
                 key_path,
                 tls_config,
             })
-        }            
+        }
+    }
         
-        pub fn build_http_router() -> axum::Router {
-            axum::Router::new()
-                .fallback(handlers::redirect_to_https)
-        }
+    pub type AppState<T> = Arc<dashmap::DashMap<uuid::Uuid, Arc<T>>>;
 
-        pub fn build_https_router(app_states: AppStates) -> axum::Router {
-            use axum::routing::get;
+    #[derive(Clone)]
+    pub struct AppStates {
+        items: AppState<Item>,
+    }
 
-            axum::Router::new()
-                .merge(items::routes())
-                .route("/healthz", get(handlers::check_app_liveliness))
-                .fallback(handlers::report_invalid_route)
-                .with_state(app_states)
+    impl AppStates {
+        pub fn new(test: Option<String>) -> Self {
+            let id = uuid::Uuid.nil();
+            let items = Arc::new(DashMap::new());
+
+            match test {
+                Some(_) => items.insert(id, Item {
+                    name: "Test".to_string(),
+                    desc: "This is a test".to_string(),
+                }),
+                None => {},
+            }
+
+            Self {
+                items,
+            }
         }
+    }
+
+    impl FromRef<AppStates> for AppState<Item> {
+        fn from_ref(states: &AppStates) -> Self {
+            Arc::clone(states.items)
+        } 
+    }
+
+    pub fn build_http_router() -> axum::Router {
+        axum::Router::new()
+            .fallback(handlers::redirect_to_https)
+    }
+
+    pub fn build_https_router(states: &AppStates) -> axum::Router {
+        axum::Router::new()
+            .merge(items::routes())
+            .route("/healthz", axum::routing::get(handlers::check_app_liveliness))
+            .fallback(handlers::report_invalid_route)
+            .with_state(states)
     }
 }
 pub mod handlers {

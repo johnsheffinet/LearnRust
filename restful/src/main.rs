@@ -219,55 +219,48 @@ pub mod items {
         InternalServerError(String),
     }
 
+    pub type AppResult<T> = Result<T, AppError>;
+
     #[tracing::instrument(skip_all, err)]
     pub async fn create(
         Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,
         State(state): State<AppState<Item>>,
-    ) -> impl IntoResponse {
-        let id = uuid::Uuid::new_v4();
-
-        let item = Item{
-            name: payload.name.to_string(),
-            desc: payload.desc.to_string(),
-        }
-
-        state
-            .write()
-            .map_err(|e| {AppError::InternalServerError(e.to_string())})
-            .insert(id, item);
-
-        let item_response = ItemResponse {
-            id,
-            item,
-        }
-
-        Ok(StatusCode::CREATED, Json(item_response))
+    ) -> AppResult<impl IntoResponse> {
+        Ok((StatusCode::CREATED, Json(item_response)))
     }
 
     #[tracing::instrument(skip_all, err)]
     pub async fn delete(
         Valid(Path(id)): Valid<Path<GetPathId>>,
         State(state): State<AppState<Item>>,
-    ) -> impl IntoResponse {}
+    ) -> AppResult<impl IntoResponse> {
+        Ok((StatusCode::NO_CONTENT, Json(item_response)))
+    }
 
     #[tracing::instrument(skip_all, err)]
     pub async fn get(
         Valid(Path(id)): Valid<Path<GetPathId>>,
         State(state): State<AppState<Item>>,
-    ) -> impl IntoResponse {}
+    ) -> AppResult<impl IntoResponse> {
+        Ok((StatusCode::OK, Json(item_response)))
+    }
 
     #[tracing::instrument(skip_all, err)]
     pub async fn select(
         Valid(Query(params)): Valid<Query<SelectQueryParams>>,
         State(state): State<AppState<Item>>,
-    ) -> impl IntoResponse {}
+    ) -> AppResult<impl IntoResponse> {
+        Ok((StatusCode::OK, Json(item_response)))
+    }
 
     #[tracing::instrument(skip_all, err)]
     pub async fn update(
-        Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,
         Valid(Path(id)): Valid<Path<GetPathId>>,
+        Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,
         State(state): State<AppState<Item>>,
-    ) -> impl IntoResponse {}
+    ) -> AppResult<impl IntoResponse> {
+        Ok((StatusCode::OK, Json(item_response)))
+    }
 
     #[tracing::instrument(skip_all, err)]
     pub async fn routes<S>() -> axum::Router<S> 
@@ -280,7 +273,7 @@ pub mod items {
             .route("/items/{id}", axum::routing::get(get).delete(delete).put(update))
     }
 
-    #[derive(Debug, serde::Deserialize)]
+    #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct Item {
         name: String,
         desc: String,
@@ -330,56 +323,6 @@ pub mod items {
         name: Option<String>,
         #[validate(length(min = 1, message = "field in update json payload is missing!"))]
         desc: Option<String>,
-    }
-}
-
-pub mod items {
-    #[tracing::instrument(skip_all, err)]
-    pub async fn create(
-        Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,
-        State(state): State<AppState<Item>>,
-    ) -> impl IntoResponse {
-        state.write().unwrap().insert(Uuid::new_v4(), Item {
-            name: payload.name.to_string(),
-            desc: payload.desc.to_string(),            
-        });
-
-        Ok(StatusCode::CREATED, Json())
-    }
-
-    #[tracing::instrument(skip_all, err)]
-    pub async fn delete(
-        Valid(Path(id)): Valid<Path<GetPathId>>,
-        State(state): State<AppState<Item>>,
-    ) -> impl IntoResponse {}
-
-    #[tracing::instrument(skip_all, err)]
-    pub async fn select(
-        Valid(Query(params)): Valid<Query<SelectQueryParams>>,
-        State(state): State<AppState<Item>>,
-    ) -> impl IntoResponse {}
-
-    #[tracing::instrument(skip_all, err)]
-    pub async fn get(
-        Valid(Path(id)): Valid<Path<GetPathId>>,
-        State(state): State<AppState<Item>>,
-    ) -> impl IntoResponse {}
-
-    #[tracing::instrument(skip_all, err)]
-    pub async fn update(
-        Valid(Path(id)): Valid<Path<GetPathId>>,
-        Valid(Json(payload)): Valid<Json<UpdateJsonPayload>>, 
-        State(state): State<AppState<Item>>,
-    ) -> impl IntoResponse {}
-    
-    pub fn routes<S>() -> axum::Router<S>
-    where
-        AppState<Item>: FromRef<S>,
-        S: Clone + Send + Sync + 'static,
-    {
-        axum::Router::new()
-            .route("/items", axum::routing::get(select).post(create))
-            .route("/items/{id}", axum::routing::get(get).delete(delete).put(update))
     }
 }
 pub mod tools {

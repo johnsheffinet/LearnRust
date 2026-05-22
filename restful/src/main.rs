@@ -9,10 +9,10 @@ pub mod config {
 
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
-        #[error("Failed to find '{1}' environment variable! {0}")]
+        #[error("Failed to find {1} environment variable! {0}")]
         FailedFindEnvVar(#[source] std::env::VarError, String),
 
-        #[error("Failed to parse '{1}' socket address {0}")]
+        #[error("Failed to parse {1} socket address {0}")]
         FailedParseSocketAddr(#[source] std::net::AddrParseError, String),
 
         #[error("Failed to open {1} PEM file! {0}")]
@@ -21,16 +21,16 @@ pub mod config {
         #[error("Failed to parse {1} PEM file! {0}")]
         FailedParsePEMFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
 
-        #[error("Failed to find valid certificates in '{0}' PEM file!")]
+        #[error("Failed to find valid certificates in {0} PEM file!")]
         FailedFindCerts(std::path::PathBuf),
 
-        #[error("Failed to configure TLS from '{1}' file! {0}")]
+        #[error("Failed to configure TLS from {1} file! {0}")]
         FailedConfigTLS(#[source] std::io::Error, std::path::PathBuf),
     }
 
     pub type AppResult<T> = Result<T, AppError>;
 
-    #[derive(Debug)]
+    #[derive(Clone, Debug)]
     pub struct AppConfig {
         pub http_addr: std::net::SocketAddr,
         pub https_addr: std::net::SocketAddr,
@@ -103,15 +103,11 @@ pub mod config {
 
     impl AppStates {
         pub fn new(test: Option<String>) -> Self {
-            let id = uuid::Uuid.nil();
-            let items = Arc::new(DashMap::new());
+            let id = uuid::Uuid::nil();
+            let items = Arc::new(dashmap::DashMap::new());
 
-            match test {
-                Some(_) => items.insert(id, Item {
-                    name: "Test".to_string(),
-                    desc: "This is a test".to_string(),
-                }),
-                None => {},
+            if test.is_some() {
+                items.insert(id, Arc::new(Item::new("Test", "This is a test")));
             }
 
             Self {
@@ -122,18 +118,21 @@ pub mod config {
 
     impl FromRef<AppStates> for AppState<Item> {
         fn from_ref(states: &AppStates) -> Self {
-            Arc::clone(states.items)
+            Arc::clone(&states.items)
         } 
     }
 
-    pub fn build_http_router() -> axum::Router {
+    pub fn build_http_router() -> axum::Router<()> {
         axum::Router::new()
             .fallback(handlers::redirect_to_https)
     }
 
-    pub fn build_https_router(states: &AppStates) -> axum::Router {
+    pub fn build_https_router(states: AppStates) -> axum::Router<AppStates> {
+        let item_routes = items::routes::<AppState<Item>>()
+            .map_state(|outer_state: AppStates| AppState::<Item>::from_ref(&outer_state));
+
         axum::Router::new()
-            .merge(items::routes())
+            .merge(item_routes)
             .route("/healthz", axum::routing::get(handlers::check_app_liveliness))
             .fallback(handlers::report_invalid_route)
             .with_state(states)

@@ -240,8 +240,8 @@ pub mod items {
     ) -> AppResult<impl IntoResponse> {
         let id = uuid::Uuid::new_v4();
         let item = payload.into();
-        state.insert(id, Arc::new(item));
         let item_response = ItemResponse { id, item: item.clone(), };
+        state.insert(id, Arc::new(item));
         Ok((StatusCode::CREATED, Json(item_response)))
     }
 

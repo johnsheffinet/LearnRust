@@ -200,6 +200,7 @@ pub mod items {
     use crate::config::AppState;
     use axum::{extract::{Json, Path, Query, State}, http::StatusCode, response::IntoResponse};
     use axum_valid::Valid;
+    use std::sync::Arc;
 
     #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
     pub enum AppError {
@@ -226,22 +227,35 @@ pub mod items {
         Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,
         State(state): State<AppState<Item>>,
     ) -> AppResult<impl IntoResponse> {
+        let id = uuid::Uuid::new_v4();
+        let item = Arc::new(payload.into());
+        state.insert(id, Arc::clone(&item));
+        let item_response = ItemResponse { id, item };
         Ok((StatusCode::CREATED, Json(item_response)))
     }
 
     #[tracing::instrument(skip_all, err)]
     pub async fn delete(
-        Valid(Path(id)): Valid<Path<GetPathId>>,
+        Valid(Path(GetPathId{ id })): Valid<Path<GetPathId>>,
         State(state): State<AppState<Item>>,
     ) -> AppResult<impl IntoResponse> {
-        Ok((StatusCode::NO_CONTENT, Json(item_response)))
+        let (_, item) = state
+            .remove(&id)
+            .ok_or_else(|| AppError::NotFound(id.to_string()))?;
+        let item_response = ItemResponse { id, item };
+        Ok((StatusCode::OK, Json(item_response)))
     }
 
     #[tracing::instrument(skip_all, err)]
     pub async fn get(
-        Valid(Path(id)): Valid<Path<GetPathId>>,
+        Valid(Path(GetPathId{ id })): Valid<Path<GetPathId>>,
         State(state): State<AppState<Item>>,
     ) -> AppResult<impl IntoResponse> {
+        let item = state
+            .get(&id)
+            .map(|entry| Arc::clone(entry.value()))
+            .ok_or_else(|| AppError::NotFound(id.to_string()))?;
+        let item_response = ItemResponse { id, item };
         Ok((StatusCode::OK, Json(item_response)))
     }
 
@@ -250,16 +264,37 @@ pub mod items {
         Valid(Query(params)): Valid<Query<SelectQueryParams>>,
         State(state): State<AppState<Item>>,
     ) -> AppResult<impl IntoResponse> {
-        Ok((StatusCode::OK, Json(item_response)))
+        let snapshots: Vec<(uuid::Uuid, Arc<Item>)> = state
+            .into_iter()
+            .map(|entry| (*entry.key(), Arc::clone(entry.value())))
+            .collect();
+        let mut results: Vec<ItemResponse> = Vec::new();
+        for (id, item) in snapshots {
+            if let Some(ref filter_name) = params.name {
+                if !item.name.contains(filter_name) { continue; }
+            }
+            if let Some(ref filter_desc) = params.desc {
+                if !item.desc.contains(filter_desc) { continue; }
+            }
+            results.push(ItemResponse { id, item });
+        }
+        Ok((StatusCode::OK, Json(results)))
     }
 
     #[tracing::instrument(skip_all, err)]
     pub async fn update(
-        Valid(Path(id)): Valid<Path<GetPathId>>,
+        Valid(Path(GetPathId{ id })): Valid<Path<GetPathId>>,
         Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,
         State(state): State<AppState<Item>>,
-    ) -> AppResult<impl IntoResponse> {
-        Ok((StatusCode::OK, Json(item_response)))
+        ) -> AppResult<impl IntoResponse> {
+            let mut entry = state
+                .get_mut(&id)
+                .ok_or_else(|_| AppError::NotFound(id.to_string()))?;
+            let item_arc_mut = entry.value_mut();
+            let item = Arc::make_mut(item_arc_mut);
+            item.edit(payload);
+            let item_response = ItemResponse { id, Arc::clone(item_arc_mut), };
+            Ok((StatusCode::OK, Json(item_response)))
     }
 
     #[tracing::instrument(skip_all, err)]
@@ -281,10 +316,12 @@ pub mod items {
 
     impl Item {
         fn new(name: impl Into<String>, desc: impl Into<String>) -> Self {
-            Self {
-                name.into(),
-                desc.into(),
-            }
+            Self { name.into(), desc.into(), }
+        }
+
+        fn edit(&mut self, payload: UpdateJsonPayload) {
+            if let Some(name) = payload.name { self.name = name; }
+            if let Some(desc) = payload.desc { self.desc = desc; }
         }
     }
 
@@ -304,10 +341,7 @@ pub mod items {
 
     impl From<CreateJsonPayload> for Item {
         fn from(payload: CreateJsonPayload) -> Self {
-            Self {
-                payload.name,
-                payload.desc,
-            }
+            Self { payload.name, payload.desc, }
         }
     }
 
@@ -341,18 +375,6 @@ pub mod items {
         name: Option<String>,
         #[validate(length(min = 1, message = "field in update json payload is missing!"))]
         desc: Option<String>,
-    }
-
-    impl From<Item, UpdateJsonPayload> for Item {
-        fn from(item: Item, payload: UpdateJsonPayload) -> Self {
-            if let Some(n) = payload.name {
-                item.name = n;
-            }
-            if let Some(d) = payload.desc {
-                item.desc = d;
-            }
-            item
-        }
     }
 }
 pub mod tools {

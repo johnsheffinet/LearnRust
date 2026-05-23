@@ -223,6 +223,17 @@ pub mod items {
     pub type AppResult<T> = Result<T, AppError>;
 
     #[tracing::instrument(skip_all, err)]
+    pub async fn routes<S>() -> axum::Router<S> 
+    where
+        AppState<Item>: axum::extract::FromRef<S>,
+        S: Clone + Send + Sync + 'static,
+    {
+        axum::Router::new()
+            .route("/items", axum::routing::get(select).post(create))
+            .route("/items/{id}", axum::routing::get(get).delete(delete).put(update))
+    }
+
+    #[tracing::instrument(skip_all, err)]
     pub async fn create(
         Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,
         State(state): State<AppState<Item>>,
@@ -295,17 +306,6 @@ pub mod items {
             item.edit(payload);
             let item_response = ItemResponse { id, item: Arc::clone(item_arc_mut), };
             Ok((StatusCode::OK, Json(item_response)))
-    }
-
-    #[tracing::instrument(skip_all, err)]
-    pub async fn routes<S>() -> axum::Router<S> 
-    where
-        AppState<Item>: axum::extract::FromRef<S>,
-        S: Clone + Send + Sync + 'static,
-    {
-        axum::Router::new()
-            .route("/items", axum::routing::get(select).post(create))
-            .route("/items/{id}", axum::routing::get(get).delete(delete).put(update))
     }
 
     #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

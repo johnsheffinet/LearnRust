@@ -275,20 +275,43 @@ pub mod items {
         Valid(Query(params)): Valid<Query<SelectQueryParams>>,
         State(state): State<AppState<Item>>,
     ) -> AppResult<impl IntoResponse> {
-        let snapshots: Vec<(uuid::Uuid, Arc<Item>)> = state
-            .into_iter()
-            .map(|entry| (*entry.key(), Arc::clone(entry.value())))
+        let results: Vec<ItemResponse> = state
+            .iter()
+            .filter_map(|entry| {
+                let item = entry.value();
+        
+                if let Some(ref filter_name) = params.name {
+                    if !item.name.contains(filter_name) {
+                        return None;
+                    }
+                }
+        
+                if let Some(ref filter_desc) = params.desc {
+                    if !item.desc.contains(filter_desc) {
+                        return None;
+                    }
+                }
+        
+                Some(ItemResponse {
+                    id: *entry.key(),
+                    item: Arc::clone(item),
+                })
+            })
             .collect();
-        let mut results: Vec<ItemResponse> = Vec::new();
-        for (id, item) in snapshots {
-            if let Some(ref filter_name) = params.name {
-                if !item.name.contains(filter_name) { continue; }
-            }
-            if let Some(ref filter_desc) = params.desc {
-                if !item.desc.contains(filter_desc) { continue; }
-            }
-            results.push(ItemResponse { id, item: Arc::clone(&item) });
-        }
+        // let snapshots: Vec<(uuid::Uuid, Arc<Item>)> = state
+        //     .into_iter()
+        //     .map(|entry| (*entry.key(), Arc::clone(entry.value())))
+        //     .collect();
+        // let mut results: Vec<ItemResponse> = Vec::new();
+        // for (id, item) in snapshots {
+        //     if let Some(ref filter_name) = params.name {
+        //         if !item.name.contains(filter_name) { continue; }
+        //     }
+        //     if let Some(ref filter_desc) = params.desc {
+        //         if !item.desc.contains(filter_desc) { continue; }
+        //     }
+        //     results.push(ItemResponse { id, item: Arc::clone(&item) });
+        // }
         Ok((StatusCode::OK, Json(results)))
     }
 
@@ -315,9 +338,9 @@ pub mod items {
     }
 
     impl Item {
-        fn new(name: impl Into<String>, desc: impl Into<String>) -> Self {
-            Self { name: name.into(), desc: desc.into(), }
-        }
+        // fn new(name: impl Into<String>, desc: impl Into<String>) -> Self {
+        //     Self { name: name.into(), desc: desc.into(), }
+        // }
 
         fn edit(&mut self, payload: UpdateJsonPayload) {
             if let Some(name) = payload.name { self.name = name; }
@@ -345,21 +368,21 @@ pub mod items {
         }
     }
 
-    #[derive(Debug, serde::Deserialize, validator::Validate)]
+    #[derive(Debug, serde::Deserialize/*, validator::Validate*/)]
     pub struct GetPathId {
-        #[validate(custom(function = "GetPathId::validate_is_v4", message = "field in path is invalid!"))]
+        // #[validate(custom(function = "GetPathId::validate_is_v4", message = "field in path is invalid!"))]
         id: uuid::Uuid,
     }
 
-    impl GetPathId {
-        fn validate_is_v4(id: &uuid::Uuid) -> Result<(), validator::ValidationError> {
-            if id.get_version_num() == 4 {
-                Ok(())
-            } else {
-                Err(validator::ValidationError::new())
-            }
-        }
-    }
+    // impl GetPathId {
+    //     fn validate_is_v4(id: &uuid::Uuid) -> Result<(), validator::ValidationError> {
+    //         if id.get_version_num() == 4 {
+    //             Ok(())
+    //         } else {
+    //             Err(validator::ValidationError::new())
+    //         }
+    //     }
+    // }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
     pub struct SelectQueryParams {

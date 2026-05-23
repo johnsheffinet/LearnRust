@@ -239,9 +239,9 @@ pub mod items {
         State(state): State<AppState<Item>>,
     ) -> AppResult<impl IntoResponse> {
         let id = uuid::Uuid::new_v4();
-        let item = Arc::new(payload.into());
-        state.insert(id, Arc::clone(&item));
-        let item_response = ItemResponse { id, item: (*item).clone(), };
+        let item = payload.into();
+        state.insert(id, Arc::new(item));
+        let item_response = ItemResponse { id, item: item.clone(), };
         Ok((StatusCode::CREATED, Json(item_response)))
     }
 
@@ -254,19 +254,19 @@ pub mod items {
             .remove(&id)
             .ok_or_else(|| AppError::NotFound(id.to_string()))?;
         let item_response = ItemResponse { id, item: (*item).clone(), };
-        Ok((StatusCode::OK, Json(item_response)))
+        Ok((StatusCode::NO_CONTENT, Json(item_response)))
     }
 
     #[tracing::instrument(skip_all, err)]
     pub async fn get(
-        Path(GetPathId{ id }): Path<GetPathId>,
+        Path(GetPathId { id }): Path<GetPathId>,
         State(state): State<AppState<Item>>,
     ) -> AppResult<impl IntoResponse> {
         let item = state
             .get(&id)
-            .map(|entry| Arc::clone(entry.value()))
+            .map(|entry| (*entry.value()).clone())
             .ok_or_else(|| AppError::NotFound(id.to_string()))?;
-        let item_response = ItemResponse { id, item: (*item).clone(), };
+        let item_response = ItemResponse { id, item };
         Ok((StatusCode::OK, Json(item_response)))
     }
 
@@ -295,20 +295,6 @@ pub mod items {
                 Some(ItemResponse { id: *entry.key(), item: (*item).clone() })
             })
             .collect();
-        // let snapshots: Vec<(uuid::Uuid, Arc<Item>)> = state
-        //     .into_iter()
-        //     .map(|entry| (*entry.key(), Arc::clone(entry.value())))
-        //     .collect();
-        // let mut results: Vec<ItemResponse> = Vec::new();
-        // for (id, item) in snapshots {
-        //     if let Some(ref filter_name) = params.name {
-        //         if !item.name.contains(filter_name) { continue; }
-        //     }
-        //     if let Some(ref filter_desc) = params.desc {
-        //         if !item.desc.contains(filter_desc) { continue; }
-        //     }
-        //     results.push(ItemResponse { id, item: Arc::clone(&item) });
-        // }
         Ok((StatusCode::OK, Json(results)))
     }
 
@@ -329,16 +315,12 @@ pub mod items {
     }
 
     #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-    pub struct Item {
+    struct Item {
         name: String,
         desc: String,
     }
 
     impl Item {
-        // fn new(name: impl Into<String>, desc: impl Into<String>) -> Self {
-        //     Self { name: name.into(), desc: desc.into(), }
-        // }
-
         fn edit(&mut self, payload: UpdateJsonPayload) {
             if let Some(name) = payload.name { self.name = name; }
             if let Some(desc) = payload.desc { self.desc = desc; }
@@ -346,13 +328,13 @@ pub mod items {
     }
 
     #[derive(Debug, serde::Serialize)]
-    pub struct ItemResponse {
+    struct ItemResponse {
         id: uuid::Uuid,
         item: Item,
     }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
-    pub struct CreateJsonPayload {
+    struct CreateJsonPayload {
         #[validate(length(min = 1, message = "field in create json payload is missing!"))]
         name: String,
         #[validate(length(min = 1, message = "field in create json payload is missing!"))]
@@ -365,24 +347,13 @@ pub mod items {
         }
     }
 
-    #[derive(Debug, serde::Deserialize/*, validator::Validate*/)]
-    pub struct GetPathId {
-        // #[validate(custom(function = "GetPathId::validate_is_v4", message = "field in path is invalid!"))]
+    #[derive(Debug, serde::Deserialize)]
+    struct GetPathId {
         id: uuid::Uuid,
     }
 
-    // impl GetPathId {
-    //     fn validate_is_v4(id: &uuid::Uuid) -> Result<(), validator::ValidationError> {
-    //         if id.get_version_num() == 4 {
-    //             Ok(())
-    //         } else {
-    //             Err(validator::ValidationError::new())
-    //         }
-    //     }
-    // }
-
     #[derive(Debug, serde::Deserialize, validator::Validate)]
-    pub struct SelectQueryParams {
+    struct SelectQueryParams {
         #[validate(length(min = 1, message = "field in select query params is missing!"))]
         name: Option<String>,
         #[validate(length(min = 1, message = "field in select query params is missing!"))]
@@ -390,7 +361,7 @@ pub mod items {
     }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
-    pub struct UpdateJsonPayload {
+    struct UpdateJsonPayload {
         #[validate(length(min = 1, message = "field in update json payload is missing!"))]
         name: Option<String>,
         #[validate(length(min = 1, message = "field in update json payload is missing!"))]

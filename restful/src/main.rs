@@ -241,7 +241,7 @@ pub mod items {
         let id = uuid::Uuid::new_v4();
         let item = Arc::new(payload.into());
         state.insert(id, Arc::clone(&item));
-        let item_response = ItemResponse { id, item: Arc::clone(&item) };
+        let item_response = ItemResponse { id, item: (*item).clone(), };
         Ok((StatusCode::CREATED, Json(item_response)))
     }
 
@@ -253,7 +253,7 @@ pub mod items {
         let (_, item) = state
             .remove(&id)
             .ok_or_else(|| AppError::NotFound(id.to_string()))?;
-        let item_response = ItemResponse { id, item: Arc::clone(&item) };
+        let item_response = ItemResponse { id, item: (*item).clone(), };
         Ok((StatusCode::OK, Json(item_response)))
     }
 
@@ -266,7 +266,7 @@ pub mod items {
             .get(&id)
             .map(|entry| Arc::clone(entry.value()))
             .ok_or_else(|| AppError::NotFound(id.to_string()))?;
-        let item_response = ItemResponse { id, item: Arc::clone(&item) };
+        let item_response = ItemResponse { id, item: (*item).clone(), };
         Ok((StatusCode::OK, Json(item_response)))
     }
 
@@ -292,10 +292,7 @@ pub mod items {
                     }
                 }
         
-                Some(ItemResponse {
-                    id: *entry.key(),
-                    item: Arc::clone(item),
-                })
+                Some(ItemResponse { id: *entry.key(), item: item: (*item).clone() })
             })
             .collect();
         // let snapshots: Vec<(uuid::Uuid, Arc<Item>)> = state

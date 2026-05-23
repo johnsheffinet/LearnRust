@@ -279,6 +279,15 @@ pub mod items {
         desc: String,
     }
 
+    impl Item {
+        fn new(name: impl Into<String>, desc: impl Into<String>) -> Self {
+            Self {
+                name.into(),
+                desc.into(),
+            }
+        }
+    }
+
     #[derive(Debug, serde::Serialize)]
     pub struct ItemResponse {
         id: uuid::Uuid,
@@ -291,6 +300,15 @@ pub mod items {
         name: String,
         #[validate(length(min = 1, message = "field in create json payload is missing!"))]
         desc: String,
+    }
+
+    impl From<CreateJsonPayload> for Item {
+        fn from(payload: CreateJsonPayload) -> Self {
+            Self {
+                payload.name,
+                payload.desc,
+            }
+        }
     }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
@@ -323,6 +341,18 @@ pub mod items {
         name: Option<String>,
         #[validate(length(min = 1, message = "field in update json payload is missing!"))]
         desc: Option<String>,
+    }
+
+    impl From<Item, UpdateJsonPayload> for Item {
+        fn from(item: Item, payload: UpdateJsonPayload) -> Self {
+            if let Some(n) = payload.name {
+                item.name = n;
+            }
+            if let Some(d) = payload.desc {
+                item.desc = d;
+            }
+            item
+        }
     }
 }
 pub mod tools {

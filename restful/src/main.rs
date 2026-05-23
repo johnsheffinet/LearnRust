@@ -254,7 +254,7 @@ pub mod items {
             .remove(&id)
             .ok_or_else(|| AppError::NotFound(id.to_string()))?;
         let item_response = ItemResponse { id, item: (*item).clone(), };
-        Ok((StatusCode::NO_CONTENT, Json(item_response)))
+        Ok((StatusCode::OK, Json(item_response)))
     }
 
     #[tracing::instrument(skip_all, err)]

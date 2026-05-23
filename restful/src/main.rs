@@ -230,7 +230,7 @@ pub mod items {
         let id = uuid::Uuid::new_v4();
         let item = Arc::new(payload.into());
         state.insert(id, Arc::clone(&item));
-        let item_response = ItemResponse { id, item };
+        let item_response = ItemResponse { id, item: Arc::clone(&item) };
         Ok((StatusCode::CREATED, Json(item_response)))
     }
 
@@ -242,7 +242,7 @@ pub mod items {
         let (_, item) = state
             .remove(&id)
             .ok_or_else(|| AppError::NotFound(id.to_string()))?;
-        let item_response = ItemResponse { id, item };
+        let item_response = ItemResponse { id, item: Arc::clone(&item) };
         Ok((StatusCode::OK, Json(item_response)))
     }
 
@@ -255,7 +255,7 @@ pub mod items {
             .get(&id)
             .map(|entry| Arc::clone(entry.value()))
             .ok_or_else(|| AppError::NotFound(id.to_string()))?;
-        let item_response = ItemResponse { id, item };
+        let item_response = ItemResponse { id, item: Arc::clone(&item) };
         Ok((StatusCode::OK, Json(item_response)))
     }
 
@@ -276,7 +276,7 @@ pub mod items {
             if let Some(ref filter_desc) = params.desc {
                 if !item.desc.contains(filter_desc) { continue; }
             }
-            results.push(ItemResponse { id, item });
+            results.push(ItemResponse { id, item: Arc::clone(&item) });
         }
         Ok((StatusCode::OK, Json(results)))
     }
@@ -284,16 +284,16 @@ pub mod items {
     #[tracing::instrument(skip_all, err)]
     pub async fn update(
         Valid(Path(GetPathId{ id })): Valid<Path<GetPathId>>,
-        Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,
+        Valid(Json(payload)): Valid<Json<UpdateJsonPayload>>,
         State(state): State<AppState<Item>>,
         ) -> AppResult<impl IntoResponse> {
             let mut entry = state
                 .get_mut(&id)
-                .ok_or_else(|_| AppError::NotFound(id.to_string()))?;
+                .ok_or_else(|| AppError::NotFound(id.to_string()))?;
             let item_arc_mut = entry.value_mut();
             let item = Arc::make_mut(item_arc_mut);
             item.edit(payload);
-            let item_response = ItemResponse { id, Arc::clone(item_arc_mut), };
+            let item_response = ItemResponse { id, item: Arc::clone(item_arc_mut), };
             Ok((StatusCode::OK, Json(item_response)))
     }
 
@@ -316,7 +316,7 @@ pub mod items {
 
     impl Item {
         fn new(name: impl Into<String>, desc: impl Into<String>) -> Self {
-            Self { name.into(), desc.into(), }
+            Self { name: name.into(), desc: desc.into(), }
         }
 
         fn edit(&mut self, payload: UpdateJsonPayload) {
@@ -328,7 +328,7 @@ pub mod items {
     #[derive(Debug, serde::Serialize)]
     pub struct ItemResponse {
         id: uuid::Uuid,
-        item: Item,
+        item: Arc<Item>,
     }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
@@ -341,7 +341,7 @@ pub mod items {
 
     impl From<CreateJsonPayload> for Item {
         fn from(payload: CreateJsonPayload) -> Self {
-            Self { payload.name, payload.desc, }
+            Self { name: payload.name, desc: payload.desc, }
         }
     }
 

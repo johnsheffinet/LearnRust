@@ -223,7 +223,7 @@ pub mod items {
     pub type AppResult<T> = Result<T, AppError>;
 
     #[tracing::instrument(skip_all, err)]
-    pub async fn routes<S>() -> axum::Router<S> 
+    pub fn routes<S>() -> axum::Router<S> 
     where
         AppState<Item>: axum::extract::FromRef<S>,
         S: Clone + Send + Sync + 'static,
@@ -247,7 +247,7 @@ pub mod items {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn delete(
-        Valid(Path(GetPathId{ id })): Valid<Path<GetPathId>>,
+        Path(GetPathId{ id }): Path<GetPathId>,
         State(state): State<AppState<Item>>,
     ) -> AppResult<impl IntoResponse> {
         let (_, item) = state
@@ -259,7 +259,7 @@ pub mod items {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn get(
-        Valid(Path(GetPathId{ id })): Valid<Path<GetPathId>>,
+        Path(GetPathId{ id }): Path<GetPathId>,
         State(state): State<AppState<Item>>,
     ) -> AppResult<impl IntoResponse> {
         let item = state
@@ -292,7 +292,7 @@ pub mod items {
                     }
                 }
         
-                Some(ItemResponse { id: *entry.key(), item: item: (*item).clone() })
+                Some(ItemResponse { id: *entry.key(), item: (*item).clone() })
             })
             .collect();
         // let snapshots: Vec<(uuid::Uuid, Arc<Item>)> = state
@@ -314,7 +314,7 @@ pub mod items {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn update(
-        Valid(Path(GetPathId{ id })): Valid<Path<GetPathId>>,
+        Path(GetPathId{ id }): Path<GetPathId>,
         Valid(Json(payload)): Valid<Json<UpdateJsonPayload>>,
         State(state): State<AppState<Item>>,
         ) -> AppResult<impl IntoResponse> {
@@ -324,7 +324,7 @@ pub mod items {
             let item_arc_mut = entry.value_mut();
             let item = Arc::make_mut(item_arc_mut);
             item.edit(payload);
-            let item_response = ItemResponse { id, item: Arc::clone(item_arc_mut), };
+            let item_response = ItemResponse { id, item: (*item_arc_mut).clone(), };
             Ok((StatusCode::OK, Json(item_response)))
     }
 
@@ -348,7 +348,7 @@ pub mod items {
     #[derive(Debug, serde::Serialize)]
     pub struct ItemResponse {
         id: uuid::Uuid,
-        item: Arc<Item>,
+        item: Item,
     }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]

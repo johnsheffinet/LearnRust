@@ -883,6 +883,29 @@ mod tests {
             pretty_assertions::assert_eq!(actual_res_params, expected_res_params);
         }
     }
+    mod items {
+        use axum_test::TestServer;
+        use testcase::testcase;
+
+        #[testcase(
+            request_payload: Json::Value,
+            expected_statuscode: StatusCode,
+            expected_response_payload: Json::Value,
+        )]
+        async fn test_create(
+            request_payload: Json::Value,
+            expected_statuscode: StatusCode,
+            expected_response_payload: Json::Value,            
+        ) {
+            let state = ;
+
+            let server = ;
+        }
+        async fn test_delete() {}
+        async fn test_get() {}
+        async fn test_select() {}
+        async fn test_update() {}
+    }
 }
 
 #[tokio::main]

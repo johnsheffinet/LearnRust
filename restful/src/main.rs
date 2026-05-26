@@ -41,7 +41,7 @@ pub mod config {
 
     impl AppConfig {
         #[tracing::instrument(skip_all, err)]
-        pub fn new() -> AppResult<AppConfig> {
+        async fn new() -> AppResult<AppConfig> {
             let http_addr_raw = std::env::var("HTTP_ADDR")
                 .map_err(|src| AppError::FailedFindEnvVar(src, "HTTP_ADDR".into()))?;
             let http_addr = http_addr_raw
@@ -96,24 +96,9 @@ pub mod config {
         
     pub type AppState<T> = Arc<dashmap::DashMap<uuid::Uuid, Arc<T>>>;
 
-    #[derive(Clone)]
+    #[derive(Clone, Default)]
     pub struct AppStates {
         items: AppState<Item>,
-    }
-
-    impl AppStates {
-        pub fn new(test: Option<String>) -> Self {
-            let id = uuid::Uuid::nil();
-            let items = Arc::new(dashmap::DashMap::new());
-
-            if test.is_some() {
-                items.insert(id, Arc::new(Item::new("Test", "This is a test")));
-            }
-
-            Self {
-                items,
-            }
-        }
     }
 
     impl FromRef<AppStates> for AppState<Item> {
@@ -122,18 +107,15 @@ pub mod config {
         } 
     }
 
-    pub fn build_http_router() -> axum::Router<()> {
+    pub fn http_router() -> axum::Router<()> {
         axum::Router::new()
             .fallback(handlers::redirect_to_https)
     }
 
-    pub fn build_https_router(states: AppStates) -> axum::Router<AppStates> {
-        let item_routes = items::routes::<AppState<Item>>()
-            .map_state(|outer_state: AppStates| AppState::<Item>::from_ref(&outer_state));
-
-        axum::Router::new()
-            .merge(item_routes)
-            .route("/healthz", axum::routing::get(handlers::check_app_liveliness))
+    pub fn https_router(states: AppStates) -> Router<AppStates> {
+        Router::new()
+            .merge(items::routes::<AppStates>())
+            .route("/healthz", get(handlers::check_app_liveliness))
             .fallback(handlers::report_invalid_route)
             .with_state(states)
     }

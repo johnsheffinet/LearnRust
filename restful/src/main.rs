@@ -4,9 +4,11 @@ pub mod config {
     use axum_server::tls_rustls::RustlsConfig;
     use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
     use std::sync::{Arc, LazyLock};
-    
-    pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| AppConfig::new().unwrap());
 
+    pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| {
+        AppConfig::new()
+            .unwrap_or_else(|err| panic!("Failed to initialize configuration! {err:?}"))
+    });
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
         #[error("Failed to find {1} environment variable! {0}")]

@@ -41,7 +41,7 @@ pub mod config {
 
     impl AppConfig {
         #[tracing::instrument(skip_all, err)]
-        async fn new() -> AppResult<AppConfig> {
+        fn new() -> AppResult<AppConfig> {
             let http_addr_raw = std::env::var("HTTP_ADDR")
                 .map_err(|src| AppError::FailedFindEnvVar(src, "HTTP_ADDR".into()))?;
             let http_addr = http_addr_raw
@@ -112,10 +112,10 @@ pub mod config {
             .fallback(handlers::redirect_to_https)
     }
 
-    pub fn https_router(states: AppStates) -> Router<AppStates> {
-        Router::new()
+    pub fn https_router(states: AppStates) -> axum::Router<AppStates> {
+        axum::Router::new()
             .merge(items::routes::<AppStates>())
-            .route("/healthz", get(handlers::check_app_liveliness))
+            .route("/healthz", axum::routing::get(handlers::check_app_liveliness))
             .fallback(handlers::report_invalid_route)
             .with_state(states)
     }

@@ -48,7 +48,7 @@ pub mod config {
 
     impl AppConfig {
         #[tracing::instrument(skip_all, err)]
-        async fn new() -> AppResult<AppConfig> {
+        pub async fn new() -> AppResult<AppConfig> {
             let http_addr_raw = std::env::var("HTTP_ADDR")
                 .map_err(|src| AppError::FailedFindEnvVar(src, "HTTP_ADDR".into()))?;
             let http_addr = http_addr_raw
@@ -74,11 +74,13 @@ pub mod config {
                 return Err(AppError::FailedFindCerts(cert_path));
             }
 
-            let key_path_raw = std::env::var("KEY_PATH")
-                .map_err(|src| AppError::FailedFindEnvVar(src, "KEY_PATH".into()))?;
-            let key_path = std::path::PathBuf::from(key_path_raw);
-            let key = PrivateKeyDer::from_pem_file(&key_path)
-                .map_err(|src| AppError::FailedOpenPEMFile(src, key_path.clone()))?;
+        let mut keys = PrivateKeyDer::pem_slice_iter(&key_pem)
+            .map_err(|src| AppError::FailedParseKeyPEM(src, key_path.clone()))?;
+        
+        let key = keys
+            .next()
+            .ok_or_else(|| AppError::FailedFindPrivateKey(key_path.clone()))?
+            .map_err(|src| AppError::FailedParseKeyPEM(src, key_path.clone()))?;
 
             let tls_config = RustlsConfig::from_der(
                 certs

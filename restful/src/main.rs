@@ -7,29 +7,29 @@ pub mod config {
 
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
-        #[error("Failed to find {1} environment variable! {0}")]
+        #[error("Failed to find environment variable {1}! {0}")]
         FailedFindEnvVar(#[source] std::env::VarError, String),
     
-        #[error("Failed to parse {1} socket address {0}")]
+        #[error("Failed to parse socket address {1}! {0}")]
         FailedParseSocketAddr(#[source] std::net::AddrParseError, String),
     
         #[error("Failed to open public key file {1}! {0}")]
-        FailedOpenPEMFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
+        FailedOpenPublicKeyFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
     
         #[error("Failed to read public key file {1}! {0}")]
-        FailedParsePEMFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
+        FailedReadPublicKeyFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
     
-        #[error("Failed to find valid certificates in PEM file {0}!")]
-        FailedFindCerts(std::path::PathBuf),
+        #[error("Failed to find public keys in PEM file {0}!")]
+        FailedFindPublicKeys(std::path::PathBuf),
     
         #[error("Failed to open private key file {1}! {0}")]
-        FailedOpenKeyFile(#[source] std::io::Error, std::path::PathBuf),
+        FailedOpenPrivateKeyFile(#[source] std::io::Error, std::path::PathBuf),
     
         #[error("Failed to read private key file {1}! {0}")]
-        FailedParseKeyPEM(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
+        FailedReadPrivateKeyFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
     
-        #[error("Failed to find valid keys in PEM file {0}!")]
-        FailedFindPrivateKey(std::path::PathBuf),
+        #[error("Failed to find private keys in PEM file {0}!")]
+        FailedFindPrivateKeys(std::path::PathBuf),
     
         #[error("Failed to configure TLS from file {1}! {0}")]
         FailedConfigTLS(#[source] std::io::Error, std::path::PathBuf),

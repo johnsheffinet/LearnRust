@@ -5,28 +5,33 @@ pub mod config {
     use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
     use std::sync::{Arc/*, LazyLock*/};
 
-    // pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| {
-    //     AppConfig::new()
-    //         .unwrap_or_else(|err| panic!("Failed to initialize configuration! {err:?}"))
-    // });
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
         #[error("Failed to find {1} environment variable! {0}")]
         FailedFindEnvVar(#[source] std::env::VarError, String),
-
+    
         #[error("Failed to parse {1} socket address {0}")]
         FailedParseSocketAddr(#[source] std::net::AddrParseError, String),
-
-        #[error("Failed to open {1} PEM file! {0}")]
+    
+        #[error("Failed to open public key file {1}! {0}")]
         FailedOpenPEMFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
-
-        #[error("Failed to parse {1} PEM file! {0}")]
+    
+        #[error("Failed to read public key file {1}! {0}")]
         FailedParsePEMFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
-
-        #[error("Failed to find valid certificates in {0} PEM file!")]
+    
+        #[error("Failed to find valid certificates in PEM file {0}!")]
         FailedFindCerts(std::path::PathBuf),
-
-        #[error("Failed to configure TLS from {1} file! {0}")]
+    
+        #[error("Failed to open private key file {1}! {0}")]
+        FailedOpenKeyFile(#[source] std::io::Error, std::path::PathBuf),
+    
+        #[error("Failed to read private key file {1}! {0}")]
+        FailedParseKeyPEM(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
+    
+        #[error("Failed to find valid keys in PEM file {0}!")]
+        FailedFindPrivateKey(std::path::PathBuf),
+    
+        #[error("Failed to configure TLS from file {1}! {0}")]
         FailedConfigTLS(#[source] std::io::Error, std::path::PathBuf),
     }
 

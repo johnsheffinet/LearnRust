@@ -3,12 +3,12 @@ pub mod config {
     use axum::extract::FromRef;
     use axum_server::tls_rustls::RustlsConfig;
     use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
-    use std::sync::{Arc, LazyLock};
+    use std::sync::{Arc/*, LazyLock*/};
 
-    pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| {
-        AppConfig::new()
-            .unwrap_or_else(|err| panic!("Failed to initialize configuration! {err:?}"))
-    });
+    // pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| {
+    //     AppConfig::new()
+    //         .unwrap_or_else(|err| panic!("Failed to initialize configuration! {err:?}"))
+    // });
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
         #[error("Failed to find {1} environment variable! {0}")]
@@ -43,7 +43,7 @@ pub mod config {
 
     impl AppConfig {
         #[tracing::instrument(skip_all, err)]
-        fn new() -> AppResult<AppConfig> {
+        async fn new() -> AppResult<AppConfig> {
             let http_addr_raw = std::env::var("HTTP_ADDR")
                 .map_err(|src| AppError::FailedFindEnvVar(src, "HTTP_ADDR".into()))?;
             let http_addr = http_addr_raw
@@ -75,7 +75,7 @@ pub mod config {
             let key = PrivateKeyDer::from_pem_file(&key_path)
                 .map_err(|src| AppError::FailedOpenPEMFile(src, key_path.clone()))?;
 
-            let tls_config = futures::executor::block_on(RustlsConfig::from_der(
+            let tls_config = RustlsConfig::from_der(
                 certs
                     .into_iter()
                     .map(|cert| cert.to_vec())
@@ -83,7 +83,8 @@ pub mod config {
                 key
                     .secret_der()
                     .to_vec(),
-            ))
+            )
+                .await
                 .map_err(|src| AppError::FailedConfigTLS(src, cert_path.clone()))?;
 
             Ok(AppConfig {
@@ -109,12 +110,12 @@ pub mod config {
         } 
     }
 
-    pub fn http_router() -> axum::Router<()> {
+    pub  fn http_router() -> axum::Router<()> {
         axum::Router::new()
             .fallback(handlers::redirect_to_https)
     }
 
-    pub fn https_router(states: AppStates) -> axum::Router<AppStates> {
+    pub  fn https_router(states: AppStates) -> axum::Router<AppStates> {
         axum::Router::new()
             .merge(items::routes::<AppStates>())
             .route("/healthz", axum::routing::get(handlers::check_app_liveliness))

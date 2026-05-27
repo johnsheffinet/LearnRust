@@ -67,20 +67,26 @@ pub mod config {
 
             let certs = CertificateDer::pem_file_iter(&cert_path)
                 .map_err(|src| AppError::FailedOpenPEMFile(src, cert_path.clone()))?
-                .map(|rsl| rsl.map_err(|src| AppError::FailedParsePEMFile(src, cert_path.clone())))
+                .map(|result| result.map_err(|src| AppError::FailedParsePEMFile(src, cert_path.clone())))
                 .collect::<Result<Vec<_>, _>>()?;
 
             if certs.is_empty() {
                 return Err(AppError::FailedFindCerts(cert_path));
             }
 
-        let mut keys = PrivateKeyDer::pem_slice_iter(&key_pem)
-            .map_err(|src| AppError::FailedParseKeyPEM(src, key_path.clone()))?;
-        
-        let key = keys
-            .next()
-            .ok_or_else(|| AppError::FailedFindPrivateKey(key_path.clone()))?
-            .map_err(|src| AppError::FailedParseKeyPEM(src, key_path.clone()))?;
+            let key_pem = std::fs::read(&key_path)
+                .map_err(|src| AppError::FailedOpenKeyFile(src, key_path.clone()))?;
+            
+            let key = PrivateKeyDer::from_pem_slice(&key_pem)
+                .map_err(|src| AppError::FailedParseKeyPEM(src, key_path.clone()))?;
+
+            let mut keys = PrivateKeyDer::pem_slice_iter(&key_pem)
+                .map_err(|src| AppError::FailedParseKeyPEM(src, key_path.clone()))?;
+
+            let key = keys
+                .next()
+                .ok_or_else(|| AppError::FailedFindPrivateKey(key_path.clone()))?
+                .map_err(|src| AppError::FailedParseKeyPEM(src, key_path.clone()))?;
 
             let tls_config = RustlsConfig::from_der(
                 certs

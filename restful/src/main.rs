@@ -148,19 +148,18 @@ pub mod handlers {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn redirect_to_https(
-        req: axum::extract::Request,
+        cfg: crate::config::AppConfig,
+        uri: axum::http::Uri,
     ) -> AppResult<axum::response::Response> {
-        use crate::config::CONFIG;
         use axum::http::header::LOCATION;
 
         let status = axum::http::StatusCode::TEMPORARY_REDIRECT;
 
-        let path_query = req
-            .uri()
+        let path_query = uri
             .path_and_query()
             .map(|pq| pq.as_str())
             .unwrap_or("/");
-        let https_addr = CONFIG.https_addr;
+        let https_addr = cfg.https_addr;
         let location =
             axum::http::HeaderValue::try_from(&format!("https://{https_addr}{path_query}"))
                 .map_err(AppError::FailedCreateHeader)?;

@@ -1,6 +1,6 @@
 pub mod config {
     use crate::{handlers, items::{self, Item}};
-    use axum::extract::FromRef;
+    use axum::{extract::FromRef, Router};
     use axum_server::tls_rustls::RustlsConfig;
     use rustls_pki_types::pem::PemObject;
     use std::sync::Arc;
@@ -121,13 +121,14 @@ pub mod config {
         } 
     }
 
-    pub fn http_router() -> axum::Router<()> {
-        axum::Router::new()
+    pub fn http_router(config: AppConfig) -> Router<()> {
+        Router::new()
             .fallback(handlers::redirect_to_https)
+            .with_state(config)
     }
 
-    pub fn https_router(states: AppStates) -> axum::Router<AppStates> {
-        axum::Router::new()
+    pub fn https_router(states: AppStates) -> Router<AppStates> {
+        Router::new()
             .merge(items::routes::<AppStates>())
             .route("/healthz", axum::routing::get(handlers::check_app_liveliness))
             .fallback(handlers::report_invalid_route)

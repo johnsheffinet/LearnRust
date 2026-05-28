@@ -2,8 +2,8 @@ pub mod config {
     use crate::{handlers, items::{self, Item}};
     use axum::extract::FromRef;
     use axum_server::tls_rustls::RustlsConfig;
-    use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
-    use std::sync::{Arc/*, LazyLock*/};
+    use rustls_pki_types::pem::PemObject;
+    use std::sync::Arc;
 
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
@@ -65,24 +65,23 @@ pub mod config {
                 .map_err(|src| AppError::FailedFindEnvVar(src, "CERT_PATH".into()))?;
             let cert_path = std::path::PathBuf::from(cert_path_raw);
 
-            let certs = CertificateDer::pem_file_iter(&cert_path)
-                .map_err(|src| AppError::FailedOpenPEMFile(src, cert_path.clone()))?
-                .map(|result| result.map_err(|src| AppError::FailedParsePEMFile(src, cert_path.clone())))
+            let certs = rustls_pki_types::CertificateDer::pem_file_iter(&cert_path)
+                .map_err(|src| AppError::FailedOpenPublicKeyFile(src, cert_path.clone()))?
+                .map(|result| result.map_err(|src| AppError::FailedReadPublicKeyFile(src, cert_path.clone())))
                 .collect::<Result<Vec<_>, _>>()?;
 
             if certs.is_empty() {
-                return Err(AppError::FailedFindCerts(cert_path));
+                return Err(AppError::FailedFindPublicKeys(cert_path));
             }
 
-            let key_pem = std::fs::read(&key_path)
-                .map_err(|src| AppError::FailedOpenKeyFile(src, key_path.clone()))?;
-            
-            let key = PrivateKeyDer::from_pem_slice(&key_pem)
-                .map_err(|src| AppError::FailedParseKeyPEM(src, key_path.clone()))?;
+            let key_path_raw = std::env::var("KEY_PATH")
+                .map_err(|src| AppError::FailedFindEnvVar(src, "KEY_PATH".into()))?;
+            let key_path = std::path::PathBuf::from(key_path_raw);
 
-            let mut keys = PrivateKeyDer::pem_slice_iter(&key_pem)
-                .map_err(|src| AppError::FailedParseKeyPEM(src, key_path.clone()))?;
-
+            let key_pem_file = std::fs::read(&key_path)
+                .map_err(|src| AppError::FailedOpenPrivateKeyFile(src, key_path.clone()))?;
+            let mut keys = rustls_pki_types::PrivateKeyDer::pem_slice_iter(&key_pem_file)
+                .map_err(|src| AppError::FailedReadPrivateKeyFile(src, key_path.clone()))?;
             let key = keys
                 .next()
                 .ok_or_else(|| AppError::FailedFindPrivateKey(key_path.clone()))?

@@ -84,8 +84,8 @@ pub mod config {
                 .map_err(|src| AppError::FailedReadPrivateKeyFile(src, key_path.clone()))?;
             let key = keys
                 .next()
-                .ok_or_else(|| AppError::FailedFindPrivateKey(key_path.clone()))?
-                .map_err(|src| AppError::FailedParseKeyPEM(src, key_path.clone()))?;
+                .ok_or_else(|| AppError::FailedFindPrivateKeys(key_path.clone()))?
+                .map_err(|src| AppError::FailedReadPrivateKeyFile(src, key_path.clone()))?;
 
             let tls_config = RustlsConfig::from_der(
                 certs
@@ -122,12 +122,12 @@ pub mod config {
         } 
     }
 
-    pub  fn http_router() -> axum::Router<()> {
+    pub fn http_router() -> axum::Router<()> {
         axum::Router::new()
             .fallback(handlers::redirect_to_https)
     }
 
-    pub  fn https_router(states: AppStates) -> axum::Router<AppStates> {
+    pub fn https_router(states: AppStates) -> axum::Router<AppStates> {
         axum::Router::new()
             .merge(items::routes::<AppStates>())
             .route("/healthz", axum::routing::get(handlers::check_app_liveliness))

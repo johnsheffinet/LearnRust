@@ -906,7 +906,9 @@ mod tests {
 
 #[tokio::main]
 async fn main() {
+    use crate::config::AppConfig;
+    
     tracing_subscriber::fmt::init();
 
-    std::sync::LazyLock::force(&config::CONFIG);
+    let cfg = AppConfig::new();
 }

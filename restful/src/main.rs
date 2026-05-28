@@ -9,28 +9,28 @@ pub mod config {
     pub enum AppError {
         #[error("Failed to find environment variable {1}! {0}")]
         FailedFindEnvVar(#[source] std::env::VarError, String),
-    
+
         #[error("Failed to parse socket address {1}! {0}")]
         FailedParseSocketAddr(#[source] std::net::AddrParseError, String),
-    
+
         #[error("Failed to open public key file {1}! {0}")]
         FailedOpenPublicKeyFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
-    
+
         #[error("Failed to read public key file {1}! {0}")]
         FailedReadPublicKeyFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
-    
+
         #[error("Failed to find public keys in PEM file {0}!")]
         FailedFindPublicKeys(std::path::PathBuf),
-    
+
         #[error("Failed to open private key file {1}! {0}")]
         FailedOpenPrivateKeyFile(#[source] std::io::Error, std::path::PathBuf),
-    
+
         #[error("Failed to read private key file {1}! {0}")]
         FailedReadPrivateKeyFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
-    
+
         #[error("Failed to find private keys in PEM file {0}!")]
         FailedFindPrivateKeys(std::path::PathBuf),
-    
+
         #[error("Failed to configure TLS from file {1}! {0}")]
         FailedConfigTLS(#[source] std::io::Error, std::path::PathBuf),
     }
@@ -69,7 +69,6 @@ pub mod config {
                 .map_err(|src| AppError::FailedOpenPublicKeyFile(src, cert_path.clone()))?
                 .map(|result| result.map_err(|src| AppError::FailedReadPublicKeyFile(src, cert_path.clone())))
                 .collect::<Result<Vec<_>, _>>()?;
-
             if certs.is_empty() {
                 return Err(AppError::FailedFindPublicKeys(cert_path));
             }
@@ -108,7 +107,7 @@ pub mod config {
             })
         }
     }
-        
+
     pub type AppState<T> = Arc<dashmap::DashMap<uuid::Uuid, Arc<T>>>;
 
     #[derive(Clone, Default)]

@@ -135,60 +135,77 @@ pub mod config {
     }
 }
 pub mod handlers {
-    use axum::response::IntoResponse;
+    // use axum::response::IntoResponse;
+    use axum::{Json, response::IntoResponse, http::{{header::{InvalidHeaderValue, LOCATION}, Uri}, StatusCode}};
+    use serde_json::json;
+
 
     #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
     pub enum AppError {
         #[error("Failed to create header! {0}")]
-        #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedCreateHeader(axum::http::header::InvalidHeaderValue),
+        #[status(StatusCode::INTERNAL_SERVER_ERROR)]
+        FailedCreateHeader(InvalidHeaderValue),
     }
 
     type AppResult<T> = Result<T, AppError>;
 
     #[tracing::instrument(skip_all, err)]
     pub async fn redirect_to_https(
-        cfg: crate::config::AppConfig,
-        uri: axum::http::Uri,
-    ) -> AppResult<axum::response::Response> {
-        use axum::http::header::LOCATION;
+        State(config): State<Arc<crate::config::AppConfig>>,
+        uri: Uri,
+    ) -> AppResult<impl IntoResponse> {
+        // use axum::{Json, http::{header::LOCATION, StatusCode}};
+        // use serde_json::json;
 
-        let status = axum::http::StatusCode::TEMPORARY_REDIRECT;
+        // let status = axum::http::StatusCode::TEMPORARY_REDIRECT;
 
         let path_query = uri
             .path_and_query()
             .map(|pq| pq.as_str())
             .unwrap_or("/");
-        let https_addr = cfg.https_addr;
+        let https_addr = config.https_addr;
         let location =
             axum::http::HeaderValue::try_from(&format!("https://{https_addr}{path_query}"))
                 .map_err(AppError::FailedCreateHeader)?;
 
-        let body = axum::Json(
-            serde_json::json!({ "status": format!("Temporarily redirecting to {location:?}.") }),
-        );
+        // let body = axum::Json(
+        //     serde_json::json!({ "status": format!("Temporarily redirecting to {location:?}.") }),
+        // );
 
-        Ok((status, [(LOCATION, location)], body).into_response())
+        // Ok((status, [(LOCATION, location)], body))
+        Ok((
+            StatusCode::TEMPORARY_REDIRECT,
+            [(LOCATION, location)],
+            Json(json!({ "status": format!("Temporarily redirecting to {location:?}.") }))
+        ))
     }
 
     #[tracing::instrument(skip_all, err)]
-    pub async fn check_app_liveliness() -> AppResult<axum::response::Response> {
-        let status = axum::http::StatusCode::OK;
+    pub async fn check_app_liveliness() -> AppResult<impl IntoResponse> {
+        // let status = axum::http::StatusCode::OK;
 
-        let body = axum::Json(serde_json::json!({ "status": "App is lively." }));
+        // let body = axum::Json(serde_json::json!({ "status": "App is lively." }));
 
-        Ok((status, body).into_response())
+        // Ok((status, body))
+        Ok((
+            StatusCode::OK,
+            Json(json!({ "status": "App is lively." }))
+        ))
     }
 
     #[tracing::instrument(skip_all, err)]
-    pub async fn report_invalid_route(uri: axum::http::Uri) -> AppResult<axum::response::Response> {
-        let status = axum::http::StatusCode::NOT_FOUND;
+    pub async fn report_invalid_route(uri: Uri) -> AppResult<impl IntoResponse> {
+        // let status = axum::http::StatusCode::NOT_FOUND;
 
         let path = uri.path();
-        let body =
-            axum::Json(serde_json::json!({ "status": format!("'{path}' route is invalid!") }));
+        // let body =
+        //     axum::Json(serde_json::json!({ "status": format!("'{path}' route is invalid!") }));
 
-        Ok((status, body).into_response())
+        // Ok((status, body))
+        Ok((
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": format!("Invalid route {path}!") }))
+        ))
     }
 }
 pub mod items {

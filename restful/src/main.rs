@@ -79,14 +79,12 @@ pub mod config {
 
             let key_pem_file = std::fs::read(&key_path)
                 .map_err(|src| AppError::FailedOpenPrivateKeyFile(src, key_path.clone()))?;
-            let mut keys = rustls_pki_types::PrivateKeyDer::pem_slice_iter(&key_pem_file)
-                .map_err(|src| AppError::FailedReadPrivateKeyFile(src, key_path.clone()))?;
-            let key = keys
+            let key = rustls_pki_types::PrivateKeyDer::pem_slice_iter(&key_pem_file)
                 .next()
                 .ok_or_else(|| AppError::FailedFindPrivateKeys(key_path.clone()))?
                 .map_err(|src| AppError::FailedReadPrivateKeyFile(src, key_path.clone()))?;
-
-            let tls_config = RustlsConfig::from_der(
+            
+                let tls_config = RustlsConfig::from_der(
                 certs
                     .into_iter()
                     .map(|cert| cert.to_vec())
@@ -121,7 +119,7 @@ pub mod config {
         } 
     }
 
-    pub fn http_router(config: AppConfig) -> Router<()> {
+    pub fn http_router(config: Arc<AppConfig>) -> Router<()> {
         Router::new()
             .fallback(handlers::redirect_to_https)
             .with_state(config)
@@ -202,7 +200,7 @@ pub mod handlers {
     }
 }
 pub mod items {
-    use crate::config::AppState;
+    use crate::config::{AppState, AppStates};
     use axum::{extract::{Json, Path, Query, State}, http::StatusCode, response::IntoResponse};
     use axum_valid::Valid;
     use std::sync::Arc;
@@ -227,7 +225,7 @@ pub mod items {
 
     pub type AppResult<T> = Result<T, AppError>;
 
-    #[tracing::instrument(skip_all, err)]
+    // #[tracing::instrument(skip_all, err)]
     pub fn routes<S>() -> axum::Router<S> 
     where
         AppState<Item>: axum::extract::FromRef<S>,
@@ -244,7 +242,7 @@ pub mod items {
         State(state): State<AppState<Item>>,
     ) -> AppResult<impl IntoResponse> {
         let id = uuid::Uuid::new_v4();
-        let item = payload.into();
+        let item: Item = payload.into();
         let item_response = ItemResponse { id, item: item.clone(), };
         state.insert(id, Arc::new(item));
         Ok((StatusCode::CREATED, Json(item_response)))
@@ -320,7 +318,7 @@ pub mod items {
     }
 
     #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-    struct Item {
+    pub struct Item {
         name: String,
         desc: String,
     }

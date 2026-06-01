@@ -106,7 +106,7 @@ pub mod config {
         }
     }
 
-    pub type AppState<T> = Arc<dashmap::DashMap<uuid::Uuid, Arc<T>>>;
+    pub type AppState<T> = Arc<dashmap::DashMap<uuid::Uuid, T>>;
 
     #[derive(Clone, Default)]
     pub struct AppStates {
@@ -200,7 +200,7 @@ pub mod handlers {
     }
 }
 pub mod items {
-    use crate::config::{AppState, AppStates};
+    use crate::config::AppState;
     use axum::{extract::{Json, Path, Query, State}, http::StatusCode, response::IntoResponse};
     use axum_valid::Valid;
     use std::sync::Arc;
@@ -238,36 +238,36 @@ pub mod items {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn create(
-        Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,
         State(state): State<AppState<Item>>,
+        Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,
     ) -> AppResult<impl IntoResponse> {
         let id = uuid::Uuid::new_v4();
         let item: Item = payload.into();
         let item_response = ItemResponse { id, item: item.clone(), };
-        state.insert(id, Arc::new(item));
+        state.insert(id, item);
         Ok((StatusCode::CREATED, Json(item_response)))
     }
 
     #[tracing::instrument(skip_all, err)]
     pub async fn delete(
-        Path(GetPathId{ id }): Path<GetPathId>,
         State(state): State<AppState<Item>>,
+        Path(GetPathId{ id }): Path<GetPathId>,
     ) -> AppResult<impl IntoResponse> {
         let (_, item) = state
             .remove(&id)
             .ok_or_else(|| AppError::NotFound(id.to_string()))?;
-        let item_response = ItemResponse { id, item: (*item).clone(), };
+        let item_response = ItemResponse { id, item: item.clone(), };
         Ok((StatusCode::OK, Json(item_response)))
     }
 
     #[tracing::instrument(skip_all, err)]
     pub async fn get(
-        Path(GetPathId { id }): Path<GetPathId>,
         State(state): State<AppState<Item>>,
+        Path(GetPathId { id }): Path<GetPathId>,
     ) -> AppResult<impl IntoResponse> {
         let item = state
             .get(&id)
-            .map(|entry| (*entry.value()).clone())
+            .map(|entry| entry.value().clone())
             .ok_or_else(|| AppError::NotFound(id.to_string()))?;
         let item_response = ItemResponse { id, item };
         Ok((StatusCode::OK, Json(item_response)))
@@ -275,8 +275,8 @@ pub mod items {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn select(
-        Valid(Query(params)): Valid<Query<SelectQueryParams>>,
         State(state): State<AppState<Item>>,
+        Valid(Query(params)): Valid<Query<SelectQueryParams>>,
     ) -> AppResult<impl IntoResponse> {
         let results: Vec<ItemResponse> = state
             .iter()
@@ -303,9 +303,9 @@ pub mod items {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn update(
+        State(state): State<AppState<Item>>,
         Path(GetPathId{ id }): Path<GetPathId>,
         Valid(Json(payload)): Valid<Json<UpdateJsonPayload>>,
-        State(state): State<AppState<Item>>,
         ) -> AppResult<impl IntoResponse> {
             let mut entry = state
                 .get_mut(&id)

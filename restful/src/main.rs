@@ -1,6 +1,9 @@
 pub mod config {
-    use crate::{handlers, items::{self, Item}};
-    use axum::{extract::FromRef, Router};
+    use crate::{
+        handlers,
+        items::{self, Item},
+    };
+    use axum::{Router, extract::FromRef};
     use axum_server::tls_rustls::RustlsConfig;
     use rustls_pki_types::pem::PemObject;
     use std::sync::Arc;
@@ -48,7 +51,7 @@ pub mod config {
 
     impl AppConfig {
         #[tracing::instrument(skip_all, err)]
-        pub async fn new() -> AppResult<AppConfig> {
+        pub fn new() -> AppResult<AppConfig> {
             let http_addr_raw = std::env::var("HTTP_ADDR")
                 .map_err(|src| AppError::FailedFindEnvVar(src, "HTTP_ADDR".into()))?;
             let http_addr = http_addr_raw
@@ -67,7 +70,9 @@ pub mod config {
 
             let certs = rustls_pki_types::CertificateDer::pem_file_iter(&cert_path)
                 .map_err(|src| AppError::FailedOpenPublicKeyFile(src, cert_path.clone()))?
-                .map(|result| result.map_err(|src| AppError::FailedReadPublicKeyFile(src, cert_path.clone())))
+                .map(|result| {
+                    result.map_err(|src| AppError::FailedReadPublicKeyFile(src, cert_path.clone()))
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             if certs.is_empty() {
                 return Err(AppError::FailedFindPublicKeys(cert_path));
@@ -83,17 +88,13 @@ pub mod config {
                 .next()
                 .ok_or_else(|| AppError::FailedFindPrivateKeys(key_path.clone()))?
                 .map_err(|src| AppError::FailedReadPrivateKeyFile(src, key_path.clone()))?;
-            
-                let tls_config = RustlsConfig::from_der(
-                certs
-                    .into_iter()
-                    .map(|cert| cert.to_vec())
-                    .collect(),
-                key
-                    .secret_der()
-                    .to_vec(),
-            )
-                .await
+
+            let tls_config = tokio::runtime::Runtime::new()
+                .map_err(|src| AppError::FailedConfigTLS(src, cert_path.clone()))?
+                .block_on(RustlsConfig::from_der(
+                    certs.into_iter().map(|cert| cert.to_vec()).collect(),
+                    key.secret_der().to_vec(),
+                ))
                 .map_err(|src| AppError::FailedConfigTLS(src, cert_path.clone()))?;
 
             Ok(AppConfig {
@@ -108,7 +109,7 @@ pub mod config {
 
     pub type AppState<T> = Arc<dashmap::DashMap<uuid::Uuid, T>>;
 
-    #[derive(Clone, Default)]
+    #[derive(Clone, Debug, Default)]
     pub struct AppStates {
         items: AppState<Item>,
     }
@@ -116,7 +117,7 @@ pub mod config {
     impl FromRef<AppStates> for AppState<Item> {
         fn from_ref(states: &AppStates) -> Self {
             Arc::clone(&states.items)
-        } 
+        }
     }
 
     pub fn http_router(config: Arc<AppConfig>) -> Router<()> {
@@ -128,22 +129,23 @@ pub mod config {
     pub fn https_router(states: AppStates) -> Router<AppStates> {
         Router::new()
             .merge(items::routes::<AppStates>())
-            .route("/healthz", axum::routing::get(handlers::check_app_liveliness))
+            .route(
+                "/healthz",
+                axum::routing::get(handlers::check_app_liveliness),
+            )
             .fallback(handlers::report_invalid_route)
             .with_state(states)
     }
 }
 pub mod handlers {
     use axum::{
+        Json,
         extract::State,
         http::{
+            HeaderValue, StatusCode, Uri,
             header::{InvalidHeaderValue, LOCATION},
-            HeaderValue,
-            StatusCode,
-            Uri,
         },
         response::IntoResponse,
-        Json,
     };
     use serde_json::json;
     use std::sync::Arc;
@@ -162,19 +164,12 @@ pub mod handlers {
         State(config): State<Arc<crate::config::AppConfig>>,
         uri: Uri,
     ) -> AppResult<impl IntoResponse> {
-        let path_query = uri
-            .path_and_query()
-            .map(|pq| pq.as_str())
-            .unwrap_or("/");
+        let path_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
 
-        let redirect_url = format!(
-            "https://{}{}",
-            config.https_addr,
-            path_query,
-        );
+        let redirect_url = format!("https://{}{}", config.https_addr, path_query,);
 
-        let location = HeaderValue::try_from(redirect_url.clone())
-            .map_err(AppError::FailedCreateHeader)?;
+        let location =
+            HeaderValue::try_from(redirect_url.clone()).map_err(AppError::FailedCreateHeader)?;
 
         Ok((
             StatusCode::TEMPORARY_REDIRECT,
@@ -185,10 +180,7 @@ pub mod handlers {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn check_app_liveliness() -> AppResult<impl IntoResponse> {
-        Ok((
-            StatusCode::OK,
-            Json(json!({"status": "App is lively."})),
-        ))
+        Ok((StatusCode::OK, Json(json!({"status": "App is lively."}))))
     }
 
     #[tracing::instrument(skip_all, err)]
@@ -201,7 +193,11 @@ pub mod handlers {
 }
 pub mod items {
     use crate::config::AppState;
-    use axum::{extract::{Json, Path, Query, State}, http::StatusCode, response::IntoResponse};
+    use axum::{
+        extract::{Json, Path, Query, State},
+        http::StatusCode,
+        response::IntoResponse,
+    };
     use axum_valid::Valid;
     use std::sync::Arc;
 
@@ -226,14 +222,17 @@ pub mod items {
     pub type AppResult<T> = Result<T, AppError>;
 
     // #[tracing::instrument(skip_all, err)]
-    pub fn routes<S>() -> axum::Router<S> 
+    pub fn routes<S>() -> axum::Router<S>
     where
         AppState<Item>: axum::extract::FromRef<S>,
         S: Clone + Send + Sync + 'static,
     {
         axum::Router::new()
             .route("/items", axum::routing::get(select).post(create))
-            .route("/items/{id}", axum::routing::get(get).delete(delete).put(update))
+            .route(
+                "/items/{id}",
+                axum::routing::get(get).delete(delete).put(update),
+            )
     }
 
     #[tracing::instrument(skip_all, err)]
@@ -242,21 +241,33 @@ pub mod items {
         Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,
     ) -> AppResult<impl IntoResponse> {
         let id = uuid::Uuid::new_v4();
+
         let item: Item = payload.into();
-        let item_response = ItemResponse { id, item: item.clone(), };
+
+        let item_response = ItemResponse {
+            id,
+            item: item.clone(),
+        };
+
         state.insert(id, item);
+
         Ok((StatusCode::CREATED, Json(item_response)))
     }
 
     #[tracing::instrument(skip_all, err)]
     pub async fn delete(
         State(state): State<AppState<Item>>,
-        Path(GetPathId{ id }): Path<GetPathId>,
+        Path(GetPathId { id }): Path<GetPathId>,
     ) -> AppResult<impl IntoResponse> {
         let (_, item) = state
             .remove(&id)
             .ok_or_else(|| AppError::NotFound(id.to_string()))?;
-        let item_response = ItemResponse { id, item: item.clone(), };
+
+        let item_response = ItemResponse {
+            id,
+            item: item.clone(),
+        };
+
         Ok((StatusCode::OK, Json(item_response)))
     }
 
@@ -269,7 +280,9 @@ pub mod items {
             .get(&id)
             .map(|entry| entry.value().clone())
             .ok_or_else(|| AppError::NotFound(id.to_string()))?;
+
         let item_response = ItemResponse { id, item };
+
         Ok((StatusCode::OK, Json(item_response)))
     }
 
@@ -282,20 +295,23 @@ pub mod items {
             .iter()
             .filter_map(|entry| {
                 let item = entry.value();
-        
+
                 if let Some(ref filter_name) = params.name {
                     if !item.name.contains(filter_name) {
                         return None;
                     }
                 }
-        
+
                 if let Some(ref filter_desc) = params.desc {
                     if !item.desc.contains(filter_desc) {
                         return None;
                     }
                 }
-        
-                Some(ItemResponse { id: *entry.key(), item: (*item).clone() })
+
+                Some(ItemResponse {
+                    id: *entry.key(),
+                    item: (*item).clone(),
+                })
             })
             .collect();
         Ok((StatusCode::OK, Json(results)))
@@ -304,17 +320,21 @@ pub mod items {
     #[tracing::instrument(skip_all, err)]
     pub async fn update(
         State(state): State<AppState<Item>>,
-        Path(GetPathId{ id }): Path<GetPathId>,
+        Path(GetPathId { id }): Path<GetPathId>,
         Valid(Json(payload)): Valid<Json<UpdateJsonPayload>>,
-        ) -> AppResult<impl IntoResponse> {
-            let mut entry = state
-                .get_mut(&id)
-                .ok_or_else(|| AppError::NotFound(id.to_string()))?;
-            let item_arc_mut = entry.value_mut();
-            let item = Arc::make_mut(item_arc_mut);
-            item.edit(payload);
-            let item_response = ItemResponse { id, item: (*item_arc_mut).clone(), };
-            Ok((StatusCode::OK, Json(item_response)))
+    ) -> AppResult<impl IntoResponse> {
+        let mut item = state
+            .get_mut(&id)
+            .ok_or_else(|| AppError::NotFound(id.to_string()))?;
+
+        item.edit(payload);
+
+        let item_response = ItemResponse {
+            id,
+            item: item.clone(),
+        };
+
+        Ok((StatusCode::OK, Json(item_response)))
     }
 
     #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -325,19 +345,31 @@ pub mod items {
 
     impl Item {
         fn edit(&mut self, payload: UpdateJsonPayload) {
-            if let Some(name) = payload.name { self.name = name; }
-            if let Some(desc) = payload.desc { self.desc = desc; }
+            if let Some(name) = payload.name {
+                self.name = name;
+            }
+            if let Some(desc) = payload.desc {
+                self.desc = desc;
+            }
         }
     }
 
     #[derive(Debug, serde::Serialize)]
     struct ItemResponse {
+        #[serde(serialize_with = "uuid_to_string")]
         id: uuid::Uuid,
         item: Item,
     }
 
+    fn uuid_to_string<S>(id: &uuid::Uuid, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&id.to_string())
+    }
+
     #[derive(Debug, serde::Deserialize, validator::Validate)]
-    struct CreateJsonPayload {
+    pub struct CreateJsonPayload {
         #[validate(length(min = 1, message = "field in create json payload is missing!"))]
         name: String,
         #[validate(length(min = 1, message = "field in create json payload is missing!"))]
@@ -346,17 +378,20 @@ pub mod items {
 
     impl From<CreateJsonPayload> for Item {
         fn from(payload: CreateJsonPayload) -> Self {
-            Self { name: payload.name, desc: payload.desc, }
+            Self {
+                name: payload.name,
+                desc: payload.desc,
+            }
         }
     }
 
     #[derive(Debug, serde::Deserialize)]
-    struct GetPathId {
+    pub struct GetPathId {
         id: uuid::Uuid,
     }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
-    struct SelectQueryParams {
+    pub struct SelectQueryParams {
         #[validate(length(min = 1, message = "field in select query params is missing!"))]
         name: Option<String>,
         #[validate(length(min = 1, message = "field in select query params is missing!"))]
@@ -364,211 +399,211 @@ pub mod items {
     }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
-    struct UpdateJsonPayload {
+    pub struct UpdateJsonPayload {
         #[validate(length(min = 1, message = "field in update json payload is missing!"))]
         name: Option<String>,
         #[validate(length(min = 1, message = "field in update json payload is missing!"))]
         desc: Option<String>,
     }
 }
-pub mod tools {
-    use axum::extract::FromRequest;
+// pub mod tools {
+//     use axum::extract::FromRequest;
 
-    #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
-    pub enum AppError {
-        #[error("Failed to serialize payload parameter into request body! {0}")]
-        #[status(axum::http::StatusCode::BAD_REQUEST)]
-        FailedSerializePayloadIntoRequest(#[source] serde_json::Error),
+//     #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
+//     pub enum AppError {
+//         #[error("Failed to serialize payload parameter into request body! {0}")]
+//         #[status(axum::http::StatusCode::BAD_REQUEST)]
+//         FailedSerializePayloadIntoRequest(#[source] serde_json::Error),
 
-        #[error("Failed to serialize payload parameter from request body! {0}")]
-        #[status(axum::http::StatusCode::BAD_REQUEST)]
-        FailedSerializePayloadFromRequest(#[source] serde_json::Error),
+//         #[error("Failed to serialize payload parameter from request body! {0}")]
+//         #[status(axum::http::StatusCode::BAD_REQUEST)]
+//         FailedSerializePayloadFromRequest(#[source] serde_json::Error),
 
-        #[error("Failed to build request body from payload parameter! {0}")]
-        #[status(axum::http::StatusCode::BAD_REQUEST)]
-        FailedBuildRequestFromPayload(#[source] axum::http::Error),
+//         #[error("Failed to build request body from payload parameter! {0}")]
+//         #[status(axum::http::StatusCode::BAD_REQUEST)]
+//         FailedBuildRequestFromPayload(#[source] axum::http::Error),
 
-        #[error("Failed to parse request body into payload parameter! {0}")]
-        #[status(axum::http::StatusCode::BAD_REQUEST)]
-        FailedParseRequestIntoPayload(#[source] axum::Error),
+//         #[error("Failed to parse request body into payload parameter! {0}")]
+//         #[status(axum::http::StatusCode::BAD_REQUEST)]
+//         FailedParseRequestIntoPayload(#[source] axum::Error),
 
-        #[error("Failed to serialize payload parameter into response body! {0}")]
-        #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedSerializePayloadIntoResponse(#[source] serde_json::Error),
+//         #[error("Failed to serialize payload parameter into response body! {0}")]
+//         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+//         FailedSerializePayloadIntoResponse(#[source] serde_json::Error),
 
-        #[error("Failed to serialize payload parameter from response body! {0}")]
-        #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedSerializePayloadFromResponse(#[source] serde_json::Error),
+//         #[error("Failed to serialize payload parameter from response body! {0}")]
+//         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+//         FailedSerializePayloadFromResponse(#[source] serde_json::Error),
 
-        #[error("Failed to build response body from payload parameter! {0}")]
-        #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedBuildResponseFromPayload(#[source] axum::http::Error),
+//         #[error("Failed to build response body from payload parameter! {0}")]
+//         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+//         FailedBuildResponseFromPayload(#[source] axum::http::Error),
 
-        #[error("Failed to parse response body into payload parameter! {0}")]
-        #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedParseResponseIntoPayload(#[source] axum::Error),
+//         #[error("Failed to parse response body into payload parameter! {0}")]
+//         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+//         FailedParseResponseIntoPayload(#[source] axum::Error),
 
-        #[error("Failed to get router response parameters from request parameters! {0}")]
-        #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedGetRouterResponse(String),
-    }
+//         #[error("Failed to get router response parameters from request parameters! {0}")]
+//         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
+//         FailedGetRouterResponse(String),
+//     }
 
-    pub type AppResult<T> = Result<T, AppError>;
+//     pub type AppResult<T> = Result<T, AppError>;
 
-    pub type AppState<T> = Arc<Rwlock<HashMap<Uuid, T>>>;
+//     pub type AppState<T> = Arc<Rwlock<HashMap<Uuid, T>>>;
 
-    #[derive(Debug, Clone, PartialEq)]
-    pub struct RequestParams {
-        pub method: axum::http::Method,
-        pub path: String,
-        pub query: String,
-        pub version: axum::http::Version,
-        pub headers: axum::http::HeaderMap,
-        pub payload: serde_json::Value,
-    }
+//     #[derive(Debug, Clone, PartialEq)]
+//     pub struct RequestParams {
+//         pub method: axum::http::Method,
+//         pub path: String,
+//         pub query: String,
+//         pub version: axum::http::Version,
+//         pub headers: axum::http::HeaderMap,
+//         pub payload: serde_json::Value,
+//     }
 
-    impl TryFrom<RequestParams> for axum::extract::Request {
-        type Error = AppError;
+//     impl TryFrom<RequestParams> for axum::extract::Request {
+//         type Error = AppError;
 
-        #[tracing::instrument(skip_all, err)]
-        fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
-            let params_uri = if params.query.is_empty() {
-                params.path
-            } else {
-                format!("{}?{}", params.path, params.query)
-            };
+//         #[tracing::instrument(skip_all, err)]
+//         fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
+//             let params_uri = if params.query.is_empty() {
+//                 params.path
+//             } else {
+//                 format!("{}?{}", params.path, params.query)
+//             };
 
-            let mut builder = axum::extract::Request::builder()
-                .method(params.method)
-                .uri(params_uri)
-                .version(params.version);
+//             let mut builder = axum::extract::Request::builder()
+//                 .method(params.method)
+//                 .uri(params_uri)
+//                 .version(params.version);
 
-            if let Some(headers) = builder.headers_mut() {
-                headers.extend(params.headers);
-            }
+//             if let Some(headers) = builder.headers_mut() {
+//                 headers.extend(params.headers);
+//             }
 
-            let body = serde_json::to_vec(&params.payload)
-                .map_err(AppError::FailedSerializePayloadIntoRequest)?;
+//             let body = serde_json::to_vec(&params.payload)
+//                 .map_err(AppError::FailedSerializePayloadIntoRequest)?;
 
-            builder
-                .body(axum::body::Body::from(body))
-                .map_err(AppError::FailedBuildRequestFromPayload)
-        }
-    }
+//             builder
+//                 .body(axum::body::Body::from(body))
+//                 .map_err(AppError::FailedBuildRequestFromPayload)
+//         }
+//     }
 
-    impl<S> FromRequest<S> for RequestParams
-    where
-        S: Send + Sync,
-    {
-        type Rejection = AppError;
+//     impl<S> FromRequest<S> for RequestParams
+//     where
+//         S: Send + Sync,
+//     {
+//         type Rejection = AppError;
 
-        #[tracing::instrument(skip_all, err)]
-        async fn from_request(
-            req: axum::extract::Request,
-            _state: &S,
-        ) -> Result<Self, Self::Rejection> {
-            let method = req.method().clone();
+//         #[tracing::instrument(skip_all, err)]
+//         async fn from_request(
+//             req: axum::extract::Request,
+//             _state: &S,
+//         ) -> Result<Self, Self::Rejection> {
+//             let method = req.method().clone();
 
-            let uri = req.uri().clone();
+//             let uri = req.uri().clone();
 
-            let path = uri.path().to_string();
+//             let path = uri.path().to_string();
 
-            let query = uri.query().unwrap_or("").to_string();
+//             let query = uri.query().unwrap_or("").to_string();
 
-            let version = req.version();
+//             let version = req.version();
 
-            let headers = req.headers().clone();
+//             let headers = req.headers().clone();
 
-            let body = axum::body::to_bytes(req.into_body(), 2 * 1024 * 1024)
-                .await
-                .map_err(AppError::FailedParseRequestIntoPayload)?;
-            let payload = serde_json::from_slice(&body)
-                .map_err(AppError::FailedSerializePayloadFromRequest)?;
+//             let body = axum::body::to_bytes(req.into_body(), 2 * 1024 * 1024)
+//                 .await
+//                 .map_err(AppError::FailedParseRequestIntoPayload)?;
+//             let payload = serde_json::from_slice(&body)
+//                 .map_err(AppError::FailedSerializePayloadFromRequest)?;
 
-            Ok(RequestParams {
-                method,
-                path,
-                query,
-                version,
-                headers,
-                payload,
-            })
-        }
-    }
+//             Ok(RequestParams {
+//                 method,
+//                 path,
+//                 query,
+//                 version,
+//                 headers,
+//                 payload,
+//             })
+//         }
+//     }
 
-    #[derive(Debug, Clone, PartialEq)]
-    pub struct ResponseParams {
-        pub version: axum::http::Version,
-        pub status: axum::http::StatusCode,
-        pub headers: axum::http::HeaderMap,
-        pub payload: serde_json::Value,
-    }
+//     #[derive(Debug, Clone, PartialEq)]
+//     pub struct ResponseParams {
+//         pub version: axum::http::Version,
+//         pub status: axum::http::StatusCode,
+//         pub headers: axum::http::HeaderMap,
+//         pub payload: serde_json::Value,
+//     }
 
-    impl TryFrom<ResponseParams> for axum::response::Response {
-        type Error = AppError;
+//     impl TryFrom<ResponseParams> for axum::response::Response {
+//         type Error = AppError;
 
-        #[tracing::instrument(skip_all, err)]
-        fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
-            let mut builder = axum::response::Response::builder()
-                .version(params.version)
-                .status(params.status);
+//         #[tracing::instrument(skip_all, err)]
+//         fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
+//             let mut builder = axum::response::Response::builder()
+//                 .version(params.version)
+//                 .status(params.status);
 
-            if let Some(headers) = builder.headers_mut() {
-                headers.extend(params.headers);
-            }
+//             if let Some(headers) = builder.headers_mut() {
+//                 headers.extend(params.headers);
+//             }
 
-            let body = serde_json::to_vec(&params.payload)
-                .map_err(AppError::FailedSerializePayloadIntoResponse)?;
+//             let body = serde_json::to_vec(&params.payload)
+//                 .map_err(AppError::FailedSerializePayloadIntoResponse)?;
 
-            builder
-                .body(axum::body::Body::from(body))
-                .map_err(AppError::FailedBuildResponseFromPayload)
-        }
-    }
+//             builder
+//                 .body(axum::body::Body::from(body))
+//                 .map_err(AppError::FailedBuildResponseFromPayload)
+//         }
+//     }
 
-    impl ResponseParams {
-        #[tracing::instrument(skip_all, err)]
-        pub async fn from_response(res: axum::response::Response) -> AppResult<Self> {
-            let version = res.version();
+//     impl ResponseParams {
+//         #[tracing::instrument(skip_all, err)]
+//         pub async fn from_response(res: axum::response::Response) -> AppResult<Self> {
+//             let version = res.version();
 
-            let status = res.status();
+//             let status = res.status();
 
-            let headers = res.headers().clone();
+//             let headers = res.headers().clone();
 
-            let body = axum::body::to_bytes(res.into_body(), 2 * 1024 * 1024)
-                .await
-                .map_err(AppError::FailedParseResponseIntoPayload)?;
-            let payload = serde_json::from_slice(&body)
-                .map_err(AppError::FailedSerializePayloadFromResponse)?;
+//             let body = axum::body::to_bytes(res.into_body(), 2 * 1024 * 1024)
+//                 .await
+//                 .map_err(AppError::FailedParseResponseIntoPayload)?;
+//             let payload = serde_json::from_slice(&body)
+//                 .map_err(AppError::FailedSerializePayloadFromResponse)?;
 
-            Ok(ResponseParams {
-                version,
-                status,
-                headers,
-                payload,
-            })
-        }
-    }
+//             Ok(ResponseParams {
+//                 version,
+//                 status,
+//                 headers,
+//                 payload,
+//             })
+//         }
+//     }
 
-    #[tracing::instrument(skip_all, err)]
-    pub async fn get_router_response_params(
-        router: axum::Router,
-        req_params: RequestParams,
-    ) -> AppResult<ResponseParams> {
-        use tower::util::ServiceExt;
+//     #[tracing::instrument(skip_all, err)]
+//     pub async fn get_router_response_params(
+//         router: axum::Router,
+//         req_params: RequestParams,
+//     ) -> AppResult<ResponseParams> {
+//         use tower::util::ServiceExt;
 
-        let req = axum::extract::Request::try_from(req_params)?;
+//         let req = axum::extract::Request::try_from(req_params)?;
 
-        let res = router
-            .oneshot(req)
-            .await
-            .map_err(|err| AppError::FailedGetRouterResponse(err.to_string()))?;
+//         let res = router
+//             .oneshot(req)
+//             .await
+//             .map_err(|err| AppError::FailedGetRouterResponse(err.to_string()))?;
 
-        let res_params = ResponseParams::from_response(res).await?;
+//         let res_params = ResponseParams::from_response(res).await?;
 
-        Ok(res_params)
-    }
-}
+//         Ok(res_params)
+//     }
+// }
 #[cfg(test)]
 mod tests {
     mod config {
@@ -578,9 +613,9 @@ mod tests {
         #[test_case(Some("valid"),   Some("valid"),   Some("valid"),   "Success";               "success")]
         #[test_case(None,            Some("valid"),   Some("valid"),   "FailedFindEnvVar";      "failure find env var")]
         #[test_case(Some("invalid"), Some("valid"),   Some("valid"),   "FailedParseSocketAddr"; "failure parse socket addr")]
-        #[test_case(Some("valid"),   None,            Some("valid"),   "FailedOpenPEMFile";     "failure open pem file")]
-        #[test_case(Some("valid"),   Some("bad_pem"), Some("valid"),   "FailedParsePEMFile";    "failure parse pem file")]
-        #[test_case(Some("valid"),   Some("no_cert"), Some("valid"),   "FailedFindCerts";       "failure find certs")]
+        #[test_case(Some("valid"),   None,            Some("valid"),   "FailedOpenPublicKeyFile";     "failure open pem file")]
+        #[test_case(Some("valid"),   Some("bad_pem"), Some("valid"),   "FailedReadPublicKeyFile";    "failure parse pem file")]
+        #[test_case(Some("valid"),   Some("no_cert"), Some("valid"),   "FailedFindPublicKeys";       "failure find certs")]
         #[test_case(Some("valid"),   Some("valid"),   Some("invalid"), "FailedConfigTLS";       "failure config tls")]
         #[test_log::test(tokio::test)]
         async fn test_create_app_config(
@@ -627,7 +662,10 @@ mod tests {
                 }
 
                 match expected {
-                    "Success" => cool_asserts::assert_matches!(AppConfig::new(), Ok(_)),
+                    "Success" => cool_asserts::assert_matches!(
+                        AppConfig::new(), 
+                        Ok(_)
+                    ),
                     "FailedFindEnvVar" => cool_asserts::assert_matches!(
                         AppConfig::new(),
                         Err(AppError::FailedFindEnvVar(_, _))
@@ -636,17 +674,17 @@ mod tests {
                         AppConfig::new(),
                         Err(AppError::FailedParseSocketAddr(_, _))
                     ),
-                    "FailedOpenPEMFile" => cool_asserts::assert_matches!(
+                    "FailedOpenPublicKeyFile" => cool_asserts::assert_matches!(
                         AppConfig::new(),
-                        Err(AppError::FailedOpenPEMFile(_, _))
+                        Err(AppError::FailedOpenPublicKeyFile(_, _))
                     ),
                     "FailedParsePEMFile" => cool_asserts::assert_matches!(
                         AppConfig::new(),
-                        Err(AppError::FailedParsePEMFile(_, _))
+                        Err(AppError::FailedReadPublicKeyFile(_, _))
                     ),
                     "FailedFindCerts" => cool_asserts::assert_matches!(
                         AppConfig::new(),
-                        Err(AppError::FailedFindCerts(_))
+                        Err(AppError::FailedFindPublicKeys(_))
                     ),
                     "FailedConfigTLS" => cool_asserts::assert_matches!(
                         AppConfig::new(),
@@ -659,135 +697,135 @@ mod tests {
             })
         }
     }
-    mod tools {
-        use crate::tools::{AppError, RequestParams, ResponseParams};
-        use axum::extract::FromRequest;
+    // mod tools {
+    //     use crate::tools::{AppError, RequestParams, ResponseParams};
+    //     use axum::extract::FromRequest;
 
-        #[test_log::test(tokio::test)]
-        async fn test_create_request_from_params_success() {
-            use axum::http::header::{CONTENT_TYPE, HeaderValue};
+    //     #[test_log::test(tokio::test)]
+    //     async fn test_create_request_from_params_success() {
+    //         use axum::http::header::{CONTENT_TYPE, HeaderValue};
 
-            let method = axum::http::Method::GET;
+    //         let method = axum::http::Method::GET;
 
-            let path = "/".to_string();
+    //         let path = "/".to_string();
 
-            let query = "key1=value1&key2=value2".to_string();
+    //         let query = "key1=value1&key2=value2".to_string();
 
-            let version = axum::http::Version::HTTP_11;
+    //         let version = axum::http::Version::HTTP_11;
 
-            let mut headers = axum::http::header::HeaderMap::new();
-            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    //         let mut headers = axum::http::header::HeaderMap::new();
+    //         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-            let payload = serde_json::json!({ "key1": "value1", "key2": "value2" });
+    //         let payload = serde_json::json!({ "key1": "value1", "key2": "value2" });
 
-            let expected_params = RequestParams {
-                method,
-                path,
-                query,
-                version,
-                headers,
-                payload,
-            };
+    //         let expected_params = RequestParams {
+    //             method,
+    //             path,
+    //             query,
+    //             version,
+    //             headers,
+    //             payload,
+    //         };
 
-            let req = cool_asserts::assert_matches!(axum::extract::Request::try_from(expected_params.clone()), Ok(req) => req);
+    //         let req = cool_asserts::assert_matches!(axum::extract::Request::try_from(expected_params.clone()), Ok(req) => req);
 
-            let actual_params = cool_asserts::assert_matches!(RequestParams::from_request(req, &()).await, Ok(actual_params) => actual_params);
+    //         let actual_params = cool_asserts::assert_matches!(RequestParams::from_request(req, &()).await, Ok(actual_params) => actual_params);
 
-            pretty_assertions::assert_eq!(actual_params, expected_params);
-        }
+    //         pretty_assertions::assert_eq!(actual_params, expected_params);
+    //     }
 
-        #[test_log::test(tokio::test)]
-        async fn test_create_request_from_params_failure_invalid_path() {
-            use axum::http::header::{CONTENT_TYPE, HeaderValue};
+    //     #[test_log::test(tokio::test)]
+    //     async fn test_create_request_from_params_failure_invalid_path() {
+    //         use axum::http::header::{CONTENT_TYPE, HeaderValue};
 
-            let method = axum::http::Method::GET;
+    //         let method = axum::http::Method::GET;
 
-            let path = "/invalid path".to_string();
+    //         let path = "/invalid path".to_string();
 
-            let query = "".to_string();
+    //         let query = "".to_string();
 
-            let version = axum::http::Version::HTTP_11;
+    //         let version = axum::http::Version::HTTP_11;
 
-            let mut headers = axum::http::header::HeaderMap::new();
+    //         let mut headers = axum::http::header::HeaderMap::new();
 
-            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    //         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-            let payload = serde_json::json!({});
+    //         let payload = serde_json::json!({});
 
-            let expected_params = RequestParams {
-                method,
-                path,
-                query,
-                version,
-                headers,
-                payload,
-            };
+    //         let expected_params = RequestParams {
+    //             method,
+    //             path,
+    //             query,
+    //             version,
+    //             headers,
+    //             payload,
+    //         };
 
-            cool_asserts::assert_matches!(
-                axum::extract::Request::try_from(expected_params.clone()),
-                Err(AppError::FailedBuildRequestFromPayload(_))
-            );
-        }
+    //         cool_asserts::assert_matches!(
+    //             axum::extract::Request::try_from(expected_params.clone()),
+    //             Err(AppError::FailedBuildRequestFromPayload(_))
+    //         );
+    //     }
 
-        #[test_log::test(tokio::test)]
-        async fn test_create_request_from_params_failure_invalid_query() {
-            use axum::http::header::{CONTENT_TYPE, HeaderValue};
+    //     #[test_log::test(tokio::test)]
+    //     async fn test_create_request_from_params_failure_invalid_query() {
+    //         use axum::http::header::{CONTENT_TYPE, HeaderValue};
 
-            let method = axum::http::Method::GET;
+    //         let method = axum::http::Method::GET;
 
-            let path = "/".to_string();
+    //         let path = "/".to_string();
 
-            let query = "invalid query".to_string();
+    //         let query = "invalid query".to_string();
 
-            let version = axum::http::Version::HTTP_11;
+    //         let version = axum::http::Version::HTTP_11;
 
-            let mut headers = axum::http::header::HeaderMap::new();
-            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    //         let mut headers = axum::http::header::HeaderMap::new();
+    //         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-            let payload = serde_json::json!({});
+    //         let payload = serde_json::json!({});
 
-            let expected_params = RequestParams {
-                method,
-                path,
-                query,
-                version,
-                headers,
-                payload,
-            };
+    //         let expected_params = RequestParams {
+    //             method,
+    //             path,
+    //             query,
+    //             version,
+    //             headers,
+    //             payload,
+    //         };
 
-            cool_asserts::assert_matches!(axum::extract::Request::try_from(expected_params.clone()), Err(AppError::FailedBuildRequestFromPayload(ref err)) => {
-                pretty_assertions::assert_eq!(err.to_string(), "invalid uri character");
-            });
-        }
+    //         cool_asserts::assert_matches!(axum::extract::Request::try_from(expected_params.clone()), Err(AppError::FailedBuildRequestFromPayload(ref err)) => {
+    //             pretty_assertions::assert_eq!(err.to_string(), "invalid uri character");
+    //         });
+    //     }
 
-        #[test_log::test(tokio::test)]
-        async fn test_create_response_from_params_success() {
-            let version = axum::http::Version::HTTP_11;
+    //     #[test_log::test(tokio::test)]
+    //     async fn test_create_response_from_params_success() {
+    //         let version = axum::http::Version::HTTP_11;
 
-            let status = axum::http::StatusCode::OK;
+    //         let status = axum::http::StatusCode::OK;
 
-            let mut headers = axum::http::header::HeaderMap::new();
-            headers.insert(
-                axum::http::header::CONTENT_TYPE,
-                axum::http::header::HeaderValue::from_static("application/json"),
-            );
+    //         let mut headers = axum::http::header::HeaderMap::new();
+    //         headers.insert(
+    //             axum::http::header::CONTENT_TYPE,
+    //             axum::http::header::HeaderValue::from_static("application/json"),
+    //         );
 
-            let payload = serde_json::json!({ "key": "value" });
+    //         let payload = serde_json::json!({ "key": "value" });
 
-            let expected_params = ResponseParams {
-                version,
-                status,
-                headers,
-                payload,
-            };
+    //         let expected_params = ResponseParams {
+    //             version,
+    //             status,
+    //             headers,
+    //             payload,
+    //         };
 
-            let res = cool_asserts::assert_matches!(axum::response::Response::try_from(expected_params.clone()), Ok(res) => res);
+    //         let res = cool_asserts::assert_matches!(axum::response::Response::try_from(expected_params.clone()), Ok(res) => res);
 
-            let actual_params = cool_asserts::assert_matches!(ResponseParams::from_response(res).await, Ok(actual_params) => actual_params);
+    //         let actual_params = cool_asserts::assert_matches!(ResponseParams::from_response(res).await, Ok(actual_params) => actual_params);
 
-            pretty_assertions::assert_eq!(actual_params, expected_params);
-        }
-    }
+    //         pretty_assertions::assert_eq!(actual_params, expected_params);
+    //     }
+    // }
     mod handlers {
         use std::str::FromStr;
 
@@ -844,8 +882,8 @@ mod tests {
             res_payload: serde_json::Value,
         ) {
             let router = match router_type {
-                "Http" => crate::config::CONFIG.http_router.clone(),
-                "Https" => crate::config::CONFIG.https_router.clone(),
+                // "Http" => crate::config::CONFIG.http_router.clone(),
+                // "Https" => crate::config::CONFIG.https_router.clone(),
                 _ => panic!("Didn't expect {} router type!", router_type),
             };
 
@@ -888,22 +926,14 @@ mod tests {
     }
     mod items {
         use axum_test::TestServer;
-        use testcase::testcase;
+        use test_case::test_case;
 
-        #[testcase(
+        #[test_case(
             request_payload: Json::Value,
             expected_statuscode: StatusCode,
             expected_response_payload: Json::Value,
         )]
-        async fn test_create(
-            request_payload: Json::Value,
-            expected_statuscode: StatusCode,
-            expected_response_payload: Json::Value,            
-        ) {
-            let state = ;
-
-            let server = ;
-        }
+        async fn test_create() {}
         async fn test_delete() {}
         async fn test_get() {}
         async fn test_select() {}
@@ -914,7 +944,7 @@ mod tests {
 #[tokio::main]
 async fn main() {
     use crate::config::AppConfig;
-    
+
     tracing_subscriber::fmt::init();
 
     let cfg = AppConfig::new();

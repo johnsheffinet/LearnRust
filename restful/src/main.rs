@@ -678,11 +678,11 @@ mod tests {
                         AppConfig::new(),
                         Err(AppError::FailedOpenPublicKeyFile(_, _))
                     ),
-                    "FailedParsePEMFile" => cool_asserts::assert_matches!(
+                    "FailedReadPublicKeyFile" => cool_asserts::assert_matches!(
                         AppConfig::new(),
                         Err(AppError::FailedReadPublicKeyFile(_, _))
                     ),
-                    "FailedFindCerts" => cool_asserts::assert_matches!(
+                    "FailedFindPublicKeys" => cool_asserts::assert_matches!(
                         AppConfig::new(),
                         Err(AppError::FailedFindPublicKeys(_))
                     ),

@@ -8,38 +8,6 @@ pub mod config {
     use rustls_pki_types::pem::PemObject;
     use std::sync::Arc;
 
-    #[derive(Debug, thiserror::Error)]
-    pub enum AppError {
-        #[error("Failed to find environment variable {1}! {0}")]
-        FailedFindEnvVar(#[source] std::env::VarError, String),
-
-        #[error("Failed to parse socket address {1}! {0}")]
-        FailedParseSocketAddr(#[source] std::net::AddrParseError, String),
-
-        #[error("Failed to open public key file {1}! {0}")]
-        FailedOpenPublicKeyFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
-
-        #[error("Failed to read public key file {1}! {0}")]
-        FailedReadPublicKeyFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
-
-        #[error("Failed to find public keys in PEM file {0}!")]
-        FailedFindPublicKeys(std::path::PathBuf),
-
-        #[error("Failed to open private key file {1}! {0}")]
-        FailedOpenPrivateKeyFile(#[source] std::io::Error, std::path::PathBuf),
-
-        #[error("Failed to read private key file {1}! {0}")]
-        FailedReadPrivateKeyFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
-
-        #[error("Failed to find private keys in PEM file {0}!")]
-        FailedFindPrivateKeys(std::path::PathBuf),
-
-        #[error("Failed to configure TLS from file {1}! {0}")]
-        FailedConfigTLS(#[source] std::io::Error, std::path::PathBuf),
-    }
-
-    pub type AppResult<T> = Result<T, AppError>;
-
     #[derive(Clone, Debug)]
     pub struct AppConfig {
         pub http_addr: std::net::SocketAddr,
@@ -107,18 +75,52 @@ pub mod config {
         }
     }
 
-    pub type AppState<T> = Arc<dashmap::DashMap<uuid::Uuid, T>>;
+    pub type AppResult<T> = Result<T, AppError>;
 
-    #[derive(Clone, Debug, Default)]
+    #[derive(Debug, thiserror::Error)]
+    pub enum AppError {
+        #[error("Failed to find environment variable {1}! {0}")]
+        FailedFindEnvVar(#[source] std::env::VarError, String),
+
+        #[error("Failed to parse socket address {1}! {0}")]
+        FailedParseSocketAddr(#[source] std::net::AddrParseError, String),
+
+        #[error("Failed to open public key file {1}! {0}")]
+        FailedOpenPublicKeyFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
+
+        #[error("Failed to read public key file {1}! {0}")]
+        FailedReadPublicKeyFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
+
+        #[error("Failed to find public keys in PEM file {0}!")]
+        FailedFindPublicKeys(std::path::PathBuf),
+
+        #[error("Failed to open private key file {1}! {0}")]
+        FailedOpenPrivateKeyFile(#[source] std::io::Error, std::path::PathBuf),
+
+        #[error("Failed to read private key file {1}! {0}")]
+        FailedReadPrivateKeyFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
+
+        #[error("Failed to find private keys in PEM file {0}!")]
+        FailedFindPrivateKeys(std::path::PathBuf),
+
+        #[error("Failed to configure TLS from file {1}! {0}")]
+        FailedConfigTLS(#[source] std::io::Error, std::path::PathBuf),
+    }
+
+    #[derive(Clone, Debug, FromRef)]
     pub struct AppStates {
         items: AppState<Item>,
     }
 
-    impl FromRef<AppStates> for AppState<Item> {
-        fn from_ref(states: &AppStates) -> Self {
-            Arc::clone(&states.items)
+    impl AppStates {
+        pub fn new() -> Self {
+            Self {
+                items: Arc::new(DashMap::new()),
+            }
         }
     }
+
+    pub type AppState<T> = Arc<dashmap::DashMap<uuid::Uuid, T>>;
 
     pub fn http_router(config: Arc<AppConfig>) -> Router<()> {
         Router::new()
@@ -149,15 +151,6 @@ pub mod handlers {
     };
     use serde_json::json;
     use std::sync::Arc;
-
-    #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
-    pub enum AppError {
-        #[error("Failed to create header! {0}")]
-        #[status(StatusCode::INTERNAL_SERVER_ERROR)]
-        FailedCreateHeader(InvalidHeaderValue),
-    }
-
-    type AppResult<T> = Result<T, AppError>;
 
     #[tracing::instrument(skip_all, err)]
     pub async fn redirect_to_https(
@@ -190,6 +183,16 @@ pub mod handlers {
             Json(json!({"status": format!("Invalid route {}!", uri.path())})),
         ))
     }
+
+    type AppResult<T> = Result<T, AppError>;
+
+    #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
+    pub enum AppError {
+        #[error("Failed to create header! {0}")]
+        #[status(StatusCode::INTERNAL_SERVER_ERROR)]
+        FailedCreateHeader(InvalidHeaderValue),
+    }
+
 }
 pub mod items {
     use crate::config::AppState;
@@ -201,27 +204,6 @@ pub mod items {
     use axum_valid::Valid;
     use std::sync::Arc;
 
-    #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
-    pub enum AppError {
-        #[error("Failed to validate request! {0}")]
-        #[status_code(StatusCode::UNPROCESSABLE_ENTITY)]
-        #[code("UNPROCESSABLE_ENTITY")]
-        UnprocessableEntity(#[from] validator::ValidationErrors),
-
-        #[error("Failed to find {0} id in request path!")]
-        #[status_code(StatusCode::NOT_FOUND)]
-        #[code("NOT_FOUND")]
-        NotFound(String),
-
-        #[error("Failed to process request! {0}")]
-        #[status_code(StatusCode::INTERNAL_SERVER_ERROR)]
-        #[code("INTERNAL_SERVER_ERROR")]
-        InternalServerError(String),
-    }
-
-    pub type AppResult<T> = Result<T, AppError>;
-
-    // #[tracing::instrument(skip_all, err)]
     pub fn routes<S>() -> axum::Router<S>
     where
         AppState<Item>: axum::extract::FromRef<S>,
@@ -229,10 +211,7 @@ pub mod items {
     {
         axum::Router::new()
             .route("/items", axum::routing::get(select).post(create))
-            .route(
-                "/items/{id}",
-                axum::routing::get(get).delete(delete).put(update),
-            )
+            .route("/items/{id}", axum::routing::get(get).delete(delete).put(update))
     }
 
     #[tracing::instrument(skip_all, err)]
@@ -314,6 +293,7 @@ pub mod items {
                 })
             })
             .collect();
+        
         Ok((StatusCode::OK, Json(results)))
     }
 
@@ -335,6 +315,26 @@ pub mod items {
         };
 
         Ok((StatusCode::OK, Json(item_response)))
+    }
+
+    pub type AppResult<T> = Result<T, AppError>;
+
+    #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
+    pub enum AppError {
+        #[error("Failed to validate request! {0}")]
+        #[status_code(StatusCode::UNPROCESSABLE_ENTITY)]
+        #[code("UNPROCESSABLE_ENTITY")]
+        UnprocessableEntity(#[from] validator::ValidationErrors),
+
+        #[error("Failed to find {0} id in request path!")]
+        #[status_code(StatusCode::NOT_FOUND)]
+        #[code("NOT_FOUND")]
+        NotFound(String),
+
+        #[error("Failed to process request! {0}")]
+        #[status_code(StatusCode::INTERNAL_SERVER_ERROR)]
+        #[code("INTERNAL_SERVER_ERROR")]
+        InternalServerError(String),
     }
 
     #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

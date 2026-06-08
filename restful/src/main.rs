@@ -1,51 +1,48 @@
 #![warn(unused_crate_dependencies)]
 
 pub mod states {
-    #[derive(Clone, Debug)]
+    use crate::{config::{AppConfig, AppResult}, handlers, items::{Item, routes}};
+    use dashmap::DashMap;
+    use uuid::Uuid;
+    
+    #[derive(Clone, Debug, FromRef)]
     pub struct AppStates {
-        items: AppState<Item>,
+        pub config: Arc<AppConfig>,
+        pub items: Arc<DashMap<Uuid, Item>>,
     }
 
     impl AppStates {
-        pub fn new() -> Self {
+        pub fn new() -> AppResult<Self> {
             Self {
-                items: Arc::new(dashmap::DashMap::new()),
+                config: Arc::new(AppConfig::new()?);
+                items: Arc::new(DashMap::new()),
             }
         }
     }
 
-    pub type AppState<T> = Arc<dashmap::DashMap<uuid::Uuid, T>>;
+    pub type AppState<T> = Arc<DashMap<Uuid, T>>;
 
-    pub fn http_router(config: Arc<AppConfig>) -> Router<()> {
+    pub fn http_router() -> AppResult<Router<()>> {
+        let states = AppStates::new()?;
+        let config = &states.config;
+
         Router::new()
             .fallback(handlers::redirect_to_https)
             .with_state(config)
     }
 
-    pub fn https_router(states: AppStates) -> Router<AppStates> {
+    pub fn https_router() -> AppResult<Router<AppStates>> {
+        let states = AppStates::new()?;
+
         Router::new()
             .merge(items::routes::<AppStates>())
             .route(
                 "/healthz",
                 axum::routing::get(handlers::check_app_liveliness),
             )
-            .fallback(handlers::report_invalid_route)
+            .fallback(handlers::report_route_invalid)
             .with_state(states)
     }
-
-    #[derive(Clone, Debug)]
-    pub struct AppStates {
-        pub config: ,
-        pub items: ,
-    }
-
-    impl AppStates {}
-
-    pub type AppState<T> = Arc<DashMap<Uuid, T>>;
-
-    pub fn http_routes() -> Router {}
-
-    pub fn https_routes() -> Router<AppState<Item>> {}
 }
 pub mod config {
     use crate::{

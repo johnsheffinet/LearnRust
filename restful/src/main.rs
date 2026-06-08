@@ -1,3 +1,5 @@
+#![warn(unused_crate_dependencies)]
+
 pub mod config {
     use crate::{
         handlers,
@@ -198,7 +200,6 @@ pub mod handlers {
         #[status(StatusCode::INTERNAL_SERVER_ERROR)]
         FailedCreateHeader(InvalidHeaderValue),
     }
-
 }
 pub mod items {
     use crate::config::AppState;
@@ -217,7 +218,10 @@ pub mod items {
     {
         axum::Router::new()
             .route("/items", axum::routing::get(select).post(create))
-            .route("/items/{id}", axum::routing::get(get).delete(delete).put(update))
+            .route(
+                "/items/{id}",
+                axum::routing::get(get).delete(delete).put(update),
+            )
     }
 
     #[tracing::instrument(skip_all, err)]
@@ -299,7 +303,7 @@ pub mod items {
                 })
             })
             .collect();
-        
+
         Ok((StatusCode::OK, Json(results)))
     }
 

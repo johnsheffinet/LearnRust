@@ -1,5 +1,52 @@
 #![warn(unused_crate_dependencies)]
 
+pub mod states {
+    #[derive(Clone, Debug)]
+    pub struct AppStates {
+        items: AppState<Item>,
+    }
+
+    impl AppStates {
+        pub fn new() -> Self {
+            Self {
+                items: Arc::new(dashmap::DashMap::new()),
+            }
+        }
+    }
+
+    pub type AppState<T> = Arc<dashmap::DashMap<uuid::Uuid, T>>;
+
+    pub fn http_router(config: Arc<AppConfig>) -> Router<()> {
+        Router::new()
+            .fallback(handlers::redirect_to_https)
+            .with_state(config)
+    }
+
+    pub fn https_router(states: AppStates) -> Router<AppStates> {
+        Router::new()
+            .merge(items::routes::<AppStates>())
+            .route(
+                "/healthz",
+                axum::routing::get(handlers::check_app_liveliness),
+            )
+            .fallback(handlers::report_invalid_route)
+            .with_state(states)
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct AppStates {
+        pub config: ,
+        pub items: ,
+    }
+
+    impl AppStates {}
+
+    pub type AppState<T> = Arc<DashMap<Uuid, T>>;
+
+    pub fn http_routes() -> Router {}
+
+    pub fn https_routes() -> Router<AppState<Item>> {}
+}
 pub mod config {
     use crate::{
         handlers,
@@ -107,44 +154,6 @@ pub mod config {
 
         #[error("Failed to configure TLS from file {1}! {0}")]
         FailedConfigTLS(#[source] std::io::Error, std::path::PathBuf),
-    }
-
-    #[derive(Clone, Debug)]
-    pub struct AppStates {
-        items: AppState<Item>,
-    }
-
-    impl AppStates {
-        pub fn new() -> Self {
-            Self {
-                items: Arc::new(dashmap::DashMap::new()),
-            }
-        }
-    }
-
-    impl FromRef<AppStates> for AppState<Item> {
-        fn from_ref(app_states: &AppStates) -> Self {
-            app_states.items.clone()
-        }
-    }
-
-    pub type AppState<T> = Arc<dashmap::DashMap<uuid::Uuid, T>>;
-
-    pub fn http_router(config: Arc<AppConfig>) -> Router<()> {
-        Router::new()
-            .fallback(handlers::redirect_to_https)
-            .with_state(config)
-    }
-
-    pub fn https_router(states: AppStates) -> Router<AppStates> {
-        Router::new()
-            .merge(items::routes::<AppStates>())
-            .route(
-                "/healthz",
-                axum::routing::get(handlers::check_app_liveliness),
-            )
-            .fallback(handlers::report_invalid_route)
-            .with_state(states)
     }
 }
 pub mod handlers {

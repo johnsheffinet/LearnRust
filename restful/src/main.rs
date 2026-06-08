@@ -107,7 +107,7 @@ pub mod config {
         FailedConfigTLS(#[source] std::io::Error, std::path::PathBuf),
     }
 
-    #[derive(Clone, Debug, FromRef)]
+    #[derive(Clone, Debug)]
     pub struct AppStates {
         items: AppState<Item>,
     }
@@ -115,18 +115,20 @@ pub mod config {
     impl AppStates {
         pub fn new() -> Self {
             Self {
-                items: Arc::new(DashMap::new()),
+                items: Arc::new(dashmap::DashMap::new()),
             }
         }
     }
 
-<<<<<<< HEAD
+    impl FromRef<AppStates> for AppState<Item> {
+        fn from_ref(app_states: &AppStates) -> Self {
+            app_states.items.clone()
+        }
+    }
+
     pub type AppState<T> = Arc<dashmap::DashMap<uuid::Uuid, T>>;
 
     pub fn http_router(config: Arc<AppConfig>) -> Router<()> {
-=======
-    pub fn http_router(config: AppConfig) -> Router<()> {
->>>>>>> e5ea62e (	modified:   restful/src/main.rs)
         Router::new()
             .fallback(handlers::redirect_to_https)
             .with_state(config)
@@ -297,11 +299,7 @@ pub mod items {
                 })
             })
             .collect();
-<<<<<<< HEAD
         
-=======
-
->>>>>>> e5ea62e (	modified:   restful/src/main.rs)
         Ok((StatusCode::OK, Json(results)))
     }
 

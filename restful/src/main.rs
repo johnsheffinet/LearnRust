@@ -13,16 +13,19 @@ pub mod states {
 
     impl AppStates {
         pub fn new() -> AppResult<Self> {
-            Self {
-                config: Arc::new(AppConfig::new()?);
-                items: Arc::new(DashMap::new()),
-            }
+            let config = Arc::new(AppConfig::new()?);
+            let items = Arc::new(DashMap::new());
+
+            Ok(Self {
+                config,
+                items,
+            })
         }
     }
 
     pub type AppState<T> = Arc<DashMap<Uuid, T>>;
 
-    pub fn http_router() -> AppResult<Router<()>> {
+    pub fn http_router() -> AppResult<Router<Arc<AppConfig>>> {
         let states = AppStates::new()?;
         let config = &states.config;
 

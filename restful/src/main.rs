@@ -24,24 +24,17 @@ pub mod states {
         }
     }
 
-    // pub type AppState<T> = Arc<DashMap<Uuid, T>>;
-
-    pub fn http_router(state: AppStates) -> AppResult<Router> {
-        // let states = AppStates::new()?;
-        // let config = &states.config;
-
+    pub fn http_router(state: AppStates) -> Router<AppStates> {
         Router::new()
             .fallback(handlers::redirect_to_https)
             .with_state(state)
     }
 
-    pub fn https_router(state: AppStates) -> AppResult<Router> {
+    pub fn https_router(state: AppStates) -> Router<AppStates> {
         use axum::routing::get;
-        
-        // let states = AppStates::new()?;
 
         Router::new()
-            .merge(items::routes())
+            .merge(items::routes::<AppStates>())
             .route("/healthz", get(handlers::check_app_liveliness))
             .fallback(handlers::report_route_invalid)
             .with_state(state)

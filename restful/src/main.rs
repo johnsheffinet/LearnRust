@@ -9,8 +9,10 @@ pub mod states {
     #[derive(Clone, Debug, FromRef)]
     pub struct AppStates {
         pub config: Arc<AppConfig>,
-        pub items: Arc<AppState<Item>>,
+        pub items: AppState<Item>,
     }
+
+    pub type AppState<T> = Arc<DashMap<Uuid, T>>;
 
     impl AppStates {
         pub fn new() -> AppResult<Self> {
@@ -23,8 +25,6 @@ pub mod states {
             })
         }
     }
-
-    pub type AppState<T> = DashMap<Uuid, T>;
 
     pub fn http_router(config: Arc<AppConfig>) -> Router<Arc<AppConfig>> {
         Router::new()
@@ -43,21 +43,57 @@ pub mod states {
     }
 }
 pub mod config {
-    use crate::{
-        handlers,
-        items::{self, Item},
-    };
-    use axum::{Router, extract::FromRef};
-    use axum_server::tls_rustls::RustlsConfig;
+    use crate::{handlers, items::{Item, routes}};
+    use std::{sync::Arc, net::SocketAddr, path::PathBuf};
+    use dashmap::DashMap;
+    use axum::{extract::FromRef, Router};
     use rustls_pki_types::pem::PemObject;
-    use std::sync::Arc;
+    use axum_server::tls_rustls::RustlsConfig;
+    use uuid::Uuid;
+    
+    #[derive(Clone, Debug, FromRef)]
+    pub struct AppStates {
+        pub config: Arc<AppConfig>,
+        pub items: AppState<Item>,
+    }
+
+    pub type AppState<T> = Arc<DashMap<Uuid, T>>;
+
+    impl AppStates {
+        #[tracing::instrument(skip_all, err)]
+        pub fn new() -> AppResult<Self> {
+            let config = Arc::new(AppConfig::new()?);
+            let items = Arc::new(DashMap::new());
+
+            Ok(Self {
+                config,
+                items,
+            })
+        }
+    }
+
+    pub fn http_router(config: Arc<AppConfig>) -> Router<Arc<AppConfig>> {
+        Router::new()
+            .fallback(handlers::redirect_to_https)
+            .with_state(config)
+    }
+
+    pub fn https_router(states: AppStates) -> Router<AppStates> {
+        use axum::routing::get;
+
+        Router::new()
+            .merge(items::routes::<AppStates>())
+            .route("/healthz", get(handlers::check_app_liveliness))
+            .fallback(handlers::report_route_invalid)
+            .with_state(states)
+    }
 
     #[derive(Clone, Debug)]
     pub struct AppConfig {
-        pub http_addr: std::net::SocketAddr,
-        pub https_addr: std::net::SocketAddr,
-        pub cert_path: std::path::PathBuf,
-        pub key_path: std::path::PathBuf,
+        pub http_addr: SocketAddr,
+        pub https_addr: SocketAddr,
+        pub cert_path: PathBuf,
+        pub key_path: PathBuf,
         pub tls_config: RustlsConfig,
     }
 
@@ -67,18 +103,18 @@ pub mod config {
             let http_addr_raw = std::env::var("HTTP_ADDR")
                 .map_err(|src| AppError::FailedFindEnvVar(src, "HTTP_ADDR".into()))?;
             let http_addr = http_addr_raw
-                .parse::<std::net::SocketAddr>()
+                .parse::<SocketAddr>()
                 .map_err(|src| AppError::FailedParseSocketAddr(src, http_addr_raw))?;
 
             let https_addr_raw = std::env::var("HTTPS_ADDR")
                 .map_err(|src| AppError::FailedFindEnvVar(src, "HTTPS_ADDR".into()))?;
             let https_addr = https_addr_raw
-                .parse::<std::net::SocketAddr>()
+                .parse::<SocketAddr>()
                 .map_err(|src| AppError::FailedParseSocketAddr(src, https_addr_raw))?;
 
             let cert_path_raw = std::env::var("CERT_PATH")
                 .map_err(|src| AppError::FailedFindEnvVar(src, "CERT_PATH".into()))?;
-            let cert_path = std::path::PathBuf::from(cert_path_raw);
+            let cert_path = PathBuf::from(cert_path_raw);
 
             let certs = rustls_pki_types::CertificateDer::pem_file_iter(&cert_path)
                 .map_err(|src| AppError::FailedOpenPublicKeyFile(src, cert_path.clone()))?
@@ -92,7 +128,7 @@ pub mod config {
 
             let key_path_raw = std::env::var("KEY_PATH")
                 .map_err(|src| AppError::FailedFindEnvVar(src, "KEY_PATH".into()))?;
-            let key_path = std::path::PathBuf::from(key_path_raw);
+            let key_path = PathBuf::from(key_path_raw);
 
             let key_pem_file = std::fs::read(&key_path)
                 .map_err(|src| AppError::FailedOpenPrivateKeyFile(src, key_path.clone()))?;
@@ -130,25 +166,25 @@ pub mod config {
         FailedParseSocketAddr(#[source] std::net::AddrParseError, String),
 
         #[error("Failed to open public key file {1}! {0}")]
-        FailedOpenPublicKeyFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
+        FailedOpenPublicKeyFile(#[source] rustls_pki_types::pem::Error, PathBuf),
 
         #[error("Failed to read public key file {1}! {0}")]
-        FailedReadPublicKeyFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
+        FailedReadPublicKeyFile(#[source] rustls_pki_types::pem::Error, PathBuf),
 
         #[error("Failed to find public keys in PEM file {0}!")]
-        FailedFindPublicKeys(std::path::PathBuf),
+        FailedFindPublicKeys(PathBuf),
 
         #[error("Failed to open private key file {1}! {0}")]
-        FailedOpenPrivateKeyFile(#[source] std::io::Error, std::path::PathBuf),
+        FailedOpenPrivateKeyFile(#[source] std::io::Error, PathBuf),
 
         #[error("Failed to read private key file {1}! {0}")]
-        FailedReadPrivateKeyFile(#[source] rustls_pki_types::pem::Error, std::path::PathBuf),
+        FailedReadPrivateKeyFile(#[source] rustls_pki_types::pem::Error, PathBuf),
 
         #[error("Failed to find private keys in PEM file {0}!")]
-        FailedFindPrivateKeys(std::path::PathBuf),
+        FailedFindPrivateKeys(PathBuf),
 
         #[error("Failed to configure TLS from file {1}! {0}")]
-        FailedConfigTLS(#[source] std::io::Error, std::path::PathBuf),
+        FailedConfigTLS(#[source] std::io::Error, PathBuf),
     }
 }
 pub mod handlers {

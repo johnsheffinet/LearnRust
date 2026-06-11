@@ -24,7 +24,7 @@ pub mod states {
         }
     }
 
-    pub fn http_router(state: AppStates) -> Router<AppStates> {
+    pub fn http_router(config: Arc<AppConfig>) -> Router<Arc<AppConfig>> {
         Router::new()
             .fallback(handlers::redirect_to_https)
             .with_state(state)

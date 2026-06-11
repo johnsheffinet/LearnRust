@@ -9,7 +9,7 @@ pub mod states {
     #[derive(Clone, Debug, FromRef)]
     pub struct AppStates {
         pub config: Arc<AppConfig>,
-        pub items: Arc<DashMap<Uuid, Item>>,
+        pub items: Arc<AppState<Item>>,
     }
 
     impl AppStates {
@@ -23,6 +23,8 @@ pub mod states {
             })
         }
     }
+
+    pub type AppState<T> = DashMap<Uuid, T>;
 
     pub fn http_router(config: Arc<AppConfig>) -> Router<Arc<AppConfig>> {
         Router::new()

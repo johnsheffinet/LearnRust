@@ -2,6 +2,7 @@
 
 pub mod states {
     use crate::{config::{AppConfig, AppResult}, handlers, items::{Item, routes}};
+    use std::sync::Arc;
     use dashmap::DashMap;
     use uuid::Uuid;
     
@@ -23,28 +24,27 @@ pub mod states {
         }
     }
 
-    pub type AppState<T> = Arc<DashMap<Uuid, T>>;
+    // pub type AppState<T> = Arc<DashMap<Uuid, T>>;
 
-    pub fn http_router() -> AppResult<Router<Arc<AppConfig>>> {
-        let states = AppStates::new()?;
-        let config = &states.config;
+    pub fn http_router(state: AppStates) -> AppResult<Router> {
+        // let states = AppStates::new()?;
+        // let config = &states.config;
 
         Router::new()
             .fallback(handlers::redirect_to_https)
-            .with_state(config)
+            .with_state(state)
     }
 
-    pub fn https_router() -> AppResult<Router<AppStates>> {
-        let states = AppStates::new()?;
+    pub fn https_router(state: AppStates) -> AppResult<Router> {
+        use axum::routing::get;
+        
+        // let states = AppStates::new()?;
 
         Router::new()
-            .merge(items::routes::<AppStates>())
-            .route(
-                "/healthz",
-                axum::routing::get(handlers::check_app_liveliness),
-            )
+            .merge(items::routes())
+            .route("/healthz", get(handlers::check_app_liveliness))
             .fallback(handlers::report_route_invalid)
-            .with_state(states)
+            .with_state(state)
     }
 }
 pub mod config {

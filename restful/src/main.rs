@@ -27,17 +27,17 @@ pub mod states {
     pub fn http_router(config: Arc<AppConfig>) -> Router<Arc<AppConfig>> {
         Router::new()
             .fallback(handlers::redirect_to_https)
-            .with_state(state)
+            .with_state(config)
     }
 
-    pub fn https_router(state: AppStates) -> Router<AppStates> {
+    pub fn https_router(states: AppStates) -> Router<AppStates> {
         use axum::routing::get;
 
         Router::new()
             .merge(items::routes::<AppStates>())
             .route("/healthz", get(handlers::check_app_liveliness))
             .fallback(handlers::report_route_invalid)
-            .with_state(state)
+            .with_state(states)
     }
 }
 pub mod config {

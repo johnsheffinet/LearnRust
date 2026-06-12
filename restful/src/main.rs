@@ -36,7 +36,7 @@ pub mod config {
 
     impl AppConfig {
         #[tracing::instrument(skip_all, err)]
-        pub async fn new() -> AppResult<AppConfig> {
+        pub async fn new() -> AppResult<Self> {
             let http_addr_raw = env::var("HTTP_ADDR")
                 .map_err(|src| AppError::FailedFindEnvVar(src, "HTTP_ADDR".into()))?;
             let http_addr = http_addr_raw
@@ -82,7 +82,7 @@ pub mod config {
                 .await
                 .map_err(|src| AppError::FailedConfigTLS(src, cert_path.clone()))?;
 
-            Ok(AppConfig {
+            Ok(Self {
                 http_addr,
                 https_addr,
                 cert_path,

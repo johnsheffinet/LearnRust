@@ -1,50 +1,8 @@
 #![warn(unused_crate_dependencies)]
 
-pub mod states {
-    use crate::{config::{AppConfig, AppResult}, handlers, items::{Item, routes}};
-    use std::sync::Arc;
-    use dashmap::DashMap;
-    use uuid::Uuid;
-    
-    #[derive(Clone, Debug, FromRef)]
-    pub struct AppStates {
-        pub config: Arc<AppConfig>,
-        pub items: AppState<Item>,
-    }
-
-    pub type AppState<T> = Arc<DashMap<Uuid, T>>;
-
-    impl AppStates {
-        pub fn new() -> AppResult<Self> {
-            let config = Arc::new(AppConfig::new()?);
-            let items = Arc::new(DashMap::new());
-
-            Ok(Self {
-                config,
-                items,
-            })
-        }
-    }
-
-    pub fn http_router(config: Arc<AppConfig>) -> Router<Arc<AppConfig>> {
-        Router::new()
-            .fallback(handlers::redirect_to_https)
-            .with_state(config)
-    }
-
-    pub fn https_router(states: AppStates) -> Router<AppStates> {
-        use axum::routing::get;
-
-        Router::new()
-            .merge(items::routes::<AppStates>())
-            .route("/healthz", get(handlers::check_app_liveliness))
-            .fallback(handlers::report_route_invalid)
-            .with_state(states)
-    }
-}
 pub mod config {
-    use crate::{handlers, items::{Item, routes}};
-    use std::{sync::Arc, net::SocketAddr, path::PathBuf};
+    use crate::{handlers, items::Item};
+    use std::{sync::Arc, env, path::PathBuf, net::SocketAddr};
     use dashmap::DashMap;
     use axum::{extract::FromRef, Router};
     use rustls_pki_types::pem::PemObject;
@@ -67,27 +25,6 @@ pub mod config {
             .with_state(states)
     }
 
-    #[derive(Clone, Debug, FromRef)]
-    pub struct AppStates {
-        pub config: Arc<AppConfig>,
-        pub items: AppState<Item>,
-    }
-
-    pub type AppState<T> = Arc<DashMap<Uuid, T>>;
-
-    impl AppStates {
-        #[tracing::instrument(skip_all, err)]
-        pub fn new() -> AppResult<Self> {
-            let config = Arc::new(AppConfig::new()?);
-            let items = Arc::new(DashMap::new());
-
-            Ok(Self {
-                config,
-                items,
-            })
-        }
-    }
-
     #[derive(Clone, Debug)]
     pub struct AppConfig {
         pub http_addr: SocketAddr,
@@ -100,19 +37,19 @@ pub mod config {
     impl AppConfig {
         #[tracing::instrument(skip_all, err)]
         pub fn new() -> AppResult<AppConfig> {
-            let http_addr_raw = std::env::var("HTTP_ADDR")
+            let http_addr_raw = env::var("HTTP_ADDR")
                 .map_err(|src| AppError::FailedFindEnvVar(src, "HTTP_ADDR".into()))?;
             let http_addr = http_addr_raw
                 .parse::<SocketAddr>()
                 .map_err(|src| AppError::FailedParseSocketAddr(src, http_addr_raw))?;
 
-            let https_addr_raw = std::env::var("HTTPS_ADDR")
+            let https_addr_raw = env::var("HTTPS_ADDR")
                 .map_err(|src| AppError::FailedFindEnvVar(src, "HTTPS_ADDR".into()))?;
             let https_addr = https_addr_raw
                 .parse::<SocketAddr>()
                 .map_err(|src| AppError::FailedParseSocketAddr(src, https_addr_raw))?;
 
-            let cert_path_raw = std::env::var("CERT_PATH")
+            let cert_path_raw = env::var("CERT_PATH")
                 .map_err(|src| AppError::FailedFindEnvVar(src, "CERT_PATH".into()))?;
             let cert_path = PathBuf::from(cert_path_raw);
 
@@ -126,7 +63,7 @@ pub mod config {
                 return Err(AppError::FailedFindPublicKeys(cert_path));
             }
 
-            let key_path_raw = std::env::var("KEY_PATH")
+            let key_path_raw = env::var("KEY_PATH")
                 .map_err(|src| AppError::FailedFindEnvVar(src, "KEY_PATH".into()))?;
             let key_path = PathBuf::from(key_path_raw);
 
@@ -186,6 +123,28 @@ pub mod config {
         #[error("Failed to configure TLS from file {1}! {0}")]
         FailedConfigTLS(#[source] std::io::Error, PathBuf),
     }
+
+    #[derive(Clone, Debug, FromRef)]
+    pub struct AppStates {
+        pub config: Arc<AppConfig>,
+        pub items: AppState<Item>,
+    }
+
+    pub type AppState<T> = Arc<DashMap<Uuid, T>>;
+
+    impl AppStates {
+        #[tracing::instrument(skip_all, err)]
+        pub fn new() -> AppResult<Self> {
+            let config = Arc::new(AppConfig::new()?);
+            let items = Arc::new(DashMap::new());
+
+            Ok(Self {
+                config,
+                items,
+            })
+        }
+    }
+
 }
 pub mod handlers {
     use axum::{

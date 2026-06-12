@@ -15,11 +15,11 @@ pub mod config {
             .with_state(config)
     }
 
-    pub fn https_router(states: AppStates) -> Router<AppStates> {
+    pub fn https_router(states: AppState) -> Router<AppState> {
         use axum::routing::get;
 
         Router::new()
-            .merge(items::routes::<AppStates>())
+            .merge(items::routes::<AppState>())
             .route("/healthz", get(handlers::check_app_liveliness))
             .fallback(handlers::report_route_invalid)
             .with_state(states)
@@ -74,14 +74,6 @@ pub mod config {
                 .ok_or_else(|| AppError::FailedFindPrivateKeys(key_path.clone()))?
                 .map_err(|src| AppError::FailedReadPrivateKeyFile(src, key_path.clone()))?;
 
-            // let tls_config = tokio::runtime::Runtime::new()
-            //     .map_err(|src| AppError::FailedConfigTLS(src, cert_path.clone()))?
-            //     .block_on(RustlsConfig::from_der(
-            //         certs.into_iter().map(|cert| cert.to_vec()).collect(),
-            //         key.secret_der().to_vec(),
-            //     ))
-            //     .map_err(|src| AppError::FailedConfigTLS(src, cert_path.clone()))?;
-
             let tls_config = RustlsConfig::from_der(
                     certs.into_iter().map(|cert| cert.to_vec()).collect(),
                     key.secret_der().to_vec(),
@@ -132,14 +124,14 @@ pub mod config {
     }
 
     #[derive(Clone, Debug, FromRef)]
-    pub struct AppStates {
+    pub struct AppState {
         pub config: Arc<AppConfig>,
-        pub items: AppState<Item>,
+        pub items: AppStore<Item>,
     }
 
-    pub type AppState<T> = Arc<DashMap<Uuid, T>>;
+    pub type AppStore<T> = Arc<DashMap<Uuid, T>>;
 
-    impl AppStates {
+    impl AppState {
         #[tracing::instrument(skip_all, err)]
         pub async fn new() -> AppResult<Self> {
             let config = Arc::new(AppConfig::new().await?);
@@ -208,7 +200,7 @@ pub mod handlers {
     }
 }
 pub mod items {
-    use crate::config::AppState;
+    use crate::config::AppStore;
     use axum::{
         extract::{Json, Path, Query, State},
         http::StatusCode,
@@ -219,7 +211,7 @@ pub mod items {
 
     pub fn routes<S>() -> axum::Router<S>
     where
-        AppState<Item>: axum::extract::FromRef<S>,
+        AppStore<Item>: axum::extract::FromRef<S>,
         S: Clone + Send + Sync + 'static,
     {
         axum::Router::new()
@@ -232,7 +224,7 @@ pub mod items {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn create(
-        State(state): State<AppState<Item>>,
+        State(state): State<AppStore<Item>>,
         Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,
     ) -> AppResult<impl IntoResponse> {
         let id = uuid::Uuid::new_v4();
@@ -251,7 +243,7 @@ pub mod items {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn delete(
-        State(state): State<AppState<Item>>,
+        State(state): State<AppStore<Item>>,
         Path(GetPathId { id }): Path<GetPathId>,
     ) -> AppResult<impl IntoResponse> {
         let (_, item) = state
@@ -268,7 +260,7 @@ pub mod items {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn get(
-        State(state): State<AppState<Item>>,
+        State(state): State<AppStore<Item>>,
         Path(GetPathId { id }): Path<GetPathId>,
     ) -> AppResult<impl IntoResponse> {
         let item = state
@@ -283,7 +275,7 @@ pub mod items {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn select(
-        State(state): State<AppState<Item>>,
+        State(state): State<AppStore<Item>>,
         Valid(Query(params)): Valid<Query<SelectQueryParams>>,
     ) -> AppResult<impl IntoResponse> {
         let results: Vec<ItemResponse> = state
@@ -315,7 +307,7 @@ pub mod items {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn update(
-        State(state): State<AppState<Item>>,
+        State(state): State<AppStore<Item>>,
         Path(GetPathId { id }): Path<GetPathId>,
         Valid(Json(payload)): Valid<Json<UpdateJsonPayload>>,
     ) -> AppResult<impl IntoResponse> {
@@ -414,207 +406,9 @@ pub mod items {
         desc: Option<String>,
     }
 }
-// pub mod tools {
-//     use axum::extract::FromRequest;
-
-//     #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
-//     pub enum AppError {
-//         #[error("Failed to serialize payload parameter into request body! {0}")]
-//         #[status(axum::http::StatusCode::BAD_REQUEST)]
-//         FailedSerializePayloadIntoRequest(#[source] serde_json::Error),
-
-//         #[error("Failed to serialize payload parameter from request body! {0}")]
-//         #[status(axum::http::StatusCode::BAD_REQUEST)]
-//         FailedSerializePayloadFromRequest(#[source] serde_json::Error),
-
-//         #[error("Failed to build request body from payload parameter! {0}")]
-//         #[status(axum::http::StatusCode::BAD_REQUEST)]
-//         FailedBuildRequestFromPayload(#[source] axum::http::Error),
-
-//         #[error("Failed to parse request body into payload parameter! {0}")]
-//         #[status(axum::http::StatusCode::BAD_REQUEST)]
-//         FailedParseRequestIntoPayload(#[source] axum::Error),
-
-//         #[error("Failed to serialize payload parameter into response body! {0}")]
-//         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-//         FailedSerializePayloadIntoResponse(#[source] serde_json::Error),
-
-//         #[error("Failed to serialize payload parameter from response body! {0}")]
-//         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-//         FailedSerializePayloadFromResponse(#[source] serde_json::Error),
-
-//         #[error("Failed to build response body from payload parameter! {0}")]
-//         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-//         FailedBuildResponseFromPayload(#[source] axum::http::Error),
-
-//         #[error("Failed to parse response body into payload parameter! {0}")]
-//         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-//         FailedParseResponseIntoPayload(#[source] axum::Error),
-
-//         #[error("Failed to get router response parameters from request parameters! {0}")]
-//         #[status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)]
-//         FailedGetRouterResponse(String),
-//     }
-
-//     pub type AppResult<T> = Result<T, AppError>;
-
-//     pub type AppState<T> = Arc<Rwlock<HashMap<Uuid, T>>>;
-
-//     #[derive(Debug, Clone, PartialEq)]
-//     pub struct RequestParams {
-//         pub method: axum::http::Method,
-//         pub path: String,
-//         pub query: String,
-//         pub version: axum::http::Version,
-//         pub headers: axum::http::HeaderMap,
-//         pub payload: serde_json::Value,
-//     }
-
-//     impl TryFrom<RequestParams> for axum::extract::Request {
-//         type Error = AppError;
-
-//         #[tracing::instrument(skip_all, err)]
-//         fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
-//             let params_uri = if params.query.is_empty() {
-//                 params.path
-//             } else {
-//                 format!("{}?{}", params.path, params.query)
-//             };
-
-//             let mut builder = axum::extract::Request::builder()
-//                 .method(params.method)
-//                 .uri(params_uri)
-//                 .version(params.version);
-
-//             if let Some(headers) = builder.headers_mut() {
-//                 headers.extend(params.headers);
-//             }
-
-//             let body = serde_json::to_vec(&params.payload)
-//                 .map_err(AppError::FailedSerializePayloadIntoRequest)?;
-
-//             builder
-//                 .body(axum::body::Body::from(body))
-//                 .map_err(AppError::FailedBuildRequestFromPayload)
-//         }
-//     }
-
-//     impl<S> FromRequest<S> for RequestParams
-//     where
-//         S: Send + Sync,
-//     {
-//         type Rejection = AppError;
-
-//         #[tracing::instrument(skip_all, err)]
-//         async fn from_request(
-//             req: axum::extract::Request,
-//             _state: &S,
-//         ) -> Result<Self, Self::Rejection> {
-//             let method = req.method().clone();
-
-//             let uri = req.uri().clone();
-
-//             let path = uri.path().to_string();
-
-//             let query = uri.query().unwrap_or("").to_string();
-
-//             let version = req.version();
-
-//             let headers = req.headers().clone();
-
-//             let body = axum::body::to_bytes(req.into_body(), 2 * 1024 * 1024)
-//                 .await
-//                 .map_err(AppError::FailedParseRequestIntoPayload)?;
-//             let payload = serde_json::from_slice(&body)
-//                 .map_err(AppError::FailedSerializePayloadFromRequest)?;
-
-//             Ok(RequestParams {
-//                 method,
-//                 path,
-//                 query,
-//                 version,
-//                 headers,
-//                 payload,
-//             })
-//         }
-//     }
-
-//     #[derive(Debug, Clone, PartialEq)]
-//     pub struct ResponseParams {
-//         pub version: axum::http::Version,
-//         pub status: axum::http::StatusCode,
-//         pub headers: axum::http::HeaderMap,
-//         pub payload: serde_json::Value,
-//     }
-
-//     impl TryFrom<ResponseParams> for axum::response::Response {
-//         type Error = AppError;
-
-//         #[tracing::instrument(skip_all, err)]
-//         fn try_from(params: ResponseParams) -> Result<Self, Self::Error> {
-//             let mut builder = axum::response::Response::builder()
-//                 .version(params.version)
-//                 .status(params.status);
-
-//             if let Some(headers) = builder.headers_mut() {
-//                 headers.extend(params.headers);
-//             }
-
-//             let body = serde_json::to_vec(&params.payload)
-//                 .map_err(AppError::FailedSerializePayloadIntoResponse)?;
-
-//             builder
-//                 .body(axum::body::Body::from(body))
-//                 .map_err(AppError::FailedBuildResponseFromPayload)
-//         }
-//     }
-
-//     impl ResponseParams {
-//         #[tracing::instrument(skip_all, err)]
-//         pub async fn from_response(res: axum::response::Response) -> AppResult<Self> {
-//             let version = res.version();
-
-//             let status = res.status();
-
-//             let headers = res.headers().clone();
-
-//             let body = axum::body::to_bytes(res.into_body(), 2 * 1024 * 1024)
-//                 .await
-//                 .map_err(AppError::FailedParseResponseIntoPayload)?;
-//             let payload = serde_json::from_slice(&body)
-//                 .map_err(AppError::FailedSerializePayloadFromResponse)?;
-
-//             Ok(ResponseParams {
-//                 version,
-//                 status,
-//                 headers,
-//                 payload,
-//             })
-//         }
-//     }
-
-//     #[tracing::instrument(skip_all, err)]
-//     pub async fn get_router_response_params(
-//         router: axum::Router,
-//         req_params: RequestParams,
-//     ) -> AppResult<ResponseParams> {
-//         use tower::util::ServiceExt;
-
-//         let req = axum::extract::Request::try_from(req_params)?;
-
-//         let res = router
-//             .oneshot(req)
-//             .await
-//             .map_err(|err| AppError::FailedGetRouterResponse(err.to_string()))?;
-
-//         let res_params = ResponseParams::from_response(res).await?;
-
-//         Ok(res_params)
-//     }
-// }
 #[cfg(test)]
 mod tests {
-    use crate::config::{AppConfig, AppResult, AppStates, http_router, https_router};
+    use crate::config::{AppConfig, AppResult, AppState, http_router, https_router};
     use axum::{Router, http::StatusCode};
     use axum_test::TestServer;
     use serde_json::{Value, json};
@@ -724,7 +518,7 @@ mod tests {
 
         #[test_log::test(tokio::test)]
         async fn test_check_app_liveliness() {
-            let server = TestServer::new(https_router(AppStates::new())).unwrap();
+            let server = TestServer::new(https_router(AppState::new())).unwrap();
 
             let response = server.get("/healthz").await;
 
@@ -733,7 +527,7 @@ mod tests {
 
         #[test_log::test(tokio::test)]
         async fn test_report_invalid_route() {
-            let server = TestServer::new(https_router(AppStates::new())).unwrap();
+            let server = TestServer::new(https_router(AppState::new())).unwrap();
 
             let response = server.get("/").await;
 

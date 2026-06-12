@@ -36,7 +36,7 @@ pub mod config {
 
     impl AppConfig {
         #[tracing::instrument(skip_all, err)]
-        pub fn new() -> AppResult<AppConfig> {
+        pub async fn new() -> AppResult<AppConfig> {
             let http_addr_raw = env::var("HTTP_ADDR")
                 .map_err(|src| AppError::FailedFindEnvVar(src, "HTTP_ADDR".into()))?;
             let http_addr = http_addr_raw
@@ -74,13 +74,19 @@ pub mod config {
                 .ok_or_else(|| AppError::FailedFindPrivateKeys(key_path.clone()))?
                 .map_err(|src| AppError::FailedReadPrivateKeyFile(src, key_path.clone()))?;
 
-            let tls_config = tokio::runtime::Runtime::new()
-                .map_err(|src| AppError::FailedConfigTLS(src, cert_path.clone()))?
-                .block_on(RustlsConfig::from_der(
+            // let tls_config = tokio::runtime::Runtime::new()
+            //     .map_err(|src| AppError::FailedConfigTLS(src, cert_path.clone()))?
+            //     .block_on(RustlsConfig::from_der(
+            //         certs.into_iter().map(|cert| cert.to_vec()).collect(),
+            //         key.secret_der().to_vec(),
+            //     ))
+            //     .map_err(|src| AppError::FailedConfigTLS(src, cert_path.clone()))?;
+
+            let tls_config = RustlsConfig::from_der(
                     certs.into_iter().map(|cert| cert.to_vec()).collect(),
                     key.secret_der().to_vec(),
-                ))
-                .map_err(|src| AppError::FailedConfigTLS(src, cert_path.clone()))?;
+                )
+                .map_err(|src| AppError::FailedConfigTLS(src, cert_path))?;
 
             Ok(AppConfig {
                 http_addr,
@@ -134,8 +140,8 @@ pub mod config {
 
     impl AppStates {
         #[tracing::instrument(skip_all, err)]
-        pub fn new() -> AppResult<Self> {
-            let config = Arc::new(AppConfig::new()?);
+        pub async fn new() -> AppResult<Self> {
+            let config = Arc::new(AppConfig::new().await?);
             let items = Arc::new(DashMap::new());
 
             Ok(Self {

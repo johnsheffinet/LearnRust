@@ -157,7 +157,7 @@ pub mod handlers {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn redirect_to_https(
-        State(config): State<crate::config::AppConfig>,
+        State(config): State<Arc<crate::config::AppConfig>>,
         uri: Uri,
     ) -> AppResult<impl IntoResponse> {
         let path_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
@@ -506,10 +506,12 @@ mod tests {
 
         #[test_log::test(tokio::test)]
         async fn test_redirect_to_https() {
-            let server = TestServer::new(http_router(AppConfig::new())).unwrap();
+            let config = Arc::new(AppConfig::new().await.unwrap());
+
+            let server = TestServer::new(http_router(config)).unwrap();
 
             let response = server.get("/healthz").await;
-
+            
             response.assert_status(StatusCode::TEMPORARY_REDIRECT);
         }
 

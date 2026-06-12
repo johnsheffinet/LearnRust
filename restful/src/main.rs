@@ -2,13 +2,13 @@
 
 pub mod config {
     use crate::{handlers, items::Item};
-    use std::{sync::Arc, env, path::PathBuf, net::SocketAddr};
-    use dashmap::DashMap;
-    use axum::{extract::FromRef, Router};
-    use rustls_pki_types::pem::PemObject;
+    use axum::{Router, extract::FromRef};
     use axum_server::tls_rustls::RustlsConfig;
+    use dashmap::DashMap;
+    use rustls_pki_types::pem::PemObject;
+    use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
     use uuid::Uuid;
-    
+
     pub fn http_router(config: Arc<AppConfig>) -> Router<Arc<AppConfig>> {
         Router::new()
             .fallback(handlers::redirect_to_https)
@@ -76,11 +76,11 @@ pub mod config {
                 .map_err(|src| AppError::FailedReadPrivateKeyFile(src, key_path.clone()))?;
 
             let tls_config = RustlsConfig::from_der(
-                    certs.into_iter().map(|cert| cert.to_vec()).collect(),
-                    key.secret_der().to_vec(),
-                )
-                .await
-                .map_err(|src| AppError::FailedConfigTLS(src, cert_path.clone()))?;
+                certs.into_iter().map(|cert| cert.to_vec()).collect(),
+                key.secret_der().to_vec(),
+            )
+            .await
+            .map_err(|src| AppError::FailedConfigTLS(src, cert_path.clone()))?;
 
             Ok(Self {
                 http_addr,
@@ -138,13 +138,9 @@ pub mod config {
             let config = Arc::new(AppConfig::new().await?);
             let items = Arc::new(DashMap::new());
 
-            Ok(Self {
-                config,
-                items,
-            })
+            Ok(Self { config, items })
         }
     }
-
 }
 pub mod handlers {
     use axum::{
@@ -184,7 +180,7 @@ pub mod handlers {
     }
 
     #[tracing::instrument(skip_all, err)]
-    pub async fn report_invalid_route(uri: Uri) -> AppResult<impl IntoResponse> {
+    pub async fn report_route_invalid(uri: Uri) -> AppResult<impl IntoResponse> {
         Ok((
             StatusCode::NOT_FOUND,
             Json(json!({"status": format!("Invalid route {}!", uri.path())})),
@@ -527,7 +523,7 @@ mod tests {
         }
 
         #[test_log::test(tokio::test)]
-        async fn test_report_invalid_route() {
+        async fn test_report_route_invalid() {
             let server = TestServer::new(https_router(AppState::new())).unwrap();
 
             let response = server.get("/").await;

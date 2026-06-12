@@ -51,6 +51,22 @@ pub mod config {
     use axum_server::tls_rustls::RustlsConfig;
     use uuid::Uuid;
     
+    pub fn http_router(config: Arc<AppConfig>) -> Router<Arc<AppConfig>> {
+        Router::new()
+            .fallback(handlers::redirect_to_https)
+            .with_state(config)
+    }
+
+    pub fn https_router(states: AppStates) -> Router<AppStates> {
+        use axum::routing::get;
+
+        Router::new()
+            .merge(items::routes::<AppStates>())
+            .route("/healthz", get(handlers::check_app_liveliness))
+            .fallback(handlers::report_route_invalid)
+            .with_state(states)
+    }
+
     #[derive(Clone, Debug, FromRef)]
     pub struct AppStates {
         pub config: Arc<AppConfig>,
@@ -70,22 +86,6 @@ pub mod config {
                 items,
             })
         }
-    }
-
-    pub fn http_router(config: Arc<AppConfig>) -> Router<Arc<AppConfig>> {
-        Router::new()
-            .fallback(handlers::redirect_to_https)
-            .with_state(config)
-    }
-
-    pub fn https_router(states: AppStates) -> Router<AppStates> {
-        use axum::routing::get;
-
-        Router::new()
-            .merge(items::routes::<AppStates>())
-            .route("/healthz", get(handlers::check_app_liveliness))
-            .fallback(handlers::report_route_invalid)
-            .with_state(states)
     }
 
     #[derive(Clone, Debug)]

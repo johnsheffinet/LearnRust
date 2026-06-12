@@ -53,14 +53,15 @@ pub mod config {
                 .map_err(|src| AppError::FailedFindEnvVar(src, "CERT_PATH".into()))?;
             let cert_path = PathBuf::from(cert_path_raw);
 
-            let certs = rustls_pki_types::CertificateDer::pem_file_iter(&cert_path)
-                .map_err(|src| AppError::FailedOpenPublicKeyFile(src, cert_path.clone()))?
+            let cert_pem_file = std::fs::read(&cert_path)
+                .map_err(|src| AppError::FailedOpenPublicKeyFile(src, cert_path.clone()))?;
+            let certs = rustls_pki_types::CertificateDer::pem_slice_iter(&cert_path)
                 .map(|result| {
                     result.map_err(|src| AppError::FailedReadPublicKeyFile(src, cert_path.clone()))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             if certs.is_empty() {
-                return Err(AppError::FailedFindPublicKeys(cert_path));
+                return Err(AppError::FailedFindPublicKeys(cert_path.clone()));
             }
 
             let key_path_raw = env::var("KEY_PATH")

@@ -86,7 +86,8 @@ pub mod config {
                     certs.into_iter().map(|cert| cert.to_vec()).collect(),
                     key.secret_der().to_vec(),
                 )
-                .map_err(|src| AppError::FailedConfigTLS(src, cert_path))?;
+                .await
+                .map_err(|src| AppError::FailedConfigTLS(src, cert_path.clone()))?;
 
             Ok(AppConfig {
                 http_addr,

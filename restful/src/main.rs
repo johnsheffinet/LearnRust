@@ -103,7 +103,7 @@ pub mod config {
         FailedParseSocketAddr(#[source] std::net::AddrParseError, String),
 
         #[error("Failed to open public key file {1}! {0}")]
-        FailedOpenPublicKeyFile(#[source] rustls_pki_types::pem::Error, PathBuf),
+        FailedOpenPublicKeyFile(#[source] std::io::Error, PathBuf),
 
         #[error("Failed to read public key file {1}! {0}")]
         FailedReadPublicKeyFile(#[source] rustls_pki_types::pem::Error, PathBuf),

@@ -55,7 +55,7 @@ pub mod config {
 
             let cert_pem_file = std::fs::read(&cert_path)
                 .map_err(|src| AppError::FailedOpenPublicKeyFile(src, cert_path.clone()))?;
-            let certs = rustls_pki_types::CertificateDer::pem_slice_iter(&cert_path_file)
+            let certs = rustls_pki_types::CertificateDer::pem_slice_iter(&cert_pem_file)
                 .map(|result| {
                     result.map_err(|src| AppError::FailedReadPublicKeyFile(src, cert_path.clone()))
                 })

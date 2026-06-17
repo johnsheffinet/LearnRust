@@ -714,6 +714,19 @@ mod tests {
             response.assert_status(StatusCode::NOT_FOUND);
         }
     }
+    mod items {
+        #[test_case(
+            "success",
+            Some("name"),
+            Some("desc");
+            "success"
+        )]
+        async fn test_create(
+            scenario: &str,
+            name: Option<&str>,
+            desc: Option<&str>,
+        ) {}
+    }
 }
 
 #[tokio::main]

@@ -672,6 +672,53 @@ mod tests {
             });
         }
     }
+pub mod handlers {
+        use super::*;
+
+        #[test_log::test(tokio::test)]
+        async fn test_redirect_to_https() {
+            let config = Arc::new(AppConfig::new().await.unwrap());
+
+            let server = TestServer::new(http_router(config)).unwrap();
+
+            let response = server.get("/healthz").await;
+            
+            response.assert_status(StatusCode::TEMPORARY_REDIRECT);
+        }
+
+        #[test_log::test(tokio::test)]
+        async fn test_check_app_liveliness() {
+            let server = TestServer::new(https_router(AppState::new())).unwrap();
+
+            let response = server.get("/healthz").await;
+
+            response.assert_status(StatusCode::OK);
+        }
+
+        #[test_log::test(tokio::test)]
+        async fn test_report_route_invalid() {
+            let server = TestServer::new(https_router(AppState::new())).unwrap();
+
+            let response = server.get("/").await;
+
+            response.assert_status(StatusCode::NOT_FOUND);
+        }
+    }
+    mod items {
+        use axum_test::TestServer;
+        use test_case::test_case;
+
+        #[test_case(
+            request_payload: Json::Value,
+            expected_statuscode: StatusCode,
+            expected_response_payload: Json::Value,
+        )]
+        async fn test_create() {}
+        async fn test_delete() {}
+        async fn test_get() {}
+        async fn test_select() {}
+        async fn test_update() {}
+    }
 }
 
 #[tokio::main]

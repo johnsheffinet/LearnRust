@@ -244,6 +244,46 @@ pub mod items {
         Ok((StatusCode::CREATED, Json(item_response)))
     }
 
+    #[derive(Debug, serde::Deserialize, validator::Validate)]
+    pub struct CreateJsonPayload {
+        #[validate(length(min = 1, message = "field in create json payload is missing!"))]
+        name: String,
+        #[validate(length(min = 1, message = "field in create json payload is missing!"))]
+        desc: String,
+    }
+
+    impl From<CreateJsonPayload> for Item {
+        fn from(payload: CreateJsonPayload) -> Self {
+            Self {
+                name: payload.name,
+                desc: payload.desc,
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+    pub struct Item {
+        name: String,
+        desc: String,
+    }
+
+    impl Item {
+        fn edit(&mut self, payload: UpdateJsonPayload) {
+            if let Some(name) = payload.name {
+                self.name = name;
+            }
+            if let Some(desc) = payload.desc {
+                self.desc = desc;
+            }
+        }
+    }
+
+    #[derive(Debug, serde::Serialize)]
+    struct ItemResponse {
+        id: uuid::Uuid,
+        item: Item,
+    }
+
     #[tracing::instrument(skip_all, err)]
     pub async fn delete(
         State(state): State<AppStore<Item>>,
@@ -259,6 +299,11 @@ pub mod items {
         };
 
         Ok((StatusCode::OK, Json(item_response)))
+    }
+
+    #[derive(Debug, serde::Deserialize)]
+    pub struct GetPathId {
+        id: uuid::Uuid,
     }
 
     #[tracing::instrument(skip_all, err)]
@@ -308,6 +353,14 @@ pub mod items {
         Ok((StatusCode::OK, Json(results)))
     }
 
+    #[derive(Debug, serde::Deserialize, validator::Validate)]
+    pub struct SelectQueryParams {
+        #[validate(length(min = 1, message = "field in select query params is missing!"))]
+        name: Option<String>,
+        #[validate(length(min = 1, message = "field in select query params is missing!"))]
+        desc: Option<String>,
+    }
+
     #[tracing::instrument(skip_all, err)]
     pub async fn update(
         State(state): State<AppStore<Item>>,
@@ -328,6 +381,14 @@ pub mod items {
         Ok((StatusCode::OK, Json(item_response)))
     }
 
+    #[derive(Debug, serde::Deserialize, validator::Validate)]
+    pub struct UpdateJsonPayload {
+        #[validate(length(min = 1, message = "field in update json payload is missing!"))]
+        name: Option<String>,
+        #[validate(length(min = 1, message = "field in update json payload is missing!"))]
+        desc: Option<String>,
+    }
+
     pub type AppResult<T> = Result<T, AppError>;
 
     #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
@@ -346,67 +407,6 @@ pub mod items {
         #[status_code(StatusCode::INTERNAL_SERVER_ERROR)]
         #[code("INTERNAL_SERVER_ERROR")]
         InternalServerError(String),
-    }
-
-    #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-    pub struct Item {
-        name: String,
-        desc: String,
-    }
-
-    impl Item {
-        fn edit(&mut self, payload: UpdateJsonPayload) {
-            if let Some(name) = payload.name {
-                self.name = name;
-            }
-            if let Some(desc) = payload.desc {
-                self.desc = desc;
-            }
-        }
-    }
-
-    #[derive(Debug, serde::Serialize)]
-    struct ItemResponse {
-        id: uuid::Uuid,
-        item: Item,
-    }
-
-    #[derive(Debug, serde::Deserialize, validator::Validate)]
-    pub struct CreateJsonPayload {
-        #[validate(length(min = 1, message = "field in create json payload is missing!"))]
-        name: String,
-        #[validate(length(min = 1, message = "field in create json payload is missing!"))]
-        desc: String,
-    }
-
-    impl From<CreateJsonPayload> for Item {
-        fn from(payload: CreateJsonPayload) -> Self {
-            Self {
-                name: payload.name,
-                desc: payload.desc,
-            }
-        }
-    }
-
-    #[derive(Debug, serde::Deserialize)]
-    pub struct GetPathId {
-        id: uuid::Uuid,
-    }
-
-    #[derive(Debug, serde::Deserialize, validator::Validate)]
-    pub struct SelectQueryParams {
-        #[validate(length(min = 1, message = "field in select query params is missing!"))]
-        name: Option<String>,
-        #[validate(length(min = 1, message = "field in select query params is missing!"))]
-        desc: Option<String>,
-    }
-
-    #[derive(Debug, serde::Deserialize, validator::Validate)]
-    pub struct UpdateJsonPayload {
-        #[validate(length(min = 1, message = "field in update json payload is missing!"))]
-        name: Option<String>,
-        #[validate(length(min = 1, message = "field in update json payload is missing!"))]
-        desc: Option<String>,
     }
 }
 #[cfg(test)]

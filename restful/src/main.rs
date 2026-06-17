@@ -179,10 +179,10 @@ pub mod handlers {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn check_app_liveliness() -> AppResult<impl IntoResponse> {
-        use tokio::time::{sleep, Duration};
+        use tokio::time::{Duration, sleep};
 
         sleep(Duration::from_secs(1)).await;
-        
+
         Ok((StatusCode::OK, Json(json!({"status": "App is lively."}))))
     }
 

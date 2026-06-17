@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 ammonia = "4.1.2" # cargo add ammonia
-axum = "0.8.8" # cargo add axum
+axum = { version = "0.8.8", features = ["macros"] } # cargo add axum --features macros
 axum_csrf = "0.11.0" # cargo add axum-csrf
 axum-error-handler = "0.2.1"
 axum-governor = "1.0.3" # cargo add axum-governor
@@ -15,7 +15,7 @@ axum_thiserror = "0.1.0" # cargo add axum_thiserror
 axum-valid = "0.24.0" # cargo add axum-valid
 chrono = { version = "0.4.43", features = ["serde"] } # cargo add chrono --features serde
 dashmap = "6.2.1"
-figment = { version = "0.10.19", features = ["env", "test"] } # cargo add figment --features env
+figment = { version = "0.10.19", features = ["env", "test"] } # cargo add figment --features env,test
 futures = "0.3.32"
 get_fields = "0.1.0" # cargo add get_fields
 jsonwebtoken = { version = "10.2.0", features = ["aws_lc_rs"] } # cargo add jsonwebtoken --features aws_lc_rs
@@ -41,6 +41,7 @@ pretty_assertions = "1.4.1" # cargo add pretty_assertions --dev
 rcgen = "0.14.7" # cargo add rcgen --dev
 test-case = "3.3.1" # cargo add test-case --dev
 test-log = { version = "0.2.19", features = ["trace"] } # cargo add test-log --features trace --dev
+tokio-test = "0.4.5"
 
 
 # trc

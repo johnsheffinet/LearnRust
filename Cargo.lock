@@ -296,6 +296,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "31b698c5f9a010f6573133b09e0de5408834d0c82f8d7475a89fc1867a71cd90"
 dependencies = [
  "axum-core 0.5.6",
+ "axum-macros",
  "bytes",
  "form_urlencoded",
  "futures-util",
@@ -407,6 +408,17 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+]
+
+[[package]]
+name = "axum-macros"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7aa268c23bfbbd2c4363b9cd302a4f504fb2a9dfe7e3451d66f35dd392e20aca"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -2295,6 +2307,7 @@ dependencies = [
  "test-log",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-test",
  "tower",
  "tower-http",
  "tracing",
@@ -2851,6 +2864,28 @@ checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
 dependencies = [
  "rustls",
  "tokio",
+]
+
+[[package]]
+name = "tokio-stream"
+version = "0.1.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32da49809aab5c3bc678af03902d4ccddea2a87d028d86392a4b1560c6906c70"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-test"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f6d24790a10a7af737693a3e8f1d03faef7e6ca0cc99aae5066f533766de545"
+dependencies = [
+ "futures-core",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]

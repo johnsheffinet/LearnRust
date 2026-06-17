@@ -1,7 +1,8 @@
-#![warn(unused_crate_dependencies)]
-
 pub mod config {
-    use crate::{handlers, items::Item};
+    use crate::{
+        handlers,
+        items::{self, Item},
+    };
     use axum::{Router, extract::FromRef};
     use axum_server::tls_rustls::RustlsConfig;
     use dashmap::DashMap;
@@ -9,20 +10,20 @@ pub mod config {
     use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
     use uuid::Uuid;
 
-    pub fn http_router(config: Arc<AppConfig>) -> Router<Arc<AppConfig>> {
+    pub fn http_router(state: AppState) -> Router<AppState> {
         Router::new()
             .fallback(handlers::redirect_to_https)
-            .with_state(config)
+            .with_state(state)
     }
 
-    pub fn https_router(states: AppState) -> Router<AppState> {
+    pub fn https_router(state: AppState) -> Router<AppState> {
         use axum::routing::get;
 
         Router::new()
             .merge(items::routes::<AppState>())
             .route("/healthz", get(handlers::check_app_liveliness))
             .fallback(handlers::report_route_invalid)
-            .with_state(states)
+            .with_state(state)
     }
 
     #[derive(Clone, Debug)]
@@ -31,7 +32,7 @@ pub mod config {
         pub https_addr: SocketAddr,
         pub cert_path: PathBuf,
         pub key_path: PathBuf,
-        pub tls_config: RustlsConfig,
+        pub tls_config: Arc<RustlsConfig>,
     }
 
     impl AppConfig {
@@ -82,6 +83,8 @@ pub mod config {
             .await
             .map_err(|src| AppError::FailedConfigTLS(src, cert_path.clone()))?;
 
+            let tls_config = Arc::new(tls_config);
+
             Ok(Self {
                 http_addr,
                 https_addr,
@@ -126,17 +129,17 @@ pub mod config {
 
     #[derive(Clone, Debug, FromRef)]
     pub struct AppState {
-        pub config: Arc<AppConfig>,
+        pub config: AppConfig,
         pub items: AppStore<Item>,
     }
 
-    pub type AppStore<T> = Arc<DashMap<Uuid, T>>;
+    pub type AppStore<T> = DashMap<Uuid, T>;
 
     impl AppState {
         #[tracing::instrument(skip_all, err)]
         pub async fn new() -> AppResult<Self> {
-            let config = Arc::new(AppConfig::new().await?);
-            let items = Arc::new(DashMap::new());
+            let config = AppConfig::new().await?;
+            let items = DashMap::new();
 
             Ok(Self { config, items })
         }
@@ -153,16 +156,17 @@ pub mod handlers {
         response::IntoResponse,
     };
     use serde_json::json;
-    use std::sync::Arc;
+
+    use crate::config::AppState;
 
     #[tracing::instrument(skip_all, err)]
     pub async fn redirect_to_https(
-        State(config): State<Arc<crate::config::AppConfig>>,
+        State(state): State<AppState>,
         uri: Uri,
     ) -> AppResult<impl IntoResponse> {
         let path_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
 
-        let redirect_url = format!("https://{}{}", config.https_addr, path_query,);
+        let redirect_url = format!("https://{}{}", &state.config.https_addr, path_query,);
 
         let location =
             HeaderValue::try_from(redirect_url.clone()).map_err(AppError::FailedCreateHeader)?;
@@ -204,7 +208,6 @@ pub mod items {
         response::IntoResponse,
     };
     use axum_valid::Valid;
-    use std::sync::Arc;
 
     pub fn routes<S>() -> axum::Router<S>
     where
@@ -405,148 +408,269 @@ pub mod items {
 }
 #[cfg(test)]
 mod tests {
-    use crate::config::{AppConfig, AppResult, AppState, http_router, https_router};
-    use axum::{Router, http::StatusCode};
-    use axum_test::TestServer;
-    use serde_json::{Value, json};
-    use std::sync::Arc;
-    use test_case::test_case;
-
     mod config {
-        use super::*;
-        // use crate::config::AppError;
-        // use test_case::test_case;
-
-        #[test_case(Some("valid"),   Some("valid"),   Some("valid"),   "Success";               "success")]
-        #[test_case(None,            Some("valid"),   Some("valid"),   "FailedFindEnvVar";      "failure find env var")]
-        #[test_case(Some("invalid"), Some("valid"),   Some("valid"),   "FailedParseSocketAddr"; "failure parse socket addr")]
-        #[test_case(Some("valid"),   None,            Some("valid"),   "FailedOpenPublicKeyFile";     "failure open pem file")]
-        #[test_case(Some("valid"),   Some("bad_pem"), Some("valid"),   "FailedReadPublicKeyFile";    "failure parse pem file")]
-        #[test_case(Some("valid"),   Some("no_cert"), Some("valid"),   "FailedFindPublicKeys";       "failure find certs")]
-        #[test_case(Some("valid"),   Some("valid"),   Some("invalid"), "FailedConfigTLS";       "failure config tls")]
-        #[test_log::test(tokio::test)]
-        async fn test_create_app_config(
-            addr_param: Option<&str>,
-            crt_param: Option<&str>,
-            key_param: Option<&str>,
-            expected: &str,
-        ) {
-            figment::Jail::expect_with(|jail| {
-                let pair_a = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
-                let pair_b = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
-
-                jail.clear_env();
-
-                if let Some(addr) = addr_param {
-                    let data = match addr {
-                        "valid" => "127.0.0.1:3080",
-                        "invalid" => "",
-                        _ => panic!("Did not expect {:?}!", addr),
-                    };
-                    jail.set_env("HTTP_ADDR", &data);
-                }
-                jail.set_env("HTTPS_ADDR", "127.0.0.1:3443");
-                jail.set_env("CERT_PATH", "test.crt");
-                jail.set_env("KEY_PATH", "test.key");
-
-                if let Some(crt) = crt_param {
-                    let data = match crt {
-                        "valid" => pair_a.cert.pem(),
-                        "bad_pem" => "-----BEGIN PUBLIC KEY-----".to_string(),
-                        "no_cert" => "".to_string(),
-                        _ => panic!("Did not expect {:?}!", crt),
-                    };
-                    jail.create_file("test.crt", &data)?;
-                }
-
-                if let Some(key) = key_param {
-                    let data = match key {
-                        "valid" => pair_a.signing_key.serialize_pem(),
-                        "invalid" => pair_b.signing_key.serialize_pem(),
-                        _ => panic!("Did not expect {:?}!", key),
-                    };
-                    jail.create_file("test.key", &data)?;
-                }
-
-                match expected {
-                    "Success" => cool_asserts::assert_matches!(AppConfig::new(), Ok(_)),
-                    "FailedFindEnvVar" => cool_asserts::assert_matches!(
-                        AppConfig::new(),
-                        Err(AppError::FailedFindEnvVar(_, _))
-                    ),
-                    "FailedParseSocketAddr" => cool_asserts::assert_matches!(
-                        AppConfig::new(),
-                        Err(AppError::FailedParseSocketAddr(_, _))
-                    ),
-                    "FailedOpenPublicKeyFile" => cool_asserts::assert_matches!(
-                        AppConfig::new(),
-                        Err(AppError::FailedOpenPublicKeyFile(_, _))
-                    ),
-                    "FailedReadPublicKeyFile" => cool_asserts::assert_matches!(
-                        AppConfig::new(),
-                        Err(AppError::FailedReadPublicKeyFile(_, _))
-                    ),
-                    "FailedFindPublicKeys" => cool_asserts::assert_matches!(
-                        AppConfig::new(),
-                        Err(AppError::FailedFindPublicKeys(_))
-                    ),
-                    "FailedConfigTLS" => cool_asserts::assert_matches!(
-                        AppConfig::new(),
-                        Err(AppError::FailedConfigTLS(_, _))
-                    ),
-                    _ => panic!("Did not expect {:?}!", expected),
-                }
-
-                Ok(())
-            })
-        }
-    }
-    pub mod handlers {
-        use super::*;
-
-        #[test_log::test(tokio::test)]
-        async fn test_redirect_to_https() {
-            let config = Arc::new(AppConfig::new().await.unwrap());
-
-            let server = TestServer::new(http_router(config)).unwrap();
-
-            let response = server.get("/healthz").await;
-            
-            response.assert_status(StatusCode::TEMPORARY_REDIRECT);
-        }
-
-        #[test_log::test(tokio::test)]
-        async fn test_check_app_liveliness() {
-            let server = TestServer::new(https_router(AppState::new())).unwrap();
-
-            let response = server.get("/healthz").await;
-
-            response.assert_status(StatusCode::OK);
-        }
-
-        #[test_log::test(tokio::test)]
-        async fn test_report_route_invalid() {
-            let server = TestServer::new(https_router(AppState::new())).unwrap();
-
-            let response = server.get("/").await;
-
-            response.assert_status(StatusCode::NOT_FOUND);
-        }
-    }
-    mod items {
-        use axum_test::TestServer;
+        use crate::config::{AppConfig, AppError};
+        use cool_asserts::assert_matches;
+        use figment::Jail;
         use test_case::test_case;
 
         #[test_case(
-            request_payload: Json::Value,
-            expected_statuscode: StatusCode,
-            expected_response_payload: Json::Value,
+            "success", // scenario
+            Some("127.0.0.1:3080"), // http_addr
+            Some("127.0.0.1:3443"), // https_addr
+            Some("test.crt"), // cert_path
+            Some("test.key"), // key_path
+            Some("a"), // crt_file
+            Some("a"); // key_file
+            "success"
         )]
-        async fn test_create() {}
-        async fn test_delete() {}
-        async fn test_get() {}
-        async fn test_select() {}
-        async fn test_update() {}
+        #[test_case(
+            "failed_find_http_addr_env_var", // scenario
+            None, // http_addr
+            Some("127.0.0.1:3443"), // https_addr
+            Some("test.crt"), // cert_path
+            Some("test.key"), // key_path
+            Some("a"), // crt_file
+            Some("a"); // key_file
+            "failed_find_http_addr_env_var"
+        )]
+        #[test_case(
+            "failed_find_https_addr_env_var", // scenario
+            Some("127.0.0.1:3080"), // http_addr
+            None, // https_addr
+            Some("test.crt"), // cert_path
+            Some("test.key"), // key_path
+            Some("a"), // crt_file
+            Some("a"); // key_file
+            "failed_find_https_addr_env_var"
+        )]
+        #[test_case(
+            "failed_find_cert_path_env_var", // scenario
+            Some("127.0.0.1:3080"), // http_addr
+            Some("127.0.0.1:3443"), // https_addr
+            None, // cert_path
+            Some("test.key"), // key_path
+            Some("a"), // crt_file
+            Some("a"); // key_file
+            "failed_find_cert_path_env_var"
+        )]
+        #[test_case(
+            "failed_find_key_path_env_var", // scenario
+            Some("127.0.0.1:3080"), // http_addr
+            Some("127.0.0.1:3443"), // https_addr
+            Some("test.crt"), // cert_path
+            None, // key_path
+            Some("a"), // crt_file
+            Some("a"); // key_file
+            "failed_find_key_path_env_var"
+        )]
+        #[test_case(
+            "failed_parse_http_socket_addr", // scenario
+            Some(""), // http_addr
+            Some("127.0.0.1:3443"), // https_addr
+            Some("test.crt"), // cert_path
+            Some("test.key"), // key_path
+            Some("a"), // crt_file
+            Some("a"); // key_file
+            "failed_parse_http_socket_addr"
+        )]
+        #[test_case(
+            "failed_parse_https_socket_addr", // scenario
+            Some("127.0.0.1:3080"), // http_addr
+            Some(""), // https_addr
+            Some("test.crt"), // cert_path
+            Some("test.key"), // key_path
+            Some("a"), // crt_file
+            Some("a"); // key_file
+            "failed_parse_https_socket_addr"
+        )]
+        #[test_case(
+            "failed_open_public_key_file", // scenario
+            Some("127.0.0.1:3080"), // http_addr
+            Some("127.0.0.1:3443"), // https_addr
+            Some("test.crt"), // cert_path
+            Some("test.key"), // key_path
+            None, // crt_file
+            Some("a"); // key_file
+            "failed_open_public_key_file"
+        )]
+        #[test_case(
+            "failed_read_public_key_file", // scenario
+            Some("127.0.0.1:3080"), // http_addr
+            Some("127.0.0.1:3443"), // https_addr
+            Some("test.crt"), // cert_path
+            Some("test.key"), // key_path
+            Some("-----BEGIN PUBLIC KEY-----"), // crt_file
+            Some("a"); // key_file
+            "failed_read_public_key_file"
+        )]
+        #[test_case(
+            "failed_find_public_keys", // scenario
+            Some("127.0.0.1:3080"), // http_addr
+            Some("127.0.0.1:3443"), // https_addr
+            Some("test.crt"), // cert_path
+            Some("test.key"), // key_path
+            Some(""), // crt_file
+            Some("a"); // key_file
+            "failed_find_public_keys"
+        )]
+        #[test_case(
+            "failed_open_private_key_file", // scenario
+            Some("127.0.0.1:3080"), // http_addr
+            Some("127.0.0.1:3443"), // https_addr
+            Some("test.crt"), // cert_path
+            Some("test.key"), // key_path
+            Some("a"), // crt_file
+            None; // key_file
+            "failed_open_private_key_file"
+        )]
+        #[test_case(
+            "failed_read_private_key_file", // scenario
+            Some("127.0.0.1:3080"), // http_addr
+            Some("127.0.0.1:3443"), // https_addr
+            Some("test.crt"), // cert_path
+            Some("test.key"), // key_path
+            Some("a"), // crt_file
+            Some("-----BEGIN PRIVATE KEY-----"); // key_file
+            "failed_read_private_key_file"
+        )]
+        #[test_case(
+            "failed_find_private_keys", // scenario
+            Some("127.0.0.1:3080"), // http_addr
+            Some("127.0.0.1:3443"), // https_addr
+            Some("test.crt"), // cert_path
+            Some("test.key"), // key_path
+            Some("a"), // crt_file
+            Some(""); // key_file
+            "failed_find_private_keys"
+        )]
+        #[test_case(
+            "failed_config_tls", // scenario
+            Some("127.0.0.1:3080"), // http_addr
+            Some("127.0.0.1:3443"), // https_addr
+            Some("test.crt"), // cert_path
+            Some("test.key"), // key_path
+            Some("a"), // crt_file
+            Some("b"); // key_file
+            "failed_config_tls"
+        )]
+        #[test_log::test(test)]
+        fn test_create_appconfig(
+            scenario: &str,
+            http_addr: Option<&str>,
+            https_addr: Option<&str>,
+            cert_path: Option<&str>,
+            key_path: Option<&str>,
+            crt_file: Option<&str>,
+            key_file: Option<&str>,
+        ) {
+            let _ = Jail::try_with(|jail| {
+                let key_pair_a =
+                    rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
+                let key_pair_b =
+                    rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
+
+                jail.clear_env();
+
+                if let Some(data) = http_addr {
+                    jail.set_env("HTTP_ADDR", data);
+                }
+
+                if let Some(data) = https_addr {
+                    jail.set_env("HTTPS_ADDR", data);
+                }
+
+                if let Some(data) = cert_path {
+                    jail.set_env("CERT_PATH", data);
+                }
+
+                if let Some(data) = key_path {
+                    jail.set_env("KEY_PATH", data);
+                }
+
+                if let Some(data) = crt_file {
+                    match data {
+                        "a" => {
+                            jail.create_file("test.crt", key_pair_a.cert.pem().as_str())?;
+                        }
+                        "b" => {
+                            jail.create_file("test.crt", key_pair_b.cert.pem().as_str())?;
+                        }
+                        _ => {
+                            jail.create_file("test.crt", data)?;
+                        }
+                    }
+                }
+
+                if let Some(data) = key_file {
+                    match data {
+                        "a" => {
+                            jail.create_file(
+                                "test.key",
+                                key_pair_a.signing_key.serialize_pem().as_str(),
+                            )?;
+                        }
+                        "b" => {
+                            jail.create_file(
+                                "test.key",
+                                key_pair_b.signing_key.serialize_pem().as_str(),
+                            )?;
+                        }
+                        _ => {
+                            jail.create_file("test.key", data)?;
+                        }
+                    }
+                }
+
+                let result = tokio_test::block_on(AppConfig::new());
+
+                match scenario {
+                    "success" => assert_matches!(result, Ok(_)),
+                    "failed_find_http_addr_env_var" => {
+                        assert_matches!(result, Err(AppError::FailedFindEnvVar(_, _)))
+                    }
+                    "failed_find_https_addr_env_var" => {
+                        assert_matches!(result, Err(AppError::FailedFindEnvVar(_, _)))
+                    }
+                    "failed_find_cert_path_env_var" => {
+                        assert_matches!(result, Err(AppError::FailedFindEnvVar(_, _)))
+                    }
+                    "failed_find_key_path_env_var" => {
+                        assert_matches!(result, Err(AppError::FailedFindEnvVar(_, _)))
+                    }
+                    "failed_parse_http_socket_addr" => {
+                        assert_matches!(result, Err(AppError::FailedParseSocketAddr(_, _)))
+                    }
+                    "failed_parse_https_socket_addr" => {
+                        assert_matches!(result, Err(AppError::FailedParseSocketAddr(_, _)))
+                    }
+                    "failed_open_public_key_file" => {
+                        assert_matches!(result, Err(AppError::FailedOpenPublicKeyFile(_, _)))
+                    }
+                    "failed_read_public_key_file" => {
+                        assert_matches!(result, Err(AppError::FailedReadPublicKeyFile(_, _)))
+                    }
+                    "failed_find_public_keys" => {
+                        assert_matches!(result, Err(AppError::FailedFindPublicKeys(_)))
+                    }
+                    "failed_open_private_key_file" => {
+                        assert_matches!(result, Err(AppError::FailedOpenPrivateKeyFile(_, _)))
+                    }
+                    "failed_read_private_key_file" => {
+                        assert_matches!(result, Err(AppError::FailedReadPrivateKeyFile(_, _)))
+                    }
+                    "failed_find_private_keys" => {
+                        assert_matches!(result, Err(AppError::FailedFindPrivateKeys(_)))
+                    }
+                    "failed_config_tls" => {
+                        assert_matches!(result, Err(AppError::FailedConfigTLS(_, _)))
+                    }
+                    _ => unreachable!(),
+                }
+
+                Ok(())
+            });
+        }
     }
 }
 
@@ -556,5 +680,5 @@ async fn main() {
 
     tracing_subscriber::fmt::init();
 
-    let cfg = AppConfig::new();
+    let _cfg = AppConfig::new().await.unwrap();
 }

@@ -10,13 +10,13 @@ pub mod config {
     use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
     use uuid::Uuid;
 
-    pub fn http_router(state: AppState) -> Router<AppState> {
+    pub fn http_router(state: AppState) -> Router {
         Router::new()
             .fallback(handlers::redirect_to_https)
             .with_state(state)
     }
 
-    pub fn https_router(state: AppState) -> Router<AppState> {
+    pub fn https_router(state: AppState) -> Router {
         use axum::routing::get;
 
         Router::new()
@@ -146,6 +146,7 @@ pub mod config {
     }
 }
 pub mod handlers {
+    use crate::config::AppState;
     use axum::{
         Json,
         extract::State,
@@ -156,8 +157,6 @@ pub mod handlers {
         response::IntoResponse,
     };
     use serde_json::json;
-
-    use crate::config::AppState;
 
     #[tracing::instrument(skip_all, err)]
     pub async fn redirect_to_https(
@@ -180,6 +179,10 @@ pub mod handlers {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn check_app_liveliness() -> AppResult<impl IntoResponse> {
+        use tokio::time::{sleep, Duration};
+
+        sleep(Duration::from_secs(1)).await;
+        
         Ok((StatusCode::OK, Json(json!({"status": "App is lively."}))))
     }
 
@@ -554,7 +557,6 @@ mod tests {
             Some("b"); // key_file
             "failed_config_tls"
         )]
-        #[test_log::test(test)]
         fn test_create_appconfig(
             scenario: &str,
             http_addr: Option<&str>,
@@ -672,23 +674,31 @@ mod tests {
             });
         }
     }
-pub mod handlers {
-        use super::*;
+    mod handlers {
+        use crate::config::{self, AppState};
+        use axum::http::StatusCode;
+        use axum_test::TestServer;
+
+        async fn test_server(router_fn: fn(AppState) -> axum::Router) -> TestServer {
+            let state = AppState::new().await.unwrap();
+
+            TestServer::new(router_fn(state))
+        }
 
         #[test_log::test(tokio::test)]
         async fn test_redirect_to_https() {
-            let config = Arc::new(AppConfig::new().await.unwrap());
-
-            let server = TestServer::new(http_router(config)).unwrap();
+            let server = test_server(config::http_router).await;
 
             let response = server.get("/healthz").await;
-            
+
             response.assert_status(StatusCode::TEMPORARY_REDIRECT);
+
+            response.assert_header("location", "https://127.0.0.1:3443/healthz");
         }
 
         #[test_log::test(tokio::test)]
         async fn test_check_app_liveliness() {
-            let server = TestServer::new(https_router(AppState::new())).unwrap();
+            let server = test_server(config::https_router).await;
 
             let response = server.get("/healthz").await;
 
@@ -697,27 +707,12 @@ pub mod handlers {
 
         #[test_log::test(tokio::test)]
         async fn test_report_route_invalid() {
-            let server = TestServer::new(https_router(AppState::new())).unwrap();
+            let server = test_server(config::https_router).await;
 
             let response = server.get("/").await;
 
             response.assert_status(StatusCode::NOT_FOUND);
         }
-    }
-    mod items {
-        use axum_test::TestServer;
-        use test_case::test_case;
-
-        #[test_case(
-            request_payload: Json::Value,
-            expected_statuscode: StatusCode,
-            expected_response_payload: Json::Value,
-        )]
-        async fn test_create() {}
-        async fn test_delete() {}
-        async fn test_get() {}
-        async fn test_select() {}
-        async fn test_update() {}
     }
 }
 

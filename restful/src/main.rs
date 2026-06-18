@@ -686,7 +686,7 @@ mod tests {
         }
 
         #[test_log::test(tokio::test)]
-        async fn test_redirect_to_https() {
+        async fn test_redirect_to_https_success() {
             let server = test_server(config::http_router).await;
 
             let response = server.get("/healthz").await;
@@ -697,7 +697,7 @@ mod tests {
         }
 
         #[test_log::test(tokio::test)]
-        async fn test_check_app_liveliness() {
+        async fn test_check_app_liveliness_success() {
             let server = test_server(config::https_router).await;
 
             let response = server.get("/healthz").await;
@@ -706,7 +706,7 @@ mod tests {
         }
 
         #[test_log::test(tokio::test)]
-        async fn test_report_route_invalid() {
+        async fn test_report_route_invalid_success() {
             let server = test_server(config::https_router).await;
 
             let response = server.get("/").await;
@@ -715,17 +715,77 @@ mod tests {
         }
     }
     mod items {
+        use crate::config::{self, AppState};
+        use axum::http::StatusCode;
+        use axum_test::TestServer;
+        use serde_json::{Value, json};
+        use test_case::test_case;
+
+        async fn test_server(router_fn: fn(AppState) -> axum::Router) -> TestServer {
+            let state = AppState::new().await.unwrap();
+
+            TestServer::new(router_fn(state))
+        }
+
         #[test_case(
-            "success",
-            Some("name"),
-            Some("desc");
+            "success", //scenario
+            json!({
+                "name":"test",
+                "desc":"test"
+            }), // payload
+            StatusCode::CREATED; // status
             "success"
         )]
-        async fn test_create(
-            scenario: &str,
-            name: Option<&str>,
-            desc: Option<&str>,
-        ) {}
+        #[test_case(
+            "failure_missing_name", //scenario
+            json!({
+                "desc":"test"
+            }), // payload
+            StatusCode::UNPROCESSABLE_ENTITY; // status
+            "failure_missing_name"
+        )]
+        #[test_case(
+            "failure_invalid_name", //scenario
+            json!({
+                "name":"",
+                "desc":"test"
+            }), // payload
+            StatusCode::BAD_REQUEST; // status
+            "failure_invalid_name"
+        )]
+        #[test_case(
+            "failure_missing_desc", //scenario
+            json!({
+                "name":"test"
+            }), // payload
+            StatusCode::UNPROCESSABLE_ENTITY; // status
+            "failure_missing_desc"
+        )]
+        #[test_case(
+            "failure_invalid_desc", //scenario
+            json!({
+                "name":"test",
+                "desc":""
+            }), // payload
+            StatusCode::BAD_REQUEST; // status
+            "failure_invalid_desc"
+        )]
+        #[test_log::test(tokio::test)]
+        async fn test_create(scenario: &str, payload: Value, status: StatusCode) {
+            let server = test_server(config::https_router).await;
+
+            let response = server.post("/items").json(&payload).await;
+
+            response.assert_status(status);
+
+            if scenario == "success" {
+                let body: Value = response.json();
+
+                assert!(body["id"].is_string());
+                assert_eq!(body["item"]["name"], payload["name"]);
+                assert_eq!(body["item"]["desc"], payload["desc"]);
+            }
+        }
     }
 }
 

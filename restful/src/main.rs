@@ -263,8 +263,8 @@ pub mod items {
 
     #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct Item {
-        name: String,
-        desc: String,
+        pub name: String,
+        pub desc: String,
     }
 
     impl Item {
@@ -715,7 +715,10 @@ mod tests {
         }
     }
     mod items {
-        use crate::config::{self, AppState};
+        use crate::{
+            config::{self, AppState},
+            items::Item,
+        };
         use axum::http::StatusCode;
         use axum_test::TestServer;
         use serde_json::{Value, json};
@@ -723,6 +726,14 @@ mod tests {
 
         async fn test_server(router_fn: fn(AppState) -> axum::Router) -> TestServer {
             let state = AppState::new().await.unwrap();
+
+            state.items.insert(
+                uuid::Uuid::nil(),
+                Item {
+                    name: "test".to_string(),
+                    desc: "test".to_string(),
+                },
+            );
 
             TestServer::new(router_fn(state))
         }

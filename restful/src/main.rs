@@ -181,7 +181,7 @@ pub mod handlers {
     pub async fn check_app_liveliness() -> AppResult<impl IntoResponse> {
         use tokio::time::{Duration, sleep};
 
-        sleep(Duration::from_secs(3)).await;
+        sleep(Duration::from_secs(10)).await;
 
         Ok((StatusCode::OK, Json(json!({"status": "App is lively."}))))
     }
@@ -675,7 +675,10 @@ mod tests {
         }
     }
     mod handlers {
-        use crate::config::{self, AppState};
+        use crate::{
+            config::{self, AppState},
+            handlers,
+        };
         use axum::http::StatusCode;
         use axum_test::TestServer;
 
@@ -696,13 +699,13 @@ mod tests {
             response.assert_header("location", "https://127.0.0.1:3443/healthz");
         }
 
-        #[test_log::test(tokio::test)]
-        async fn test_check_app_liveliness_success() {
-            let server = test_server(config::https_router).await;
+        #[test_log::test(tokio::test(start_paused = true))]
+        async fn test_check_app_liveliness() {
+            let task = tokio::spawn(handlers::check_app_liveliness());
 
-            let response = server.get("/healthz").await;
+            tokio::time::advance(std::time::Duration::from_secs(1)).await;
 
-            response.assert_status(StatusCode::OK);
+            assert!(task.await.unwrap().is_ok());
         }
 
         #[test_log::test(tokio::test)]
@@ -723,6 +726,7 @@ mod tests {
         use axum_test::TestServer;
         use serde_json::{Value, json};
         use test_case::test_case;
+        use uuid::Uuid;
 
         async fn test_server(router_fn: fn(AppState) -> axum::Router) -> TestServer {
             let state = AppState::new().await.unwrap();
@@ -795,6 +799,39 @@ mod tests {
                 assert!(body["id"].is_string());
                 assert_eq!(body["item"]["name"], payload["name"]);
                 assert_eq!(body["item"]["desc"], payload["desc"]);
+            }
+        }
+
+        #[test_case(
+            "success", //scenario
+            Uuid::nil().to_string(), // id
+            StatusCode::OK; // status
+            "success"
+        )]
+        #[test_case(
+            "failure_missing_id", //scenario
+            Uuid::new_v4().to_string(), // id
+            StatusCode::INTERNAL_SERVER_ERROR; // status
+            "failure_missing_id"
+        )]
+        #[test_case(
+            "failure_invalid_id", //scenario
+            "".to_string(), // id
+            StatusCode::NOT_FOUND; // status
+            "failure_invalid_id"
+        )]
+        #[test_log::test(tokio::test)]
+        async fn test_delete(scenario: &str, id: String, status: StatusCode) {
+            let server = test_server(config::https_router).await;
+
+            let response = server.delete(&format!("/items/{id}")).await;
+
+            response.assert_status(status);
+
+            if scenario == "success" {
+                let body: Value = response.json();
+
+                assert_eq!(body["id"].as_str().unwrap(), id);
             }
         }
     }

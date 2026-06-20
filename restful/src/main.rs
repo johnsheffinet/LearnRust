@@ -832,6 +832,43 @@ mod tests {
                 let body: Value = response.json();
 
                 assert_eq!(body["id"].as_str().unwrap(), id);
+                assert_eq!(body["item"]["name"], "test");
+                assert_eq!(body["item"]["desc"], "test");
+            }
+        }
+
+        #[test_case(
+            "success", //scenario
+            Uuid::nil().to_string(), // id
+            StatusCode::OK; // status
+            "success"
+        )]
+        #[test_case(
+            "failure_missing_id", //scenario
+            Uuid::new_v4().to_string(), // id
+            StatusCode::INTERNAL_SERVER_ERROR; // status
+            "failure_missing_id"
+        )]
+        #[test_case(
+            "failure_invalid_id", //scenario
+            "".to_string(), // id
+            StatusCode::NOT_FOUND; // status
+            "failure_invalid_id"
+        )]
+        #[test_log::test(tokio::test)]
+        async fn test_get(scenario: &str, id: String, status: StatusCode) {
+            let server = test_server(config::https_router).await;
+
+            let response = server.get(&format!("/items/{id}")).await;
+
+            response.assert_status(status);
+
+            if scenario == "success" {
+                let body: Value = response.json();
+
+                assert_eq!(body["id"].as_str().unwrap(), id);
+                assert_eq!(body["item"]["name"], "test");
+                assert_eq!(body["item"]["desc"], "test");
             }
         }
     }

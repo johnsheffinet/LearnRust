@@ -739,6 +739,14 @@ mod tests {
                 },
             );
 
+            state.items.insert(
+                uuid::Uuid::new_v4(),
+                Item {
+                    name: "tset".to_string(),
+                    desc: "tset".to_string(),
+                },
+            );
+
             TestServer::new(router_fn(state))
         }
 
@@ -804,34 +812,34 @@ mod tests {
 
         #[test_case(
             "success", //scenario
-            Uuid::nil().to_string(), // id
+            Uuid::nil().to_string(), // pathid
             StatusCode::OK; // status
             "success"
         )]
         #[test_case(
             "failure_missing_id", //scenario
-            Uuid::new_v4().to_string(), // id
+            Uuid::new_v4().to_string(), // pathid
             StatusCode::INTERNAL_SERVER_ERROR; // status
             "failure_missing_id"
         )]
         #[test_case(
             "failure_invalid_id", //scenario
-            "".to_string(), // id
+            "".to_string(), // pathid
             StatusCode::NOT_FOUND; // status
             "failure_invalid_id"
         )]
         #[test_log::test(tokio::test)]
-        async fn test_delete(scenario: &str, id: String, status: StatusCode) {
+        async fn test_delete(scenario: &str, pathid: String, status: StatusCode) {
             let server = test_server(config::https_router).await;
 
-            let response = server.delete(&format!("/items/{id}")).await;
+            let response = server.delete(&format!("/items/{pathid}")).await;
 
             response.assert_status(status);
 
             if scenario == "success" {
                 let body: Value = response.json();
 
-                assert_eq!(body["id"].as_str().unwrap(), id);
+                assert_eq!(body["pathid"].as_str().unwrap(), pathid);
                 assert_eq!(body["item"]["name"], "test");
                 assert_eq!(body["item"]["desc"], "test");
             }
@@ -839,38 +847,74 @@ mod tests {
 
         #[test_case(
             "success", //scenario
-            Uuid::nil().to_string(), // id
+            Uuid::nil().to_string(), // pathid
             StatusCode::OK; // status
             "success"
         )]
         #[test_case(
             "failure_missing_id", //scenario
-            Uuid::new_v4().to_string(), // id
+            Uuid::new_v4().to_string(), // pathid
             StatusCode::INTERNAL_SERVER_ERROR; // status
             "failure_missing_id"
         )]
         #[test_case(
             "failure_invalid_id", //scenario
-            "".to_string(), // id
+            "".to_string(), // pathid
             StatusCode::NOT_FOUND; // status
             "failure_invalid_id"
         )]
         #[test_log::test(tokio::test)]
-        async fn test_get(scenario: &str, id: String, status: StatusCode) {
+        async fn test_get(scenario: &str, pathid: String, status: StatusCode) {
             let server = test_server(config::https_router).await;
 
-            let response = server.get(&format!("/items/{id}")).await;
+            let response = server.get(&format!("/items/{pathid}")).await;
 
             response.assert_status(status);
 
             if scenario == "success" {
                 let body: Value = response.json();
 
-                assert_eq!(body["id"].as_str().unwrap(), id);
+                assert_eq!(body["id"].as_str().unwrap(), pathid);
                 assert_eq!(body["item"]["name"], "test");
                 assert_eq!(body["item"]["desc"], "test");
             }
         }
+
+        #[test_case(
+        "success_no_filter", //scenario
+        "".to_string(), // queryparams
+        StatusCode::OK; // status
+        "success"
+        )]
+        #[test_case(
+        "success_name_filter", //scenario
+        "name='test'".to_string(), // queryparams
+        StatusCode::OK; // status
+        "success"
+        )]
+        #[test_case(
+        "success_desc_filter", //scenario
+        "name='test'&desc='tset'".to_string(), // queryparams
+        StatusCode::OK; // status
+        "success"
+        )]
+        #[test_log::test(tokio::test)]
+        async fn test_select(scenario: &str, queryparams: String, status: StatusCode) {
+            let server = test_server(config::https_router).await;
+    
+            let response = server.get(&format!("/items?queryparams")).await;
+    
+            response.assert_status(status);
+    
+            if scenario == "success" {
+                let body: Value = response.json();
+    
+                assert_eq!(body["id"].as_str().unwrap(), pathid);
+                assert_eq!(body["item"]["name"], "test");
+                assert_eq!(body["item"]["desc"], "test");
+            }
+        }
+
     }
 }
 

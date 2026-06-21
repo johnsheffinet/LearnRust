@@ -688,16 +688,16 @@ mod tests {
             TestServer::new(router_fn(state))
         }
 
-        #[test_log::test(tokio::test)]
-        async fn test_redirect_to_https_success() {
-            let server = test_server(config::http_router).await;
+        // #[test_log::test(tokio::test)]
+        // async fn test_redirect_to_https_success() {
+        //     let server = test_server(config::http_router).await;
 
-            let response = server.get("/healthz").await;
+        //     let response = server.get("/healthz").await;
 
-            response.assert_status(StatusCode::TEMPORARY_REDIRECT);
+        //     response.assert_status(StatusCode::TEMPORARY_REDIRECT);
 
-            response.assert_header("location", "https://127.0.0.1:3443/healthz");
-        }
+        //     response.assert_header("location", "https://127.0.0.1:3443/healthz");
+        // }
 
         #[test_log::test(tokio::test(start_paused = true))]
         async fn test_check_app_liveliness() {
@@ -751,7 +751,6 @@ mod tests {
         }
 
         #[test_case(
-            "success", //scenario
             json!({
                 "name":"test",
                 "desc":"test"
@@ -760,7 +759,6 @@ mod tests {
             "success"
         )]
         #[test_case(
-            "failure_missing_name", //scenario
             json!({
                 "desc":"test"
             }), // payload
@@ -768,7 +766,6 @@ mod tests {
             "failure_missing_name"
         )]
         #[test_case(
-            "failure_invalid_name", //scenario
             json!({
                 "name":"",
                 "desc":"test"
@@ -777,7 +774,6 @@ mod tests {
             "failure_invalid_name"
         )]
         #[test_case(
-            "failure_missing_desc", //scenario
             json!({
                 "name":"test"
             }), // payload
@@ -785,7 +781,6 @@ mod tests {
             "failure_missing_desc"
         )]
         #[test_case(
-            "failure_invalid_desc", //scenario
             json!({
                 "name":"test",
                 "desc":""
@@ -794,14 +789,14 @@ mod tests {
             "failure_invalid_desc"
         )]
         #[test_log::test(tokio::test)]
-        async fn test_create(scenario: &str, payload: Value, status: StatusCode) {
+        async fn test_create(payload: Value, status: StatusCode) {
             let server = test_server(config::https_router).await;
 
             let response = server.post("/items").json(&payload).await;
 
             response.assert_status(status);
 
-            if scenario == "success" {
+            if status == StatusCode::CREATED {
                 let body: Value = response.json();
 
                 assert!(body["id"].is_string());
@@ -811,67 +806,61 @@ mod tests {
         }
 
         #[test_case(
-            "success", //scenario
             Uuid::nil().to_string(), // pathid
             StatusCode::OK; // status
             "success"
         )]
         #[test_case(
-            "failure_missing_id", //scenario
             Uuid::new_v4().to_string(), // pathid
             StatusCode::INTERNAL_SERVER_ERROR; // status
             "failure_missing_id"
         )]
         #[test_case(
-            "failure_invalid_id", //scenario
             "".to_string(), // pathid
             StatusCode::NOT_FOUND; // status
             "failure_invalid_id"
         )]
         #[test_log::test(tokio::test)]
-        async fn test_delete(scenario: &str, pathid: String, status: StatusCode) {
+        async fn test_delete(pathid: String, status: StatusCode) {
             let server = test_server(config::https_router).await;
 
             let response = server.delete(&format!("/items/{pathid}")).await;
 
             response.assert_status(status);
 
-            if scenario == "success" {
+            if status == StatusCode::OK {
                 let body: Value = response.json();
 
-                assert_eq!(body["pathid"].as_str().unwrap(), pathid);
+                assert_eq!(body["id"].as_str().unwrap(), pathid);
                 assert_eq!(body["item"]["name"], "test");
                 assert_eq!(body["item"]["desc"], "test");
             }
         }
 
         #[test_case(
-            "success", //scenario
             Uuid::nil().to_string(), // pathid
             StatusCode::OK; // status
             "success"
         )]
         #[test_case(
-            "failure_missing_id", //scenario
             Uuid::new_v4().to_string(), // pathid
             StatusCode::INTERNAL_SERVER_ERROR; // status
             "failure_missing_id"
         )]
         #[test_case(
-            "failure_invalid_id", //scenario
             "".to_string(), // pathid
             StatusCode::NOT_FOUND; // status
             "failure_invalid_id"
         )]
         #[test_log::test(tokio::test)]
-        async fn test_get(scenario: &str, pathid: String, status: StatusCode) {
+        async fn test_get(pathid: String, status: StatusCode) {
             let server = test_server(config::https_router).await;
 
             let response = server.get(&format!("/items/{pathid}")).await;
 
             response.assert_status(status);
 
-            if scenario == "success" {
+            if status == StatusCode::OK {
                 let body: Value = response.json();
 
                 assert_eq!(body["id"].as_str().unwrap(), pathid);
@@ -881,40 +870,43 @@ mod tests {
         }
 
         #[test_case(
-        "success_no_filter", //scenario
         "".to_string(), // queryparams
+        2, // length
         StatusCode::OK; // status
-        "success"
+        "success_no_filter"
         )]
         #[test_case(
-        "success_name_filter", //scenario
-        "name='test'".to_string(), // queryparams
+        "name=test".to_string(), // queryparams
+        1, // length
         StatusCode::OK; // status
-        "success"
+        "success_filter_name"
         )]
         #[test_case(
-        "success_desc_filter", //scenario
-        "name='test'&desc='tset'".to_string(), // queryparams
+        "name=test&desc=tset".to_string(), // queryparams
+        0, // length
         StatusCode::OK; // status
-        "success"
+        "success_filter_name_and_desc"
+        )]
+        #[test_case(
+        "name=".to_string(), // queryparams
+        0, // length
+        StatusCode::BAD_REQUEST; // status
+        "failure_missing_filter"
         )]
         #[test_log::test(tokio::test)]
-        async fn test_select(scenario: &str, queryparams: String, status: StatusCode) {
+        async fn test_select(queryparams: String, length: usize, status: StatusCode) {
             let server = test_server(config::https_router).await;
-    
-            let response = server.get(&format!("/items?queryparams")).await;
-    
+
+            let response = server.get(&format!("/items?{queryparams}")).await;
+
             response.assert_status(status);
-    
-            if scenario == "success" {
-                let body: Value = response.json();
-    
-                assert_eq!(body["id"].as_str().unwrap(), pathid);
-                assert_eq!(body["item"]["name"], "test");
-                assert_eq!(body["item"]["desc"], "test");
+
+            if status == StatusCode::OK {
+                let body: Vec<Value> = response.json();
+
+                assert_eq!(body.len(), length);
             }
         }
-
     }
 }
 

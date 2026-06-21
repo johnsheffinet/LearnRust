@@ -196,10 +196,10 @@ pub mod handlers {
 
     type AppResult<T> = Result<T, AppError>;
 
-    #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
+    #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
     pub enum AppError {
         #[error("Failed to create header! {0}")]
-        #[status(StatusCode::INTERNAL_SERVER_ERROR)]
+        #[status_code("BAD_REQUEST")]
         FailedCreateHeader(InvalidHeaderValue),
     }
 }
@@ -394,19 +394,19 @@ pub mod items {
     #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
     pub enum AppError {
         #[error("Failed to validate request! {0}")]
-        #[status_code(StatusCode::UNPROCESSABLE_ENTITY)]
+        #[status_code("UNPROCESSABLE_ENTITY")]
         #[code("UNPROCESSABLE_ENTITY")]
         UnprocessableEntity(#[from] validator::ValidationErrors),
 
         #[error("Failed to find {0} id in request path!")]
-        #[status_code(StatusCode::NOT_FOUND)]
+        #[status_code("NOT_FOUND")]
         #[code("NOT_FOUND")]
         NotFound(String),
 
-        #[error("Failed to process request! {0}")]
-        #[status_code(StatusCode::INTERNAL_SERVER_ERROR)]
-        #[code("INTERNAL_SERVER_ERROR")]
-        InternalServerError(String),
+        // #[error("Failed to process request! {0}")]
+        // #[status_code("INTERNAL_SERVER_ERROR")]
+        // #[code("INTERNAL_SERVER_ERROR")]
+        // InternalServerError(String),
     }
 }
 #[cfg(test)]
@@ -688,16 +688,16 @@ mod tests {
             TestServer::new(router_fn(state))
         }
 
-        // #[test_log::test(tokio::test)]
-        // async fn test_redirect_to_https_success() {
-        //     let server = test_server(config::http_router).await;
+        #[test_log::test(tokio::test)]
+        async fn test_redirect_to_https_success() {
+            let server = test_server(config::http_router).await;
 
-        //     let response = server.get("/healthz").await;
+            let response = server.get("/healthz").await;
 
-        //     response.assert_status(StatusCode::TEMPORARY_REDIRECT);
+            response.assert_status(StatusCode::TEMPORARY_REDIRECT);
 
-        //     response.assert_header("location", "https://127.0.0.1:3443/healthz");
-        // }
+            response.assert_header("location", "https://127.0.0.1:3443/healthz");
+        }
 
         #[test_log::test(tokio::test(start_paused = true))]
         async fn test_check_app_liveliness() {
@@ -816,8 +816,8 @@ mod tests {
             "failure_missing_id"
         )]
         #[test_case(
-            "".to_string(), // pathid
-            StatusCode::NOT_FOUND; // status
+            "abc".to_string(), // pathid
+            StatusCode::BAD_REQUEST; // status
             "failure_invalid_id"
         )]
         #[test_log::test(tokio::test)]
@@ -848,8 +848,8 @@ mod tests {
             "failure_missing_id"
         )]
         #[test_case(
-            "".to_string(), // pathid
-            StatusCode::NOT_FOUND; // status
+            "abc".to_string(), // pathid
+            StatusCode::BAD_REQUEST; // status
             "failure_invalid_id"
         )]
         #[test_log::test(tokio::test)]
@@ -909,17 +909,15 @@ mod tests {
         }
 
         #[test_case(
-            "success_update_name_and_desc", //scenario
             Uuid::nil().to_string(), // pathid
             json!({
                 "name":"updated",
-                "desc":"updated
+                "desc":"updated",
             }), // payload
             StatusCode::OK; // status
             "success_update_name_and_desc"
         )]
         #[test_case(
-            "success_update_name", //scenario
             Uuid::nil().to_string(), // pathid
             json!({
                 "name":"updated",
@@ -928,62 +926,55 @@ mod tests {
             "success_update_name"
         )]
         #[test_case(
-            "success_update_desc", //scenario
             Uuid::nil().to_string(), // pathid
             json!({
-                "desc":"updated
+                "desc":"updated",
             }), // payload
             StatusCode::OK; // status
             "success_update_desc"
         )]
         #[test_case(
-            "failure_missing_id", //scenario
             Uuid::new_v4().to_string(), // pathid
             json!({
                 "name":"updated",
-                "desc":"updated"
+                "desc":"updated",
             }), // payload
-            StatusCode::INTERNAL_SERVER_ERROR; // status
+            StatusCode::NOT_FOUND; // status
             "failure_missing_id"
         )]
         #[test_case(
-            "failure_invalid_id", //scenario
-            "".to_string(), // pathid
+            "abc".to_string(), // pathid
             json!({
                 "name":"updated",
                 "desc":"updated"
             }), // payload
-            StatusCode::NOT_FOUND; // status
+            StatusCode::BAD_REQUEST; // status
             "failure_invalid_id"
         )]
         #[test_log::test(tokio::test)]
-        async fn test_update(scenario: &str, pathid: String, payload: Value, status: StatusCode) {
+        async fn test_update(pathid: String, payload: Value, status: StatusCode) {
             let server = test_server(config::https_router).await;
 
             let response = server.put(&format!("/items/{pathid}")).json(&payload).await;
+
+            dbg!(response.text()); // REMOVE
 
             response.assert_status(status);
 
             if status == StatusCode::OK {
                 let body: Value = response.json();
 
+                dbg!(&body); // REMOVE
+
                 assert_eq!(body["id"].as_str().unwrap(), pathid);
-                match scenario {
-                    "success_update_name_and_desc" => {
-                        assert_eq!(body["item"]["name"], "updated");
-                        assert_eq!(body["item"]["desc"], "updated");
-                    "success_update_name" => {
-                        assert_eq!(body["item"]["name"], "updated");
-                        assert_eq!(body["item"]["desc"], "test");
-                    "success_update_desc" => {
-                        assert_eq!(body["item"]["name"], "test");
-                        assert_eq!(body["item"]["desc"], "updated");                        
-                    }
+                if payload.get("name").is_some() {
+                    assert_eq!(body["item"]["name"], payload["name"],);
+                }
+                if payload.get("desc").is_some() {
+                    assert_eq!(body["item"]["desc"], payload["desc"],);
                 }
             }
         }
-
-        
     }
 }
 

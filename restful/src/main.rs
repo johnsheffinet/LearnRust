@@ -907,6 +907,83 @@ mod tests {
                 assert_eq!(body.len(), length);
             }
         }
+
+        #[test_case(
+            "success_update_name_and_desc", //scenario
+            Uuid::nil().to_string(), // pathid
+            json!({
+                "name":"updated",
+                "desc":"updated
+            }), // payload
+            StatusCode::OK; // status
+            "success_update_name_and_desc"
+        )]
+        #[test_case(
+            "success_update_name", //scenario
+            Uuid::nil().to_string(), // pathid
+            json!({
+                "name":"updated",
+            }), // payload
+            StatusCode::OK; // status
+            "success_update_name"
+        )]
+        #[test_case(
+            "success_update_desc", //scenario
+            Uuid::nil().to_string(), // pathid
+            json!({
+                "desc":"updated
+            }), // payload
+            StatusCode::OK; // status
+            "success_update_desc"
+        )]
+        #[test_case(
+            "failure_missing_id", //scenario
+            Uuid::new_v4().to_string(), // pathid
+            json!({
+                "name":"updated",
+                "desc":"updated"
+            }), // payload
+            StatusCode::INTERNAL_SERVER_ERROR; // status
+            "failure_missing_id"
+        )]
+        #[test_case(
+            "failure_invalid_id", //scenario
+            "".to_string(), // pathid
+            json!({
+                "name":"updated",
+                "desc":"updated"
+            }), // payload
+            StatusCode::NOT_FOUND; // status
+            "failure_invalid_id"
+        )]
+        #[test_log::test(tokio::test)]
+        async fn test_update(scenario: &str, pathid: String, payload: Value, status: StatusCode) {
+            let server = test_server(config::https_router).await;
+
+            let response = server.put(&format!("/items/{pathid}")).json(&payload).await;
+
+            response.assert_status(status);
+
+            if status == StatusCode::OK {
+                let body: Value = response.json();
+
+                assert_eq!(body["id"].as_str().unwrap(), pathid);
+                match scenario {
+                    "success_update_name_and_desc" => {
+                        assert_eq!(body["item"]["name"], "updated");
+                        assert_eq!(body["item"]["desc"], "updated");
+                    "success_update_name" => {
+                        assert_eq!(body["item"]["name"], "updated");
+                        assert_eq!(body["item"]["desc"], "test");
+                    "success_update_desc" => {
+                        assert_eq!(body["item"]["name"], "test");
+                        assert_eq!(body["item"]["desc"], "updated");                        
+                    }
+                }
+            }
+        }
+
+        
     }
 }
 

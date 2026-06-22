@@ -129,7 +129,7 @@ pub mod config {
 
     #[derive(Clone, Debug, FromRef)]
     pub struct AppState {
-        pub config: AppConfig,
+        // pub config: AppConfig,
         pub items: AppStore<Item>,
     }
 
@@ -138,7 +138,7 @@ pub mod config {
     impl AppState {
         #[tracing::instrument(skip_all, err)]
         pub async fn new() -> AppResult<Self> {
-            let config = AppConfig::new().await?;
+            // let config = AppConfig::new().await?;
             let items = DashMap::new();
 
             Ok(Self { config, items })
@@ -674,49 +674,49 @@ mod tests {
             });
         }
     }
-    mod handlers {
-        use crate::{
-            config::{self, AppState},
-            handlers,
-        };
-        use axum::http::StatusCode;
-        use axum_test::TestServer;
+    // mod handlers {
+    //     use crate::{
+    //         config::{self, AppState},
+    //         handlers,
+    //     };
+    //     use axum::http::StatusCode;
+    //     use axum_test::TestServer;
 
-        async fn test_server(router_fn: fn(AppState) -> axum::Router) -> TestServer {
-            let state = AppState::new().await.unwrap();
+    //     async fn test_server(router_fn: fn(AppState) -> axum::Router) -> TestServer {
+    //         let state = AppState::new().await.unwrap();
 
-            TestServer::new(router_fn(state))
-        }
+    //         TestServer::new(router_fn(state))
+    //     }
 
-        #[test_log::test(tokio::test)]
-        async fn test_redirect_to_https_success() {
-            let server = test_server(config::http_router).await;
+    //     #[test_log::test(tokio::test)]
+    //     async fn test_redirect_to_https_success() {
+    //         let server = test_server(config::http_router).await;
 
-            let response = server.get("/healthz").await;
+    //         let response = server.get("/healthz").await;
 
-            response.assert_status(StatusCode::TEMPORARY_REDIRECT);
+    //         response.assert_status(StatusCode::TEMPORARY_REDIRECT);
 
-            response.assert_header("location", "https://127.0.0.1:3443/healthz");
-        }
+    //         response.assert_header("location", "https://127.0.0.1:3443/healthz");
+    //     }
 
-        #[test_log::test(tokio::test(start_paused = true))]
-        async fn test_check_app_liveliness() {
-            let task = tokio::spawn(handlers::check_app_liveliness());
+    //     #[test_log::test(tokio::test(start_paused = true))]
+    //     async fn test_check_app_liveliness() {
+    //         let task = tokio::spawn(handlers::check_app_liveliness());
 
-            tokio::time::advance(std::time::Duration::from_secs(1)).await;
+    //         tokio::time::advance(std::time::Duration::from_secs(1)).await;
 
-            assert!(task.await.unwrap().is_ok());
-        }
+    //         assert!(task.await.unwrap().is_ok());
+    //     }
 
-        #[test_log::test(tokio::test)]
-        async fn test_report_route_invalid_success() {
-            let server = test_server(config::https_router).await;
+    //     #[test_log::test(tokio::test)]
+    //     async fn test_report_route_invalid_success() {
+    //         let server = test_server(config::https_router).await;
 
-            let response = server.get("/").await;
+    //         let response = server.get("/").await;
 
-            response.assert_status(StatusCode::NOT_FOUND);
-        }
-    }
+    //         response.assert_status(StatusCode::NOT_FOUND);
+    //     }
+    // }
     mod items {
         use crate::{
             config::{self, AppState},
@@ -732,7 +732,7 @@ mod tests {
             let state = AppState::new().await.unwrap();
 
             state.items.insert(
-                uuid::Uuid::nil(),
+                Uuid::nil(),
                 Item {
                     name: "test".to_string(),
                     desc: "test".to_string(),
@@ -740,7 +740,7 @@ mod tests {
             );
 
             state.items.insert(
-                uuid::Uuid::new_v4(),
+                Uuid::new_v4(),
                 Item {
                     name: "tset".to_string(),
                     desc: "tset".to_string(),

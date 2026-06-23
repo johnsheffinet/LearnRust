@@ -174,7 +174,7 @@ pub mod handlers {
         Ok((
             StatusCode::TEMPORARY_REDIRECT,
             [(LOCATION, location)],
-            Json(json!({"status": format!("Temporarily redirecting to {redirect_url}.")})),
+            Json(json!({ "status": format!("Temporarily redirecting to {redirect_url}.") })),
         ))
     }
 
@@ -184,7 +184,7 @@ pub mod handlers {
 
         sleep(Duration::from_secs(10)).await;
 
-        Ok((StatusCode::OK, Json(json!({"status": "App is lively."}))))
+        Ok((StatusCode::OK, Json(json!({ "status": "App is lively." }))))
     }
 
     #[tracing::instrument(skip_all, err)]
@@ -192,7 +192,7 @@ pub mod handlers {
         let path = uri.path();
         Ok((
             StatusCode::NOT_FOUND,
-            Json(json!({"status": format!("Invalid route {path}.")})),
+            Json(json!({ "status": format!("Invalid route {path}.") })),
         ))
     }
 
@@ -749,7 +749,7 @@ mod tests {
         }
 
         #[test_case(
-            json!({"name":"test", "desc":"test"}), // payload
+            json!({ "name":"test", "desc":"test" }), // payload
             StatusCode::CREATED; // status
             "success"
         )]
@@ -912,7 +912,7 @@ mod tests {
             "success_update_desc"
         )]
         #[test_case(
-            uuid::Uuid::new_v4().to_string(), // pathid
+            Uuid::new_v4().to_string(), // pathid
             json!({ "name":"updated", "desc":"updated", }), // payload
             StatusCode::NOT_FOUND; // status
             "failure_missing_id"

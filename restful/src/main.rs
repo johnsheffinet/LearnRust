@@ -393,7 +393,7 @@ pub mod items {
     pub type AppResult<T> = Result<T, AppError>;
 
     #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
-    enum AppError {
+    pub enum AppError {
         #[error("Failed to validate request! {0}")]
         #[status_code("422")]
         #[code("UNPROCESSABLE_ENTITY")]
@@ -758,7 +758,7 @@ mod tests {
             json!({
                 "desc":"test"
             }), // payload
-            StatusCode::BAD_REQUEST; // status
+            StatusCode::UNPROCESSABLE_ENTITY; // status
             "failure_missing_name"
         )]
         #[test_case(
@@ -766,14 +766,14 @@ mod tests {
                 "name":"",
                 "desc":"test"
             }), // payload
-            StatusCode::UNPROCESSABLE_ENTITY; // status
+            StatusCode::BAD_REQUEST; // status
             "failure_invalid_name"
         )]
         #[test_case(
             json!({
                 "name":"test"
             }), // payload
-            StatusCode::BAD_REQUEST; // status
+            StatusCode::UNPROCESSABLE_ENTITY; // status
             "failure_missing_desc"
         )]
         #[test_case(
@@ -781,7 +781,7 @@ mod tests {
                 "name":"test",
                 "desc":""
             }), // payload
-            StatusCode::UNPROCESSABLE_ENTITY; // status
+            StatusCode::BAD_REQUEST; // status
             "failure_invalid_desc"
         )]
         #[test_log::test(tokio::test)]

@@ -129,7 +129,7 @@ pub mod config {
 
     #[derive(Clone, Debug, FromRef)]
     pub struct AppState {
-        // pub config: AppConfig,
+        pub config: AppConfig,
         pub items: AppStore<Item>,
     }
 
@@ -138,10 +138,10 @@ pub mod config {
     impl AppState {
         #[tracing::instrument(skip_all, err)]
         pub async fn new() -> AppResult<Self> {
-            // let config = AppConfig::new().await?;
+            let config = AppConfig::new().await?;
             let items = DashMap::new();
 
-            Ok(Self { /*config,*/ items })
+            Ok(Self { config, items })
         }
     }
 }
@@ -165,7 +165,7 @@ pub mod handlers {
     ) -> AppResult<impl IntoResponse> {
         let path_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
 
-        let redirect_url = format!("https://{}{}", /*&state.config.https_addr*/ "127.0.0.1:3443", path_query,);
+        let redirect_url = format!("https://{}{}", &state.config.https_addr, path_query,);
 
         let location =
             HeaderValue::try_from(redirect_url.clone()).map_err(AppError::FailedCreateHeader)?;
@@ -199,7 +199,7 @@ pub mod handlers {
     #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
     pub enum AppError {
         #[error("Failed to create header! {0}")]
-        #[status_code("BAD_REQUEST")]
+        #[status_code("400")]
         FailedCreateHeader(InvalidHeaderValue),
     }
 }
@@ -395,7 +395,7 @@ pub mod items {
     #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
     enum AppError {
         #[error("Failed to validate request! {0}")]
-        #[status_code("UNPROCESSABLE_ENTITY")]
+        #[status_code("422")]
         #[code("UNPROCESSABLE_ENTITY")]
         UnprocessableEntity(#[from] validator::ValidationErrors),
 
@@ -403,11 +403,6 @@ pub mod items {
         #[status_code("404")]
         #[code("NOT_FOUND")]
         NotFound(String),
-
-        // #[error("Failed to process request! {0}")]
-        // #[status_code("INTERNAL_SERVER_ERROR")]
-        // #[code("INTERNAL_SERVER_ERROR")]
-        // InternalServerError(String),
     }
 }
 #[cfg(test)]
@@ -675,49 +670,49 @@ mod tests {
             });
         }
     }
-    // mod handlers {
-    //     use crate::{
-    //         config::{self, AppState},
-    //         handlers,
-    //     };
-    //     use axum::http::StatusCode;
-    //     use axum_test::TestServer;
+    mod handlers {
+        use crate::{
+            config::{self, AppState},
+            handlers,
+        };
+        use axum::http::StatusCode;
+        use axum_test::TestServer;
 
-    //     async fn test_server(router_fn: fn(AppState) -> axum::Router) -> TestServer {
-    //         let state = AppState::new().await.unwrap();
+        async fn test_server(router_fn: fn(AppState) -> axum::Router) -> TestServer {
+            let state = AppState::new().await.unwrap();
 
-    //         TestServer::new(router_fn(state))
-    //     }
+            TestServer::new(router_fn(state))
+        }
 
-    //     #[test_log::test(tokio::test)]
-    //     async fn test_redirect_to_https_success() {
-    //         let server = test_server(config::http_router).await;
+        #[test_log::test(tokio::test)]
+        async fn test_redirect_to_https_success() {
+            let server = test_server(config::http_router).await;
 
-    //         let response = server.get("/healthz").await;
+            let response = server.get("/healthz").await;
 
-    //         response.assert_status(StatusCode::TEMPORARY_REDIRECT);
+            response.assert_status(StatusCode::TEMPORARY_REDIRECT);
 
-    //         response.assert_header("location", "https://127.0.0.1:3443/healthz");
-    //     }
+            response.assert_header("location", "https://127.0.0.1:3443/healthz");
+        }
 
-    //     #[test_log::test(tokio::test(start_paused = true))]
-    //     async fn test_check_app_liveliness() {
-    //         let task = tokio::spawn(handlers::check_app_liveliness());
+        #[test_log::test(tokio::test(start_paused = true))]
+        async fn test_check_app_liveliness() {
+            let task = tokio::spawn(handlers::check_app_liveliness());
 
-    //         tokio::time::advance(std::time::Duration::from_secs(1)).await;
+            tokio::time::advance(std::time::Duration::from_secs(1)).await;
 
-    //         assert!(task.await.unwrap().is_ok());
-    //     }
+            assert!(task.await.unwrap().is_ok());
+        }
 
-    //     #[test_log::test(tokio::test)]
-    //     async fn test_report_route_invalid_success() {
-    //         let server = test_server(config::https_router).await;
+        #[test_log::test(tokio::test)]
+        async fn test_report_route_invalid_success() {
+            let server = test_server(config::https_router).await;
 
-    //         let response = server.get("/").await;
+            let response = server.get("/").await;
 
-    //         response.assert_status(StatusCode::NOT_FOUND);
-    //     }
-    // }
+            response.assert_status(StatusCode::NOT_FOUND);
+        }
+    }
     mod items {
         use crate::{
             config::{self, AppState},
@@ -763,7 +758,7 @@ mod tests {
             json!({
                 "desc":"test"
             }), // payload
-            StatusCode::UNPROCESSABLE_ENTITY; // status
+            StatusCode::BAD_REQUEST; // status
             "failure_missing_name"
         )]
         #[test_case(
@@ -771,14 +766,14 @@ mod tests {
                 "name":"",
                 "desc":"test"
             }), // payload
-            StatusCode::BAD_REQUEST; // status
+            StatusCode::UNPROCESSABLE_ENTITY; // status
             "failure_invalid_name"
         )]
         #[test_case(
             json!({
                 "name":"test"
             }), // payload
-            StatusCode::UNPROCESSABLE_ENTITY; // status
+            StatusCode::BAD_REQUEST; // status
             "failure_missing_desc"
         )]
         #[test_case(
@@ -786,7 +781,7 @@ mod tests {
                 "name":"test",
                 "desc":""
             }), // payload
-            StatusCode::BAD_REQUEST; // status
+            StatusCode::UNPROCESSABLE_ENTITY; // status
             "failure_invalid_desc"
         )]
         #[test_log::test(tokio::test)]
@@ -813,7 +808,7 @@ mod tests {
         )]
         #[test_case(
             Uuid::new_v4().to_string(), // pathid
-            StatusCode::INTERNAL_SERVER_ERROR; // status
+            StatusCode::NOT_FOUND; // status
             "failure_missing_id"
         )]
         #[test_case(
@@ -845,7 +840,7 @@ mod tests {
         )]
         #[test_case(
             Uuid::new_v4().to_string(), // pathid
-            StatusCode::INTERNAL_SERVER_ERROR; // status
+            StatusCode::NOT_FOUND; // status
             "failure_missing_id"
         )]
         #[test_case(

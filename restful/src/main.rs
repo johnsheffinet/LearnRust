@@ -1,13 +1,10 @@
 pub mod config {
-    use crate::{
-        handlers,
-        items::{self, Item},
-    };
-    use axum::{Router, extract::FromRef};
+    use crate::{handlers, items::{self, Item},};
+    use axum::{Router, extract::FromRef,};
     use axum_server::tls_rustls::RustlsConfig;
     use dashmap::DashMap;
     use rustls_pki_types::pem::PemObject;
-    use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
+    use std::{env, net::SocketAddr, path::PathBuf, sync::Arc,};
     use uuid::Uuid;
 
     pub fn http_router(state: AppState) -> Router {
@@ -141,7 +138,10 @@ pub mod config {
             let config = AppConfig::new().await?;
             let items = DashMap::new();
 
-            Ok(Self { config, items })
+            Ok(Self { 
+                config, 
+                items,
+            })
         }
     }
 }
@@ -150,10 +150,7 @@ pub mod handlers {
     use axum::{
         Json,
         extract::State,
-        http::{
-            HeaderValue, StatusCode, Uri,
-            header::{InvalidHeaderValue, LOCATION},
-        },
+        http::{ HeaderValue, StatusCode, Uri, header::{ InvalidHeaderValue, LOCATION }, },
         response::IntoResponse,
     };
     use serde_json::json;
@@ -180,11 +177,14 @@ pub mod handlers {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn check_app_liveliness() -> AppResult<impl IntoResponse> {
-        use tokio::time::{Duration, sleep};
+        use tokio::time::{ Duration, sleep, };
 
         sleep(Duration::from_secs(10)).await;
 
-        Ok((StatusCode::OK, Json(json!({ "status": "App is lively." }))))
+        Ok((
+            StatusCode::OK, 
+            Json(json!({ "status": "App is lively." }))
+        ))
     }
 
     #[tracing::instrument(skip_all, err)]
@@ -208,7 +208,7 @@ pub mod handlers {
 pub mod items {
     use crate::config::AppStore;
     use axum::{
-        extract::{Json, Path, Query, State},
+        extract::{ Json, Path, Query, State, },
         http::StatusCode,
         response::IntoResponse,
     };
@@ -223,7 +223,7 @@ pub mod items {
         axum::Router::new()
             .route("/items", axum::routing::get(select).post(create))
             .route(
-                "/items/{ id }",
+                "/items/{id}",
                 axum::routing::get(get).delete(delete).put(update),
             )
     }
@@ -244,7 +244,10 @@ pub mod items {
 
         state.insert(id, item);
 
-        Ok((StatusCode::CREATED, Json(item_response)))
+        Ok((
+            StatusCode::CREATED, 
+            Json(item_response)
+        ))
     }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
@@ -301,7 +304,10 @@ pub mod items {
             item: item.clone(),
         };
 
-        Ok((StatusCode::OK, Json(item_response)))
+        Ok((
+            StatusCode::OK, 
+            Json(item_response)
+        ))
     }
 
     #[derive(Debug, serde::Deserialize)]
@@ -319,9 +325,15 @@ pub mod items {
             .map(|entry| entry.value().clone())
             .ok_or_else(|| AppError::NotFound(id.to_string()))?;
 
-        let item_response = ItemResponse { id, item };
+        let item_response = ItemResponse { 
+            id, 
+            item 
+        };
 
-        Ok((StatusCode::OK, Json(item_response)))
+        Ok((
+            StatusCode::OK, 
+            Json(item_response)
+        ))
     }
 
     #[tracing::instrument(skip_all, err)]
@@ -353,7 +365,10 @@ pub mod items {
             })
             .collect();
 
-        Ok((StatusCode::OK, Json(results)))
+        Ok((
+            StatusCode::OK, 
+            Json(results)
+        ))
     }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
@@ -381,7 +396,10 @@ pub mod items {
             item: item.clone(),
         };
 
-        Ok((StatusCode::OK, Json(item_response)))
+        Ok((
+            StatusCode::OK, 
+            Json(item_response)
+        ))
     }
 
     #[derive(Debug, serde::Deserialize, validator::Validate)]
@@ -410,7 +428,7 @@ pub mod items {
 #[cfg(test)]
 mod tests {
     mod config {
-        use crate::config::{AppConfig, AppError};
+        use crate::config::{ AppConfig, AppError };
         use cool_asserts::assert_matches;
         use figment::Jail;
         use test_case::test_case;

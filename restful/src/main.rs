@@ -141,7 +141,7 @@ pub mod config {
             // let config = AppConfig::new().await?;
             let items = DashMap::new();
 
-            Ok(Self { config, items })
+            Ok(Self { /*config,*/ items })
         }
     }
 }
@@ -165,7 +165,7 @@ pub mod handlers {
     ) -> AppResult<impl IntoResponse> {
         let path_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
 
-        let redirect_url = format!("https://{}{}", &state.config.https_addr, path_query,);
+        let redirect_url = format!("https://{}{}", /*&state.config.https_addr*/ "127.0.0.1:3443", path_query,);
 
         let location =
             HeaderValue::try_from(redirect_url.clone()).map_err(AppError::FailedCreateHeader)?;
@@ -211,6 +211,7 @@ pub mod items {
         response::IntoResponse,
     };
     use axum_valid::Valid;
+    use uuid::Uuid;
 
     pub fn routes<S>() -> axum::Router<S>
     where
@@ -280,7 +281,7 @@ pub mod items {
 
     #[derive(Debug, serde::Serialize)]
     struct ItemResponse {
-        id: uuid::Uuid,
+        id: Uuid,
         item: Item,
     }
 
@@ -303,7 +304,7 @@ pub mod items {
 
     #[derive(Debug, serde::Deserialize)]
     pub struct GetPathId {
-        id: uuid::Uuid,
+        id: Uuid,
     }
 
     #[tracing::instrument(skip_all, err)]
@@ -392,14 +393,14 @@ pub mod items {
     pub type AppResult<T> = Result<T, AppError>;
 
     #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
-    pub enum AppError {
+    enum AppError {
         #[error("Failed to validate request! {0}")]
         #[status_code("UNPROCESSABLE_ENTITY")]
         #[code("UNPROCESSABLE_ENTITY")]
         UnprocessableEntity(#[from] validator::ValidationErrors),
 
         #[error("Failed to find {0} id in request path!")]
-        #[status_code("NOT_FOUND")]
+        #[status_code("404")]
         #[code("NOT_FOUND")]
         NotFound(String),
 
@@ -934,10 +935,10 @@ mod tests {
             "success_update_desc"
         )]
         #[test_case(
-            Uuid::new_v4().to_string(), // pathid
+            uuid::Uuid::new_v4().to_string(), // pathid
             json!({
-                "name":"updated",
-                "desc":"updated",
+                "name": "updated",
+                "desc": "updated",
             }), // payload
             StatusCode::NOT_FOUND; // status
             "failure_missing_id"
@@ -945,8 +946,8 @@ mod tests {
         #[test_case(
             "abc".to_string(), // pathid
             json!({
-                "name":"updated",
-                "desc":"updated"
+                "name": "updated",
+                "desc": "updated",
             }), // payload
             StatusCode::BAD_REQUEST; // status
             "failure_invalid_id"
@@ -957,14 +958,10 @@ mod tests {
 
             let response = server.put(&format!("/items/{pathid}")).json(&payload).await;
 
-            dbg!(response.text()); // REMOVE
-
             response.assert_status(status);
 
             if status == StatusCode::OK {
                 let body: Value = response.json();
-
-                dbg!(&body); // REMOVE
 
                 assert_eq!(body["id"].as_str().unwrap(), pathid);
                 if payload.get("name").is_some() {

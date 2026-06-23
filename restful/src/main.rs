@@ -181,7 +181,7 @@ pub mod handlers {
     pub async fn check_app_liveliness() -> AppResult<impl IntoResponse> {
         use tokio::time::{Duration, sleep};
 
-        sleep(Duration::from_secs(2)).await;
+        sleep(Duration::from_secs(10)).await;
 
         Ok((StatusCode::OK, Json(json!({"status": "App is lively."}))))
     }
@@ -196,10 +196,10 @@ pub mod handlers {
 
     type AppResult<T> = Result<T, AppError>;
 
-    #[derive(Debug, thiserror::Error, axum_thiserror::ErrorStatus)]
+    #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
     pub enum AppError {
         #[error("Failed to create header! {0}")]
-        #[status(StatusCode::INTERNAL_SERVER_ERROR)]
+        #[status_code("400")]
         FailedCreateHeader(InvalidHeaderValue),
     }
 }
@@ -211,6 +211,7 @@ pub mod items {
         response::IntoResponse,
     };
     use axum_valid::Valid;
+    use uuid::Uuid;
 
     pub fn routes<S>() -> axum::Router<S>
     where
@@ -244,6 +245,46 @@ pub mod items {
         Ok((StatusCode::CREATED, Json(item_response)))
     }
 
+    #[derive(Debug, serde::Deserialize, validator::Validate)]
+    pub struct CreateJsonPayload {
+        #[validate(length(min = 1, message = "field in create json payload is missing!"))]
+        name: String,
+        #[validate(length(min = 1, message = "field in create json payload is missing!"))]
+        desc: String,
+    }
+
+    impl From<CreateJsonPayload> for Item {
+        fn from(payload: CreateJsonPayload) -> Self {
+            Self {
+                name: payload.name,
+                desc: payload.desc,
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+    pub struct Item {
+        pub name: String,
+        pub desc: String,
+    }
+
+    impl Item {
+        fn edit(&mut self, payload: UpdateJsonPayload) {
+            if let Some(name) = payload.name {
+                self.name = name;
+            }
+            if let Some(desc) = payload.desc {
+                self.desc = desc;
+            }
+        }
+    }
+
+    #[derive(Debug, serde::Serialize)]
+    struct ItemResponse {
+        id: Uuid,
+        item: Item,
+    }
+
     #[tracing::instrument(skip_all, err)]
     pub async fn delete(
         State(state): State<AppStore<Item>>,
@@ -259,6 +300,11 @@ pub mod items {
         };
 
         Ok((StatusCode::OK, Json(item_response)))
+    }
+
+    #[derive(Debug, serde::Deserialize)]
+    pub struct GetPathId {
+        id: Uuid,
     }
 
     #[tracing::instrument(skip_all, err)]
@@ -308,6 +354,14 @@ pub mod items {
         Ok((StatusCode::OK, Json(results)))
     }
 
+    #[derive(Debug, serde::Deserialize, validator::Validate)]
+    pub struct SelectQueryParams {
+        #[validate(length(min = 1, message = "field in select query params is missing!"))]
+        name: Option<String>,
+        #[validate(length(min = 1, message = "field in select query params is missing!"))]
+        desc: Option<String>,
+    }
+
     #[tracing::instrument(skip_all, err)]
     pub async fn update(
         State(state): State<AppStore<Item>>,
@@ -328,85 +382,27 @@ pub mod items {
         Ok((StatusCode::OK, Json(item_response)))
     }
 
-    pub type AppResult<T> = Result<T, AppError>;
-
-    #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
-    pub enum AppError {
-        #[error("Failed to validate request! {0}")]
-        #[status_code(StatusCode::UNPROCESSABLE_ENTITY)]
-        #[code("UNPROCESSABLE_ENTITY")]
-        UnprocessableEntity(#[from] validator::ValidationErrors),
-
-        #[error("Failed to find {0} id in request path!")]
-        #[status_code(StatusCode::NOT_FOUND)]
-        #[code("NOT_FOUND")]
-        NotFound(String),
-
-        #[error("Failed to process request! {0}")]
-        #[status_code(StatusCode::INTERNAL_SERVER_ERROR)]
-        #[code("INTERNAL_SERVER_ERROR")]
-        InternalServerError(String),
-    }
-
-    #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-    pub struct Item {
-        name: String,
-        desc: String,
-    }
-
-    impl Item {
-        fn edit(&mut self, payload: UpdateJsonPayload) {
-            if let Some(name) = payload.name {
-                self.name = name;
-            }
-            if let Some(desc) = payload.desc {
-                self.desc = desc;
-            }
-        }
-    }
-
-    #[derive(Debug, serde::Serialize)]
-    struct ItemResponse {
-        id: uuid::Uuid,
-        item: Item,
-    }
-
-    #[derive(Debug, serde::Deserialize, validator::Validate)]
-    pub struct CreateJsonPayload {
-        #[validate(length(min = 1, message = "field in create json payload is missing!"))]
-        name: String,
-        #[validate(length(min = 1, message = "field in create json payload is missing!"))]
-        desc: String,
-    }
-
-    impl From<CreateJsonPayload> for Item {
-        fn from(payload: CreateJsonPayload) -> Self {
-            Self {
-                name: payload.name,
-                desc: payload.desc,
-            }
-        }
-    }
-
-    #[derive(Debug, serde::Deserialize)]
-    pub struct GetPathId {
-        id: uuid::Uuid,
-    }
-
-    #[derive(Debug, serde::Deserialize, validator::Validate)]
-    pub struct SelectQueryParams {
-        #[validate(length(min = 1, message = "field in select query params is missing!"))]
-        name: Option<String>,
-        #[validate(length(min = 1, message = "field in select query params is missing!"))]
-        desc: Option<String>,
-    }
-
     #[derive(Debug, serde::Deserialize, validator::Validate)]
     pub struct UpdateJsonPayload {
         #[validate(length(min = 1, message = "field in update json payload is missing!"))]
         name: Option<String>,
         #[validate(length(min = 1, message = "field in update json payload is missing!"))]
         desc: Option<String>,
+    }
+
+    pub type AppResult<T> = Result<T, AppError>;
+
+    #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
+    pub enum AppError {
+        #[error("Failed to validate request! {0}")]
+        #[status_code("422")]
+        #[code("UNPROCESSABLE_ENTITY")]
+        UnprocessableEntity(#[from] validator::ValidationErrors),
+
+        #[error("Failed to find {0} id in request path!")]
+        #[status_code("404")]
+        #[code("NOT_FOUND")]
+        NotFound(String),
     }
 }
 #[cfg(test)]
@@ -675,7 +671,10 @@ mod tests {
         }
     }
     mod handlers {
-        use crate::config::{self, AppState};
+        use crate::{
+            config::{self, AppState},
+            handlers,
+        };
         use axum::http::StatusCode;
         use axum_test::TestServer;
 
@@ -686,7 +685,7 @@ mod tests {
         }
 
         #[test_log::test(tokio::test)]
-        async fn test_redirect_to_https() {
+        async fn test_redirect_to_https_success() {
             let server = test_server(config::http_router).await;
 
             let response = server.get("/healthz").await;
@@ -696,22 +695,277 @@ mod tests {
             response.assert_header("location", "https://127.0.0.1:3443/healthz");
         }
 
-        #[test_log::test(tokio::test)]
+        #[test_log::test(tokio::test(start_paused = true))]
         async fn test_check_app_liveliness() {
-            let server = test_server(config::https_router).await;
+            let task = tokio::spawn(handlers::check_app_liveliness());
 
-            let response = server.get("/healthz").await;
+            tokio::time::advance(std::time::Duration::from_secs(1)).await;
 
-            response.assert_status(StatusCode::OK);
+            assert!(task.await.unwrap().is_ok());
         }
 
         #[test_log::test(tokio::test)]
-        async fn test_report_route_invalid() {
+        async fn test_report_route_invalid_success() {
             let server = test_server(config::https_router).await;
 
             let response = server.get("/").await;
 
             response.assert_status(StatusCode::NOT_FOUND);
+        }
+    }
+    mod items {
+        use crate::{
+            config::{self, AppState},
+            items::Item,
+        };
+        use axum::http::StatusCode;
+        use axum_test::TestServer;
+        use serde_json::{Value, json};
+        use test_case::test_case;
+        use uuid::Uuid;
+
+        async fn test_server(router_fn: fn(AppState) -> axum::Router) -> TestServer {
+            let state = AppState::new().await.unwrap();
+
+            state.items.insert(
+                Uuid::nil(),
+                Item {
+                    name: "test".to_string(),
+                    desc: "test".to_string(),
+                },
+            );
+
+            state.items.insert(
+                Uuid::new_v4(),
+                Item {
+                    name: "tset".to_string(),
+                    desc: "tset".to_string(),
+                },
+            );
+
+            TestServer::new(router_fn(state))
+        }
+
+        #[test_case(
+            json!({
+                "name":"test",
+                "desc":"test"
+            }), // payload
+            StatusCode::CREATED; // status
+            "success"
+        )]
+        #[test_case(
+            json!({
+                "desc":"test"
+            }), // payload
+            StatusCode::UNPROCESSABLE_ENTITY; // status
+            "failure_missing_name"
+        )]
+        #[test_case(
+            json!({
+                "name":"",
+                "desc":"test"
+            }), // payload
+            StatusCode::BAD_REQUEST; // status
+            "failure_invalid_name"
+        )]
+        #[test_case(
+            json!({
+                "name":"test"
+            }), // payload
+            StatusCode::UNPROCESSABLE_ENTITY; // status
+            "failure_missing_desc"
+        )]
+        #[test_case(
+            json!({
+                "name":"test",
+                "desc":""
+            }), // payload
+            StatusCode::BAD_REQUEST; // status
+            "failure_invalid_desc"
+        )]
+        #[test_log::test(tokio::test)]
+        async fn test_create(payload: Value, status: StatusCode) {
+            let server = test_server(config::https_router).await;
+
+            let response = server.post("/items").json(&payload).await;
+
+            response.assert_status(status);
+
+            if status == StatusCode::CREATED {
+                let body: Value = response.json();
+
+                assert!(body["id"].is_string());
+                assert_eq!(body["item"]["name"], payload["name"]);
+                assert_eq!(body["item"]["desc"], payload["desc"]);
+            }
+        }
+
+        #[test_case(
+            Uuid::nil().to_string(), // pathid
+            StatusCode::OK; // status
+            "success"
+        )]
+        #[test_case(
+            Uuid::new_v4().to_string(), // pathid
+            StatusCode::NOT_FOUND; // status
+            "failure_missing_id"
+        )]
+        #[test_case(
+            "abc".to_string(), // pathid
+            StatusCode::BAD_REQUEST; // status
+            "failure_invalid_id"
+        )]
+        #[test_log::test(tokio::test)]
+        async fn test_delete(pathid: String, status: StatusCode) {
+            let server = test_server(config::https_router).await;
+
+            let response = server.delete(&format!("/items/{pathid}")).await;
+
+            response.assert_status(status);
+
+            if status == StatusCode::OK {
+                let body: Value = response.json();
+
+                assert_eq!(body["id"].as_str().unwrap(), pathid);
+                assert_eq!(body["item"]["name"], "test");
+                assert_eq!(body["item"]["desc"], "test");
+            }
+        }
+
+        #[test_case(
+            Uuid::nil().to_string(), // pathid
+            StatusCode::OK; // status
+            "success"
+        )]
+        #[test_case(
+            Uuid::new_v4().to_string(), // pathid
+            StatusCode::NOT_FOUND; // status
+            "failure_missing_id"
+        )]
+        #[test_case(
+            "abc".to_string(), // pathid
+            StatusCode::BAD_REQUEST; // status
+            "failure_invalid_id"
+        )]
+        #[test_log::test(tokio::test)]
+        async fn test_get(pathid: String, status: StatusCode) {
+            let server = test_server(config::https_router).await;
+
+            let response = server.get(&format!("/items/{pathid}")).await;
+
+            response.assert_status(status);
+
+            if status == StatusCode::OK {
+                let body: Value = response.json();
+
+                assert_eq!(body["id"].as_str().unwrap(), pathid);
+                assert_eq!(body["item"]["name"], "test");
+                assert_eq!(body["item"]["desc"], "test");
+            }
+        }
+
+        #[test_case(
+        "".to_string(), // queryparams
+        2, // length
+        StatusCode::OK; // status
+        "success_no_filter"
+        )]
+        #[test_case(
+        "name=test".to_string(), // queryparams
+        1, // length
+        StatusCode::OK; // status
+        "success_filter_name"
+        )]
+        #[test_case(
+        "name=test&desc=tset".to_string(), // queryparams
+        0, // length
+        StatusCode::OK; // status
+        "success_filter_name_and_desc"
+        )]
+        #[test_case(
+        "name=".to_string(), // queryparams
+        0, // length
+        StatusCode::BAD_REQUEST; // status
+        "failure_missing_filter"
+        )]
+        #[test_log::test(tokio::test)]
+        async fn test_select(queryparams: String, length: usize, status: StatusCode) {
+            let server = test_server(config::https_router).await;
+
+            let response = server.get(&format!("/items?{queryparams}")).await;
+
+            response.assert_status(status);
+
+            if status == StatusCode::OK {
+                let body: Vec<Value> = response.json();
+
+                assert_eq!(body.len(), length);
+            }
+        }
+
+        #[test_case(
+            Uuid::nil().to_string(), // pathid
+            json!({
+                "name":"updated",
+                "desc":"updated",
+            }), // payload
+            StatusCode::OK; // status
+            "success_update_name_and_desc"
+        )]
+        #[test_case(
+            Uuid::nil().to_string(), // pathid
+            json!({
+                "name":"updated",
+            }), // payload
+            StatusCode::OK; // status
+            "success_update_name"
+        )]
+        #[test_case(
+            Uuid::nil().to_string(), // pathid
+            json!({
+                "desc":"updated",
+            }), // payload
+            StatusCode::OK; // status
+            "success_update_desc"
+        )]
+        #[test_case(
+            uuid::Uuid::new_v4().to_string(), // pathid
+            json!({
+                "name": "updated",
+                "desc": "updated",
+            }), // payload
+            StatusCode::NOT_FOUND; // status
+            "failure_missing_id"
+        )]
+        #[test_case(
+            "abc".to_string(), // pathid
+            json!({
+                "name": "updated",
+                "desc": "updated",
+            }), // payload
+            StatusCode::BAD_REQUEST; // status
+            "failure_invalid_id"
+        )]
+        #[test_log::test(tokio::test)]
+        async fn test_update(pathid: String, payload: Value, status: StatusCode) {
+            let server = test_server(config::https_router).await;
+
+            let response = server.put(&format!("/items/{pathid}")).json(&payload).await;
+
+            response.assert_status(status);
+
+            if status == StatusCode::OK {
+                let body: Value = response.json();
+
+                assert_eq!(body["id"].as_str().unwrap(), pathid);
+                if payload.get("name").is_some() {
+                    assert_eq!(body["item"]["name"], payload["name"],);
+                }
+                if payload.get("desc").is_some() {
+                    assert_eq!(body["item"]["desc"], payload["desc"],);
+                }
+            }
         }
     }
 }

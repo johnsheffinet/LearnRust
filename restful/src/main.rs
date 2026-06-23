@@ -163,9 +163,10 @@ pub mod handlers {
         State(state): State<AppState>,
         uri: Uri,
     ) -> AppResult<impl IntoResponse> {
+        let addr = &state.config.https_addr;
         let path_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
 
-        let redirect_url = format!("https://{}{}", &state.config.https_addr, path_query,);
+        let redirect_url = format!("https://{addr}{path_query}");
 
         let location =
             HeaderValue::try_from(redirect_url.clone()).map_err(AppError::FailedCreateHeader)?;
@@ -173,7 +174,7 @@ pub mod handlers {
         Ok((
             StatusCode::TEMPORARY_REDIRECT,
             [(LOCATION, location)],
-            Json(json!({"status": format!("Temporarily redirecting to {}.", redirect_url)})),
+            Json(json!({"status": format!("Temporarily redirecting to {redirect_url}.")})),
         ))
     }
 
@@ -188,9 +189,10 @@ pub mod handlers {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn report_route_invalid(uri: Uri) -> AppResult<impl IntoResponse> {
+        let path = uri.path();
         Ok((
             StatusCode::NOT_FOUND,
-            Json(json!({"status": format!("Invalid route {}!", uri.path())})),
+            Json(json!({"status": format!("Invalid route {path}.")})),
         ))
     }
 
@@ -221,7 +223,7 @@ pub mod items {
         axum::Router::new()
             .route("/items", axum::routing::get(select).post(create))
             .route(
-                "/items/{id}",
+                "/items/{ id }",
                 axum::routing::get(get).delete(delete).put(update),
             )
     }
@@ -747,40 +749,27 @@ mod tests {
         }
 
         #[test_case(
-            json!({
-                "name":"test",
-                "desc":"test"
-            }), // payload
+            json!({"name":"test", "desc":"test"}), // payload
             StatusCode::CREATED; // status
             "success"
         )]
         #[test_case(
-            json!({
-                "desc":"test"
-            }), // payload
+            json!({ "desc":"test" }), // payload
             StatusCode::UNPROCESSABLE_ENTITY; // status
             "failure_missing_name"
         )]
         #[test_case(
-            json!({
-                "name":"",
-                "desc":"test"
-            }), // payload
+            json!({ "name":"", "desc":"test" }), // payload
             StatusCode::BAD_REQUEST; // status
             "failure_invalid_name"
         )]
         #[test_case(
-            json!({
-                "name":"test"
-            }), // payload
+            json!({ "name":"test" }), // payload
             StatusCode::UNPROCESSABLE_ENTITY; // status
             "failure_missing_desc"
         )]
         #[test_case(
-            json!({
-                "name":"test",
-                "desc":""
-            }), // payload
+            json!({ "name":"test", "desc":"" }), // payload
             StatusCode::BAD_REQUEST; // status
             "failure_invalid_desc"
         )]
@@ -906,44 +895,31 @@ mod tests {
 
         #[test_case(
             Uuid::nil().to_string(), // pathid
-            json!({
-                "name":"updated",
-                "desc":"updated",
-            }), // payload
+            json!({ "name":"updated", "desc":"updated", }), // payload
             StatusCode::OK; // status
             "success_update_name_and_desc"
         )]
         #[test_case(
             Uuid::nil().to_string(), // pathid
-            json!({
-                "name":"updated",
-            }), // payload
+            json!({ "name":"updated", }), // payload
             StatusCode::OK; // status
             "success_update_name"
         )]
         #[test_case(
             Uuid::nil().to_string(), // pathid
-            json!({
-                "desc":"updated",
-            }), // payload
+            json!({ "desc":"updated", }), // payload
             StatusCode::OK; // status
             "success_update_desc"
         )]
         #[test_case(
             uuid::Uuid::new_v4().to_string(), // pathid
-            json!({
-                "name": "updated",
-                "desc": "updated",
-            }), // payload
+            json!({ "name":"updated", "desc":"updated", }), // payload
             StatusCode::NOT_FOUND; // status
             "failure_missing_id"
         )]
         #[test_case(
             "abc".to_string(), // pathid
-            json!({
-                "name": "updated",
-                "desc": "updated",
-            }), // payload
+            json!({ "name": "updated", "desc": "updated", }), // payload
             StatusCode::BAD_REQUEST; // status
             "failure_invalid_id"
         )]

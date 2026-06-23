@@ -334,17 +334,15 @@ pub mod items {
             .filter_map(|entry| {
                 let item = entry.value();
 
-                if let Some(ref filter_name) = params.name {
-                    if !item.name.contains(filter_name) {
+                if let Some(ref filter_name) = params.name
+                    && !item.name.contains(filter_name) {
                         return None;
                     }
-                }
 
-                if let Some(ref filter_desc) = params.desc {
-                    if !item.desc.contains(filter_desc) {
+                if let Some(ref filter_desc) = params.desc
+                    && !item.desc.contains(filter_desc) {
                         return None;
                     }
-                }
 
                 Some(ItemResponse {
                     id: *entry.key(),

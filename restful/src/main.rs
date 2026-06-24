@@ -180,9 +180,9 @@ pub mod handlers {
 
     #[tracing::instrument(skip_all, err)]
     pub async fn check_app_liveliness() -> AppResult<impl IntoResponse> {
-        use tokio::time::{Duration, sleep};
+        // use tokio::time::{Duration, sleep};
 
-        sleep(Duration::from_secs(10)).await;
+        // sleep(Duration::from_secs(10)).await;
 
         Ok((StatusCode::OK, Json(json!({"status": "App is lively."}))))
     }
@@ -987,26 +987,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("[HTTP] Worker task complete.");
     });
 
-    // 5. Spawn and track the HTTPS service
     let https_state = state.clone();
     let https_router = config::https_router(https_state);
     let https_shutdown = https_token.clone();
     
     tracker.spawn(async move {
-        println!("[HTTPS] Starting service on https://{https_addr}");
+        println!("[HTTPS] Starting service on https://{}", config.https_addr);
         
         axum_server::bind_rustls(config.https_addr, (*config.tls_config).clone())
             .with_graceful_shutdown(async move {
                 https_shutdown.cancelled().await;
-                println!("[HTTPS] Shutdown token triggered. Finishing inflight requests...");
-                // Allow a small window to drain outstanding keep-alive streams safely
+                println!("[HTTPS] Triggered shutdown token. Finishing inflight requests...");
                 sleep(Duration::from_secs(1)).await;
             })
             .serve(https_router.into_make_service())
             .await
             .unwrap();
 
-        println!("[HTTPS] Worker task complete.");
+        println!("[HTTPS] Stopped service on https://{}", config.https_addr");
     });
 
     tracker.close();

@@ -945,10 +945,84 @@ mod tests {
 }
 
 #[tokio::main]
-async fn main() {
-    use crate::config::AppConfig;
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use crate::config::AppState;
+    use std::time::Duration;
+    use tokio::time::sleep;
+    use tokio_util::{sync::CancellationToken, task::TaskTracker};
+    // use tokio_util::task::TaskTracker;
 
     tracing_subscriber::fmt::init();
 
-    let _cfg = AppConfig::new().await.unwrap();
+    // 2. Build the shared application state (loads env vars and TLS certificates)
+    println!("Loading configurations and building AppState...");
+    let state = AppState::new().await?;
+    let config = state.config.clone();
+
+    // 3. Set up the tracking infrastructure
+    let tracker = TaskTracker::new();
+    let main_token = CancellationToken::new();
+
+    // Branch parent token into independent HTTP and HTTPS tokens
+    let http_token = main_token.child_token();
+    let https_token = main_token.child_token();
+
+    // 4. Spawn and track the HTTP service
+    let http_state = state.clone();
+    let http_router = config::http_router(http_state);
+    let http_shutdown = http_token.clone();
+    
+    tracker.spawn(async move {
+        println!("HTTP Service starting on http://{}", config.http_addr);
+        
+        axum_server::bind(config.http_addr)
+            .with_graceful_shutdown(async move {
+                http_shutdown.cancelled().await;
+                println!("[HTTP] Shutdown token triggered. Dropping HTTP listener.");
+            })
+            .serve(http_router.into_make_service())
+            .await
+            .unwrap();
+
+        println!("[HTTP] Worker task complete.");
+    });
+
+    // 5. Spawn and track the HTTPS service
+    let https_state = state.clone();
+    let https_router = config::https_router(https_state);
+    let https_shutdown = https_token.clone();
+    
+    tracker.spawn(async move {
+        println!("[HTTPS] Starting service on https://{https_addr}");
+        
+        axum_server::bind_rustls(config.https_addr, (*config.tls_config).clone())
+            .with_graceful_shutdown(async move {
+                https_shutdown.cancelled().await;
+                println!("[HTTPS] Shutdown token triggered. Finishing inflight requests...");
+                // Allow a small window to drain outstanding keep-alive streams safely
+                sleep(Duration::from_secs(1)).await;
+            })
+            .serve(https_router.into_make_service())
+            .await
+            .unwrap();
+
+        println!("[HTTPS] Worker task complete.");
+    });
+
+    tracker.close();
+
+    tokio::signal::ctrl_c()
+        .await
+        .expect("Failed to initialize Ctrl+C interceptor!");
+
+    println!("\n[Main] Intercepted shutdown signal! Cancelling child tokens...");
+    
+    main_token.cancel();
+
+    println!("[Main] Waiting until all services gracefully stop...");
+    tracker.wait().await;
+
+    println!("[Main] All services stopped. Exiting process cleanly...");
+    Ok(())
+}
 }

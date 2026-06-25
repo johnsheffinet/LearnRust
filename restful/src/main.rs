@@ -1,3 +1,79 @@
+
+#[tokio::main]
+async fn main() -> config::AppResult<()>
+    use crate::config::AppState;
+    use std::time::Duration;
+    use tokio::time::sleep;
+    use tokio_util::{sync::CancellationToken, task::TaskTracker};
+    // use tokio_util::task::TaskTracker;
+
+    tracing_subscriber::fmt::init();
+
+    println!("Building AppConfig and AppState...");
+    let state = AppState::new().await?;
+    let config = state.config.clone();
+
+    let tracker = TaskTracker::new();
+    let main_token = CancellationToken::new();
+
+    let http_token = main_token.child_token();
+    let https_token = main_token.child_token();
+
+    let http_state = state.clone();
+    let http_router = config::http_router(http_state);
+    let http_shutdown = http_token.clone();
+    
+    tracker.spawn(async move {
+        println!("[HTTP] Starting service on http://{}", config.http_addr);
+        
+        axum_server::bind(config.http_addr)
+            .with_graceful_shutdown(async move {
+                http_shutdown.cancelled().await;
+                println!("[HTTP] Triggered shutdown token. Dropping HTTP listener...");
+            })
+            .serve(http_router.into_make_service())
+            .await
+            .unwrap();
+
+        println!("[HTTP] Stopped service on http://{}.", config.http_addr");
+    });
+
+    let https_state = state.clone();
+    let https_router = config::https_router(https_state);
+    let https_shutdown = https_token.clone();
+    
+    tracker.spawn(async move {
+        println!("[HTTPS] Starting service on https://{}", config.https_addr);
+        
+        axum_server::bind_rustls(config.https_addr, (*config.tls_config).clone())
+            .with_graceful_shutdown(async move {
+                https_shutdown.cancelled().await;
+                println!("[HTTPS] Triggered shutdown token. Finishing inflight requests...");
+                sleep(Duration::from_secs(1)).await;
+            })
+            .serve(https_router.into_make_service())
+            .await
+            .unwrap();
+
+        println!("[HTTPS] Stopped service on https://{}.", config.https_addr");
+    });
+
+    tracker.close();
+
+    tokio::signal::ctrl_c()
+        .await
+        .expect("Failed to initialize Ctrl+C interceptor!");
+
+    println!("\n[Main] Intercepted shutdown signal! Cancelling child tokens..."); 
+    main_token.cancel();
+
+    println!("[Main] Waiting until all services gracefully stop...");
+    tracker.wait().await;
+
+    println!("[Main] All services stopped. Exiting process cleanly...");
+    Ok(())
+}
+
 pub mod config {
     use crate::{
         handlers,
@@ -9,6 +85,24 @@ pub mod config {
     use rustls_pki_types::pem::PemObject;
     use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
     use uuid::Uuid;
+
+    #[derive(Clone, Debug, FromRef)]
+    pub struct AppState {
+        pub config: AppConfig,
+        pub items: AppStore<Item>,
+    }
+
+    impl AppState {
+        #[tracing::instrument(skip_all, err)]
+        pub async fn new() -> AppResult<Self> {
+            let config = AppConfig::new().await?;
+            let items = DashMap::new();
+
+            Ok(Self { config, items })
+        }
+    }
+
+    pub type AppStore<T> = DashMap<Uuid, T>;
 
     pub fn http_router(state: AppState) -> Router {
         Router::new()
@@ -126,24 +220,6 @@ pub mod config {
         #[error("Failed to configure TLS from file {1}! {0}")]
         FailedConfigTLS(#[source] std::io::Error, PathBuf),
     }
-
-    #[derive(Clone, Debug, FromRef)]
-    pub struct AppState {
-        pub config: AppConfig,
-        pub items: AppStore<Item>,
-    }
-
-    pub type AppStore<T> = DashMap<Uuid, T>;
-
-    impl AppState {
-        #[tracing::instrument(skip_all, err)]
-        pub async fn new() -> AppResult<Self> {
-            let config = AppConfig::new().await?;
-            let items = DashMap::new();
-
-            Ok(Self { config, items })
-        }
-    }
 }
 pub mod handlers {
     use crate::config::AppState;
@@ -164,6 +240,7 @@ pub mod handlers {
         uri: Uri,
     ) -> AppResult<impl IntoResponse> {
         let addr = &state.config.https_addr;
+
         let path_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
 
         let redirect_url = format!("https://{addr}{path_query}");
@@ -942,85 +1019,4 @@ mod tests {
             }
         }
     }
-}
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use crate::config::AppState;
-    use std::time::Duration;
-    use tokio::time::sleep;
-    use tokio_util::{sync::CancellationToken, task::TaskTracker};
-    // use tokio_util::task::TaskTracker;
-
-    tracing_subscriber::fmt::init();
-
-    // 2. Build the shared application state (loads env vars and TLS certificates)
-    println!("Loading configurations and building AppState...");
-    let state = AppState::new().await?;
-    let config = state.config.clone();
-
-    // 3. Set up the tracking infrastructure
-    let tracker = TaskTracker::new();
-    let main_token = CancellationToken::new();
-
-    // Branch parent token into independent HTTP and HTTPS tokens
-    let http_token = main_token.child_token();
-    let https_token = main_token.child_token();
-
-    // 4. Spawn and track the HTTP service
-    let http_state = state.clone();
-    let http_router = config::http_router(http_state);
-    let http_shutdown = http_token.clone();
-    
-    tracker.spawn(async move {
-        println!("HTTP Service starting on http://{}", config.http_addr);
-        
-        axum_server::bind(config.http_addr)
-            .with_graceful_shutdown(async move {
-                http_shutdown.cancelled().await;
-                println!("[HTTP] Shutdown token triggered. Dropping HTTP listener.");
-            })
-            .serve(http_router.into_make_service())
-            .await
-            .unwrap();
-
-        println!("[HTTP] Worker task complete.");
-    });
-
-    let https_state = state.clone();
-    let https_router = config::https_router(https_state);
-    let https_shutdown = https_token.clone();
-    
-    tracker.spawn(async move {
-        println!("[HTTPS] Starting service on https://{}", config.https_addr);
-        
-        axum_server::bind_rustls(config.https_addr, (*config.tls_config).clone())
-            .with_graceful_shutdown(async move {
-                https_shutdown.cancelled().await;
-                println!("[HTTPS] Triggered shutdown token. Finishing inflight requests...");
-                sleep(Duration::from_secs(1)).await;
-            })
-            .serve(https_router.into_make_service())
-            .await
-            .unwrap();
-
-        println!("[HTTPS] Stopped service on https://{}", config.https_addr");
-    });
-
-    tracker.close();
-
-    tokio::signal::ctrl_c()
-        .await
-        .expect("Failed to initialize Ctrl+C interceptor!");
-
-    println!("\n[Main] Intercepted shutdown signal! Cancelling child tokens...");
-    
-    main_token.cancel();
-
-    println!("[Main] Waiting until all services gracefully stop...");
-    tracker.wait().await;
-
-    println!("[Main] All services stopped. Exiting process cleanly...");
-    Ok(())
-}
 }

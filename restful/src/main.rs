@@ -16,11 +16,14 @@ async fn main() -> config::AppResult<()>
     let tracker = TaskTracker::new();
     let main_token = CancellationToken::new();
 
-    let http_token = main_token.child_token();
+    // let http_token = main_token.child_token();
     let https_token = main_token.child_token();
 
     let http_state = state.clone();
     let http_router = config::http_router(http_state);
+    let http_config = config.clone();
+    let http_addr = http_config.http_addr;
+    let http_token = main_token.child_token();
     let http_shutdown = http_token.clone();
     
     tracker.spawn(async move {

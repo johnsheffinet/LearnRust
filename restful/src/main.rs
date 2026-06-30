@@ -1,79 +1,102 @@
-
 #[tokio::main]
-async fn main() -> config::AppResult<()>
+async fn main() -> config::AppResult<()> {
     use crate::config::AppState;
-    use std::time::Duration;
-    use tokio::time::sleep;
     use tokio_util::{sync::CancellationToken, task::TaskTracker};
-    // use tokio_util::task::TaskTracker;
 
     tracing_subscriber::fmt::init();
 
-    println!("Building AppConfig and AppState...");
+    tracing::info!("Building AppState and AppConfig...");
+
     let state = AppState::new().await?;
     let config = state.config.clone();
-
+    let token = CancellationToken::new();
     let tracker = TaskTracker::new();
-    let main_token = CancellationToken::new();
 
-    // let http_token = main_token.child_token();
-    let https_token = main_token.child_token();
+    tracker.spawn({
+        let config = config.clone();
+        let state = state.clone();
+        let token = token.child_token();
 
-    let http_state = state.clone();
-    let http_router = config::http_router(http_state);
-    let http_config = config.clone();
-    let http_addr = http_config.http_addr;
-    let http_token = main_token.child_token();
-    let http_shutdown = http_token.clone();
-    
-    tracker.spawn(async move {
-        println!("[HTTP] Starting service on http://{}", config.http_addr);
-        
-        axum_server::bind(config.http_addr)
-            .with_graceful_shutdown(async move {
-                http_shutdown.cancelled().await;
-                println!("[HTTP] Triggered shutdown token. Dropping HTTP listener...");
-            })
-            .serve(http_router.into_make_service())
-            .await
-            .unwrap();
+        async move {
+            let addr = config.http_addr;
+            let handle = axum_server::Handle::new();
+            let router = config::http_router(state);
 
-        println!("[HTTP] Stopped service on http://{}.", config.http_addr");
+            let shutdown = {
+                let handle = handle.clone();
+
+                tokio::spawn(async move {
+                    token.cancelled().await;
+                    tracing::info!("[HTTP] Stopping service on http://{addr}.");
+                    handle.graceful_shutdown(None);
+                })
+            };
+
+            tracing::info!("[HTTP] Starting service on http://{addr}");
+
+            if let Err(e) = axum_server::bind(addr)
+                .handle(handle)
+                .serve(router.into_make_service())
+                .await
+            {
+                tracing::error!("[HTTP] Failed to start service on http://{addr}! {e}");
+            }
+
+            let _ = shutdown.await;
+
+            tracing::info!("[HTTP] Stopped service on http://{addr}.");
+        }
     });
 
-    let https_state = state.clone();
-    let https_router = config::https_router(https_state);
-    let https_shutdown = https_token.clone();
-    
-    tracker.spawn(async move {
-        println!("[HTTPS] Starting service on https://{}", config.https_addr);
-        
-        axum_server::bind_rustls(config.https_addr, (*config.tls_config).clone())
-            .with_graceful_shutdown(async move {
-                https_shutdown.cancelled().await;
-                println!("[HTTPS] Triggered shutdown token. Finishing inflight requests...");
-                sleep(Duration::from_secs(1)).await;
-            })
-            .serve(https_router.into_make_service())
-            .await
-            .unwrap();
+    tracker.spawn({
+        let config = config.clone();
+        let state = state.clone();
+        let token = token.child_token();
 
-        println!("[HTTPS] Stopped service on https://{}.", config.https_addr");
+        async move {
+            let addr = config.https_addr;
+            let handle = axum_server::Handle::new();
+            let router = config::https_router(state);
+
+            let shutdown = {
+                let handle = handle.clone();
+
+                tokio::spawn(async move {
+                    token.cancelled().await;
+                    tracing::info!("[HTTPS] Stopping service on https://{addr}.");
+                    handle.graceful_shutdown(None);
+                })
+            };
+
+            tracing::info!("[HTTPS] Starting service on https://{addr}");
+
+            if let Err(e) = axum_server::bind_rustls(addr, (*config.tls_config).clone())
+                .handle(handle)
+                .serve(router.into_make_service())
+                .await
+            {
+                tracing::error!("[HTTPS] Failed to start service on https://{addr}! {e}");
+            }
+
+            let _ = shutdown.await;
+
+            tracing::info!("[HTTPS] Stopped service on https://{addr}.");
+        }
     });
-
-    tracker.close();
 
     tokio::signal::ctrl_c()
         .await
         .expect("Failed to initialize Ctrl+C interceptor!");
 
-    println!("\n[Main] Intercepted shutdown signal! Cancelling child tokens..."); 
-    main_token.cancel();
+    tracing::info!("\n[Main] Intercepted shutdown signal! Cancelling child tokens...");
+    token.cancel();
 
-    println!("[Main] Waiting until all services gracefully stop...");
+    tracker.close();
+
+    tracing::info!("[Main] Waiting until all services gracefully stop...");
     tracker.wait().await;
 
-    println!("[Main] All services stopped. Exiting process cleanly...");
+    tracing::info!("[Main] All services stopped. Exiting process cleanly...");
     Ok(())
 }
 
@@ -415,14 +438,16 @@ pub mod items {
                 let item = entry.value();
 
                 if let Some(ref filter_name) = params.name
-                    && !item.name.contains(filter_name) {
-                        return None;
-                    }
+                    && !item.name.contains(filter_name)
+                {
+                    return None;
+                }
 
                 if let Some(ref filter_desc) = params.desc
-                    && !item.desc.contains(filter_desc) {
-                        return None;
-                    }
+                    && !item.desc.contains(filter_desc)
+                {
+                    return None;
+                }
 
                 Some(ItemResponse {
                     id: *entry.key(),

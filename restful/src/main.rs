@@ -148,41 +148,43 @@ pub mod config {
             }
         });
     }
-    // tracker.spawn({
-    //     let config = config.clone();
-    //     let state = state.clone();
-    //     let handle = https_handle.clone();
-    //     let token = token.child_token();
-    
-    //     async move {
-    //         let addr = config.https_addr;
-    //         let router = config::https_router(state);
-    
-    //         let server = axum_server::bind_rustls(
-    //                 addr,
-    //                 (*config.tls_config).clone(),
-    //             )
-    //             .handle(handle.clone())
-    //             .serve(router.into_make_service());
-    
-    //         run_server(
-    //             "HTTPS",
-    //             addr,
-    //             handle,
-    //             token,
-    //             server,
-    //         )
-    //         .await;
-    //     }
-    // });
 
+    pub fn run_https(
+        config: AppConfig,
+        handle: Handle,
+        state: AppState,
+        token: CancellationToken,
+        tracker: &TaskTracker,
+    ) {
+        tracker.spawn(async move {
+            let addr = config.https_addr;
+            let router = https_router(state);
+    
+            let server = axum_server::bind_rustls(
+                addr,
+                (*config.tls_config).clone(),
+            )
+            .handle(handle.clone())
+            .serve(router.into_make_service());
+    
+            run_server(
+                "HTTPS",
+                addr,
+                handle,
+                token,
+                server,
+            )
+            .await;
+        });
+    }
     async fn run_server<F>(
         name: &'static str,
-        addr: std::net::SocketAddr,
-        handle: axum_server::Handle,
-        token: tokio_util::sync::CancellationToken,
+        addr: SocketAddr,
+        handle: Handle,
+        token: CancellationToken,
         server: F,
-    ) where
+    )
+    where
         F: Future<Output = std::io::Result<()>>,
     {
         let shutdown = {
@@ -203,9 +205,8 @@ pub mod config {
     
         let _ = shutdown.await;
     
-        tracing::info!("[{name}] Service stopped.");
-    }
-    
+        tracing::info!("[{name}] Stopped service on {addr}.");
+    }    
     #[derive(Clone, Debug, FromRef)]
     pub struct AppState {
         pub config: AppConfig,

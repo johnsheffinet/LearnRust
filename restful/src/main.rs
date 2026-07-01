@@ -1,6 +1,7 @@
 #[tokio::main]
 async fn main() -> config::AppResult<()> {
     use crate::config::AppState;
+    use axum_server::Handle;
     use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
     tracing_subscriber::fmt::init();
@@ -9,80 +10,27 @@ async fn main() -> config::AppResult<()> {
 
     let state = AppState::new().await?;
     let config = state.config.clone();
+    let handle = Handle::new();
     let token = CancellationToken::new();
     let tracker = TaskTracker::new();
 
-    tracker.spawn({
-        let config = config.clone();
-        let state = state.clone();
-        let token = token.child_token();
+    config::run_http(
+        config.clone(),
+        handle.clone(),
+        state.clone().clone(),
+        token.clone(),
+        &tracker,
+    )
+    .await;
 
-        async move {
-            let addr = config.http_addr;
-            let handle = axum_server::Handle::new();
-            let router = config::http_router(state);
-
-            let shutdown = {
-                let handle = handle.clone();
-
-                tokio::spawn(async move {
-                    token.cancelled().await;
-                    tracing::info!("[HTTP] Stopping service on http://{addr}.");
-                    handle.graceful_shutdown(None);
-                })
-            };
-
-            tracing::info!("[HTTP] Starting service on http://{addr}");
-
-            if let Err(e) = axum_server::bind(addr)
-                .handle(handle)
-                .serve(router.into_make_service())
-                .await
-            {
-                tracing::error!("[HTTP] Failed to start service on http://{addr}! {e}");
-            }
-
-            let _ = shutdown.await;
-
-            tracing::info!("[HTTP] Stopped service on http://{addr}.");
-        }
-    });
-
-    tracker.spawn({
-        let config = config.clone();
-        let state = state.clone();
-        let token = token.child_token();
-
-        async move {
-            let addr = config.https_addr;
-            let handle = axum_server::Handle::new();
-            let router = config::https_router(state);
-
-            let shutdown = {
-                let handle = handle.clone();
-
-                tokio::spawn(async move {
-                    token.cancelled().await;
-                    tracing::info!("[HTTPS] Stopping service on https://{addr}.");
-                    handle.graceful_shutdown(None);
-                })
-            };
-
-            tracing::info!("[HTTPS] Starting service on https://{addr}");
-
-            if let Err(e) = axum_server::bind_rustls(addr, (*config.tls_config).clone())
-                .handle(handle)
-                .serve(router.into_make_service())
-                .await
-            {
-                tracing::error!("[HTTPS] Failed to start service on https://{addr}! {e}");
-            }
-
-            let _ = shutdown.await;
-
-            tracing::info!("[HTTPS] Stopped service on https://{addr}.");
-        }
-    });
+    config::run_https(
+        config.clone(),
+        handle.clone(),
+        state.clone().clone(),
+        token.clone(),
+        &tracker,
+    )
+    .await;
 
     tokio::signal::ctrl_c()
         .await
@@ -112,46 +60,33 @@ pub mod config {
     use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
     use uuid::Uuid;
 
-    use tokio_util::{sync::CancellationToken, task::TaskTracker};
     use std::future::Future;
-    use axum_server::Handle;
-    
+    use tokio_util::{sync::CancellationToken, task::TaskTracker};
+
     pub async fn run_http(
         config: AppConfig,
-        handle: Handle,
+        handle: axum_server::Handle<SocketAddr>,
         state: AppState,
         token: CancellationToken,
         tracker: &TaskTracker,
     ) {
         tracker.spawn({
-            // let config = config.clone();
-            // let handle = http_handle.clone();
-            // let state = state.clone();
-            // let token = token.child_token();
-        
             async move {
                 let addr = config.http_addr;
-                let router = config::http_router(state);
-        
+                let router = http_router(state);
+
                 let server = axum_server::bind(addr)
                     .handle(handle.clone())
                     .serve(router.into_make_service());
-        
-                run_server(
-                    "HTTP",
-                    addr,
-                    handle,
-                    token,
-                    server,
-                )
-                .await;
+
+                run_server("HTTP", addr, handle, token, server).await;
             }
         });
     }
 
-    pub fn run_https(
+    pub async fn run_https(
         config: AppConfig,
-        handle: Handle,
+        handle: axum_server::Handle<SocketAddr>,
         state: AppState,
         token: CancellationToken,
         tracker: &TaskTracker,
@@ -159,54 +94,45 @@ pub mod config {
         tracker.spawn(async move {
             let addr = config.https_addr;
             let router = https_router(state);
-    
-            let server = axum_server::bind_rustls(
-                addr,
-                (*config.tls_config).clone(),
-            )
-            .handle(handle.clone())
-            .serve(router.into_make_service());
-    
-            run_server(
-                "HTTPS",
-                addr,
-                handle,
-                token,
-                server,
-            )
-            .await;
+
+            let server = axum_server::bind_rustls(addr, (*config.tls_config).clone())
+                .handle(handle.clone())
+                .serve(router.into_make_service());
+
+            run_server("HTTPS", addr, handle, token, server).await;
         });
     }
+
     async fn run_server<F>(
         name: &'static str,
         addr: SocketAddr,
-        handle: Handle,
+        handle: axum_server::Handle<SocketAddr>,
         token: CancellationToken,
         server: F,
-    )
-    where
+    ) where
         F: Future<Output = std::io::Result<()>>,
     {
         let shutdown = {
             let handle = handle.clone();
-    
+
             tokio::spawn(async move {
                 token.cancelled().await;
                 tracing::info!("[{name}] Stopping service on {addr}...");
                 handle.graceful_shutdown(None);
             })
         };
-    
+
         tracing::info!("[{name}] Starting service on {addr}");
-    
+
         if let Err(err) = server.await {
             tracing::error!("[{name}] {err}");
         }
-    
+
         let _ = shutdown.await;
-    
+
         tracing::info!("[{name}] Stopped service on {addr}.");
-    }    
+    }
+
     #[derive(Clone, Debug, FromRef)]
     pub struct AppState {
         pub config: AppConfig,

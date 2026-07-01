@@ -115,7 +115,6 @@ pub mod config {
     use tokio_util::{sync::CancellationToken, task::TaskTracker};
     use std::future::Future;
     use axum_server::Handle;
-
     
     pub async fn run_http(
         config: AppConfig,
@@ -123,61 +122,59 @@ pub mod config {
         state: AppState,
         token: CancellationToken,
         tracker: TaskTracker,
-    ) -> ... {
-    
-    }
-    tracker.spawn({
-        // let config = config.clone();
-        // let handle = http_handle.clone();
-        // let state = state.clone();
-        // let token = token.child_token();
-    
-        async move {
-            let addr = config.http_addr;
-            let router = config::http_router(state);
-    
-            let server = axum_server::bind(addr)
-                .handle(handle.clone())
-                .serve(router.into_make_service());
-    
-            run_server(
-                "HTTP",
-                addr,
-                handle,
-                token,
-                server,
-            )
-            .await;
-        }
-    });
-    
-    tracker.spawn({
-        let config = config.clone();
-        let state = state.clone();
-        let handle = https_handle.clone();
-        let token = token.child_token();
-    
-        async move {
-            let addr = config.https_addr;
-            let router = config::https_router(state);
-    
-            let server = axum_server::bind_rustls(
+    ) {
+        tracker.spawn({
+            // let config = config.clone();
+            // let handle = http_handle.clone();
+            // let state = state.clone();
+            // let token = token.child_token();
+        
+            async move {
+                let addr = config.http_addr;
+                let router = config::http_router(state);
+        
+                let server = axum_server::bind(addr)
+                    .handle(handle.clone())
+                    .serve(router.into_make_service());
+        
+                run_server(
+                    "HTTP",
                     addr,
-                    (*config.tls_config).clone(),
+                    handle,
+                    token,
+                    server,
                 )
-                .handle(handle.clone())
-                .serve(router.into_make_service());
+                .await;
+            }
+        });
+    }
+    // tracker.spawn({
+    //     let config = config.clone();
+    //     let state = state.clone();
+    //     let handle = https_handle.clone();
+    //     let token = token.child_token();
     
-            run_server(
-                "HTTPS",
-                addr,
-                handle,
-                token,
-                server,
-            )
-            .await;
-        }
-    });
+    //     async move {
+    //         let addr = config.https_addr;
+    //         let router = config::https_router(state);
+    
+    //         let server = axum_server::bind_rustls(
+    //                 addr,
+    //                 (*config.tls_config).clone(),
+    //             )
+    //             .handle(handle.clone())
+    //             .serve(router.into_make_service());
+    
+    //         run_server(
+    //             "HTTPS",
+    //             addr,
+    //             handle,
+    //             token,
+    //             server,
+    //         )
+    //         .await;
+    //     }
+    // });
 
     async fn run_server<F>(
         name: &'static str,

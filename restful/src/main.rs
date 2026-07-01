@@ -112,6 +112,103 @@ pub mod config {
     use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
     use uuid::Uuid;
 
+    use tokio_util::{sync::CancellationToken, task::TaskTracker};
+    use std::future::Future;
+    use axum_server::Handle;
+
+    
+    pub async fn run_http(
+        config: AppConfig,
+        handle: Handle,
+        state: AppState,
+        token: CancellationToken,
+        tracker: TaskTracker,
+    ) -> ... {
+    
+    }
+    tracker.spawn({
+        // let config = config.clone();
+        // let handle = http_handle.clone();
+        // let state = state.clone();
+        // let token = token.child_token();
+    
+        async move {
+            let addr = config.http_addr;
+            let router = config::http_router(state);
+    
+            let server = axum_server::bind(addr)
+                .handle(handle.clone())
+                .serve(router.into_make_service());
+    
+            run_server(
+                "HTTP",
+                addr,
+                handle,
+                token,
+                server,
+            )
+            .await;
+        }
+    });
+    
+    tracker.spawn({
+        let config = config.clone();
+        let state = state.clone();
+        let handle = https_handle.clone();
+        let token = token.child_token();
+    
+        async move {
+            let addr = config.https_addr;
+            let router = config::https_router(state);
+    
+            let server = axum_server::bind_rustls(
+                    addr,
+                    (*config.tls_config).clone(),
+                )
+                .handle(handle.clone())
+                .serve(router.into_make_service());
+    
+            run_server(
+                "HTTPS",
+                addr,
+                handle,
+                token,
+                server,
+            )
+            .await;
+        }
+    });
+
+    async fn run_server<F>(
+        name: &'static str,
+        addr: std::net::SocketAddr,
+        handle: axum_server::Handle,
+        token: tokio_util::sync::CancellationToken,
+        server: F,
+    ) where
+        F: Future<Output = std::io::Result<()>>,
+    {
+        let shutdown = {
+            let handle = handle.clone();
+    
+            tokio::spawn(async move {
+                token.cancelled().await;
+                tracing::info!("[{name}] Stopping service on {addr}...");
+                handle.graceful_shutdown(None);
+            })
+        };
+    
+        tracing::info!("[{name}] Starting service on {addr}");
+    
+        if let Err(err) = server.await {
+            tracing::error!("[{name}] {err}");
+        }
+    
+        let _ = shutdown.await;
+    
+        tracing::info!("[{name}] Service stopped.");
+    }
+    
     #[derive(Clone, Debug, FromRef)]
     pub struct AppState {
         pub config: AppConfig,

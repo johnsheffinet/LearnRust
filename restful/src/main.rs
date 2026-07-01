@@ -121,7 +121,7 @@ pub mod config {
         handle: Handle,
         state: AppState,
         token: CancellationToken,
-        tracker: TaskTracker,
+        tracker: &TaskTracker,
     ) {
         tracker.spawn({
             // let config = config.clone();

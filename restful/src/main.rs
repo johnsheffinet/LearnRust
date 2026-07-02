@@ -7,22 +7,19 @@ async fn main() -> config::AppResult<()> {
 
     tracing::info!("Building AppState and AppConfig...");
 
-    let tracker = TaskTracker::new();
-    let token = CancellationToken::new();
     let state = AppState::new().await?;
     let config = state.config.clone();
     let http_state = state.clone();
     let https_state = state.clone();
+    let token = CancellationToken::new();
+    let tracker = TaskTracker::new();
 
     config::spawn_server(
         "HTTP",
         move |handle| {
-            let addr = config.http_addr;
-            let router = config::http_router(http_state);
-
-            axum_server::bind(addr)
+            axum_server::bind(config.http_addr)
                 .handle(handle)
-                .serve(router.into_make_service())
+                .serve(config::http_router(http_state).into_make_service())
         },
         token.child_token(),
         &tracker,
@@ -31,12 +28,9 @@ async fn main() -> config::AppResult<()> {
     config::spawn_server(
         "HTTPS",
         move |handle| {
-            let addr = config.https_addr;
-            let router = config::https_router(https_state);
-
-            axum_server::bind_rustls(addr, (*config.tls_config).clone())
+            axum_server::bind_rustls(config.https_addr, (*config.tls_config).clone())
                 .handle(handle)
-                .serve(router.into_make_service())
+                .serve(config::https_router(https_state).into_make_service())
         },
         token.child_token(),
         &tracker,
@@ -54,7 +48,7 @@ async fn main() -> config::AppResult<()> {
     tracing::info!("[Main] Waiting until all services gracefully stop...");
     tracker.wait().await;
 
-    tracing::info!("[Main] All services stopped. Exiting process cleanly...");
+    tracing::info!("[Main] Stopped all services. Exiting process cleanly...");
     Ok(())
 }
 

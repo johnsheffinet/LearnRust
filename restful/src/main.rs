@@ -8,17 +8,19 @@ async fn main() -> config::AppResult<()> {
     tracing::info!("Building AppState and AppConfig...");
 
     let state = AppState::new().await?;
-    let config = state.config.clone();
     let http_state = state.clone();
     let https_state = state.clone();
+    let config = state.config.clone();
+    let http_config = config.clone();
+    let https_config = config.clone();
     let token = CancellationToken::new();
     let tracker = TaskTracker::new();
 
     config::spawn_server(
         "HTTP",
-        config.http_addr,
+        http_config.http_addr,
         move |handle| {
-            axum_server::bind(config.http_addr)
+            axum_server::bind(http_config.http_addr)
                 .handle(handle)
                 .serve(config::http_router(http_state).into_make_service())
         },
@@ -28,9 +30,9 @@ async fn main() -> config::AppResult<()> {
 
     config::spawn_server(
         "HTTPS",
-        config.https_addr,
+        https_config.https_addr,
         move |handle| {
-            axum_server::bind_rustls(config.https_addr, (*config.tls_config).clone())
+            axum_server::bind_rustls(https_config.https_addr, (*config.tls_config).clone())
                 .handle(handle)
                 .serve(config::https_router(https_state).into_make_service())
         },

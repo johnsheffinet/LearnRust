@@ -16,6 +16,7 @@ async fn main() -> config::AppResult<()> {
 
     config::spawn_server(
         "HTTP",
+        config.http_addr,
         move |handle| {
             axum_server::bind(config.http_addr)
                 .handle(handle)
@@ -27,6 +28,7 @@ async fn main() -> config::AppResult<()> {
 
     config::spawn_server(
         "HTTPS",
+        config.https_addr,
         move |handle| {
             axum_server::bind_rustls(config.https_addr, (*config.tls_config).clone())
                 .handle(handle)
@@ -67,6 +69,7 @@ pub mod config {
 
     pub fn spawn_server<F, B>(
         name: &'static str,
+        addr: SocketAddr,
         builder: B,
         token: CancellationToken,
         tracker: &TaskTracker,
@@ -82,7 +85,7 @@ pub mod config {
             async move {
                 token.cancelled().await;
 
-                tracing::info!("[{name}] Stopping service...");
+                tracing::info!("[{name}] Stopping service on {addr}...");
 
                 handle.graceful_shutdown(None);
             }
@@ -92,15 +95,15 @@ pub mod config {
             let handle = handle.clone();
 
             async move {
-                tracing::info!("[{name}] Starting service...");
+                tracing::info!("[{name}] Starting service on {addr}...");
 
                 let server = builder(handle);
 
                 if let Err(err) = server.await {
-                    tracing::error!("[{name}] Failed to start service! {err}");
+                    tracing::error!("[{name}] {err}");
                 }
 
-                tracing::info!("[{name}] Stopped service.");
+                tracing::info!("[{name}] Stopped service on {addr}.");
             }
         });
     }

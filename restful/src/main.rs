@@ -1,7 +1,6 @@
 #[tokio::main]
 async fn main() -> config::AppResult<()> {
     use crate::config::AppState;
-    use axum_server::Handle;
     use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
     tracing_subscriber::fmt::init();
@@ -12,60 +11,36 @@ async fn main() -> config::AppResult<()> {
     let token = CancellationToken::new();
     let state = AppState::new().await?;
     let config = state.config.clone();
-    // let handle = Handle::new();
+    let http_state = state.clone();
+    let https_state = state.clone();
 
-    spawn_server(
-        &tracker,
-        token.child_token(),
+    config::spawn_server(
         "HTTP",
         move |handle| {
             let addr = config.http_addr;
-            let router = http_router(state);
-    
-            tracing::info!("[HTTP] Starting service on http://{addr}...");
-    
+            let router = config::http_router(http_state);
+
             axum_server::bind(addr)
                 .handle(handle)
                 .serve(router.into_make_service())
         },
+        token.child_token(),
+        &tracker,
     );
 
-    spawn_server(
-        &tracker,
-        token.child_token(),
+    config::spawn_server(
         "HTTPS",
         move |handle| {
             let addr = config.https_addr;
-            let router = https_router(state);
-    
-            tracing::info!("[HTTPS] Starting service on https://{addr}");
-    
-            axum_server::bind_rustls(
-                addr,
-                (*config.tls_config).clone(),
-            )
-            .handle(handle)
-            .serve(router.into_make_service())
+            let router = config::https_router(https_state);
+
+            axum_server::bind_rustls(addr, (*config.tls_config).clone())
+                .handle(handle)
+                .serve(router.into_make_service())
         },
+        token.child_token(),
+        &tracker,
     );
-
-    // config::run_http(
-    //     config.clone(),
-    //     handle.clone(),
-    //     state.clone().clone(),
-    //     token.clone(),
-    //     &tracker,
-    // )
-    // .await;
-
-    // config::run_https(
-    //     config.clone(),
-    //     handle.clone(),
-    //     state.clone().clone(),
-    //     token.clone(),
-    //     &tracker,
-    // )
-    // .await;
 
     tokio::signal::ctrl_c()
         .await
@@ -89,129 +64,52 @@ pub mod config {
         items::{self, Item},
     };
     use axum::{Router, extract::FromRef};
-    use axum_server::tls_rustls::RustlsConfig;
+    use axum_server::{Handle, tls_rustls::RustlsConfig};
     use dashmap::DashMap;
     use rustls_pki_types::pem::PemObject;
-    use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
+    use std::{env, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
+    use tokio_util::{sync::CancellationToken, task::TaskTracker};
     use uuid::Uuid;
 
-    // use std::future::Future;
-    // use tokio_util::{sync::CancellationToken, task::TaskTracker};
-
-    use std::future::Future;
-    use axum_server::Handle;
-    use tokio_util::{sync::CancellationToken, task::TaskTracker};
-    
     pub fn spawn_server<F, B>(
-        tracker: &TaskTracker,
-        token: CancellationToken,
         name: &'static str,
         builder: B,
+        token: CancellationToken,
+        tracker: &TaskTracker,
     ) where
-        B: FnOnce(Handle) -> F,
+        B: FnOnce(Handle<SocketAddr>) -> F + Send + 'static,
         F: Future<Output = std::io::Result<()>> + Send + 'static,
     {
         let handle = Handle::new();
-    
-        //
-        // Shutdown task
-        //
+
         tracker.spawn({
             let handle = handle.clone();
-    
+
             async move {
                 token.cancelled().await;
-    
+
                 tracing::info!("[{name}] Stopping service...");
-    
+
                 handle.graceful_shutdown(None);
             }
         });
-    
-        //
-        // Startup task
-        //
-        tracker.spawn(async move {
-            tracing::info!("[{name}] Starting service...");
-    
-            let server = builder(handle);
-    
-            if let Err(err) = server.await {
-                tracing::error!("[{name}] Failed to start service! {err}");
+
+        tracker.spawn({
+            let handle = handle.clone();
+
+            async move {
+                tracing::info!("[{name}] Starting service...");
+
+                let server = builder(handle);
+
+                if let Err(err) = server.await {
+                    tracing::error!("[{name}] Failed to start service! {err}");
+                }
+
+                tracing::info!("[{name}] Stopped service.");
             }
-    
-            tracing::info!("[{name}] Stopped service.");
         });
-    }    
-    // pub async fn run_http(
-    //     config: AppConfig,
-    //     handle: axum_server::Handle<SocketAddr>,
-    //     state: AppState,
-    //     token: CancellationToken,
-    //     tracker: &TaskTracker,
-    // ) {
-    //     tracker.spawn({
-    //         async move {
-    //             let addr = config.http_addr;
-    //             let router = http_router(state);
-
-    //             let server = axum_server::bind(addr)
-    //                 .handle(handle.clone())
-    //                 .serve(router.into_make_service());
-
-    //             run_server("HTTP", addr, handle, token, server).await;
-    //         }
-    //     });
-    // }
-
-    // pub async fn run_https(
-    //     config: AppConfig,
-    //     handle: axum_server::Handle<SocketAddr>,
-    //     state: AppState,
-    //     token: CancellationToken,
-    //     tracker: &TaskTracker,
-    // ) {
-    //     tracker.spawn(async move {
-    //         let addr = config.https_addr;
-    //         let router = https_router(state);
-
-    //         let server = axum_server::bind_rustls(addr, (*config.tls_config).clone())
-    //             .handle(handle.clone())
-    //             .serve(router.into_make_service());
-
-    //         run_server("HTTPS", addr, handle, token, server).await;
-    //     });
-    // }
-
-    // async fn run_server<F>(
-    //     name: &'static str,
-    //     addr: SocketAddr,
-    //     handle: axum_server::Handle<SocketAddr>,
-    //     token: CancellationToken,
-    //     server: F,
-    // ) where
-    //     F: Future<Output = std::io::Result<()>>,
-    // {
-    //     let shutdown = {
-    //         let handle = handle.clone();
-
-    //         tokio::spawn(async move {
-    //             token.cancelled().await;
-    //             tracing::info!("[{name}] Stopping service on {addr}...");
-    //             handle.graceful_shutdown(None);
-    //         })
-    //     };
-
-    //     tracing::info!("[{name}] Starting service on {addr}");
-
-    //     if let Err(err) = server.await {
-    //         tracing::error!("[{name}] {err}");
-    //     }
-
-    //     let _ = shutdown.await;
-
-    //     tracing::info!("[{name}] Stopped service on {addr}.");
-    // }
+    }
 
     #[derive(Clone, Debug, FromRef)]
     pub struct AppState {

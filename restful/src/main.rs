@@ -5,6 +5,13 @@ async fn main() -> config::AppResult<()> {
 
     tracing_subscriber::fmt::init();
 
+    // config::run(async {
+    //     tokio::signal::ctrl_c()
+    //         .await
+    //         .expect("Failed to initialize Ctrl+C interceptor!");
+    // })
+    // .await
+
     tracing::info!("Building AppState and AppConfig...");
 
     let state = AppState::new().await?;

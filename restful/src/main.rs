@@ -281,6 +281,9 @@ pub mod config {
 
         #[error("Failed to configure TLS from file {1}! {0}")]
         FailedConfigTLS(#[source] std::io::Error, PathBuf),
+
+        #[error("Failed to initialize Ctrl+C interceptor! {0}")]
+        FailedInitCtrlC(#[source] std::io::Error),
     }
 }
 pub mod handlers {

@@ -35,7 +35,7 @@ pub mod config {
 
         spawn_server(
             "HTTP",
-            http_config.http_addr,
+            // http_config.http_addr,
             move |handle| {
                 axum_server::bind(http_config.http_addr)
                     .handle(handle)
@@ -47,7 +47,7 @@ pub mod config {
 
         spawn_server(
             "HTTPS",
-            https_config.https_addr,
+            // https_config.https_addr,
             move |handle| {
                 axum_server::bind_rustls(https_config.https_addr, (*config.tls_config).clone())
                     .handle(handle)
@@ -75,7 +75,6 @@ pub mod config {
 
     pub fn spawn_server<F, B>(
         name: &'static str,
-        addr: SocketAddr,
         builder: B,
         token: CancellationToken,
         tracker: &TaskTracker,
@@ -84,35 +83,70 @@ pub mod config {
         F: Future<Output = std::io::Result<()>> + Send + 'static,
     {
         let handle = Handle::new();
-
+    
         tracker.spawn({
             let handle = handle.clone();
-
+    
             async move {
                 token.cancelled().await;
-
-                tracing::info!("[{name}] Stopping service on {addr}...");
-
+    
+                tracing::info!("[{name}] Stopping service...");
+    
                 handle.graceful_shutdown(None);
             }
         });
 
-        tracker.spawn({
-            let handle = handle.clone();
-
-            async move {
-                tracing::info!("[{name}] Starting service on {addr}...");
-
-                let server = builder(handle);
-
-                if let Err(err) = server.await {
-                    tracing::error!("[{name}] {err}");
-                }
-
-                tracing::info!("[{name}] Stopped service on {addr}.");
+        tracker.spawn(async move {
+            tracing::info!("[{name}] Starting service...");
+    
+            if let Err(err) = builder(handle).await {
+                tracing::error!("[{name}] {err}");
             }
+    
+            tracing::info!("[{name}] Stopped service.");
         });
     }
+
+    // pub fn spawn_server<F, B>(
+    //     name: &'static str,
+    //     addr: SocketAddr,
+    //     builder: B,
+    //     token: CancellationToken,
+    //     tracker: &TaskTracker,
+    // ) where
+    //     B: FnOnce(Handle<SocketAddr>) -> F + Send + 'static,
+    //     F: Future<Output = std::io::Result<()>> + Send + 'static,
+    // {
+    //     let handle = Handle::new();
+
+    //     tracker.spawn({
+    //         let handle = handle.clone();
+
+    //         async move {
+    //             token.cancelled().await;
+
+    //             tracing::info!("[{name}] Stopping service on {addr}...");
+
+    //             handle.graceful_shutdown(None);
+    //         }
+    //     });
+
+    //     tracker.spawn({
+    //         let handle = handle.clone();
+
+    //         async move {
+    //             tracing::info!("[{name}] Starting service on {addr}...");
+
+    //             let server = builder(handle);
+
+    //             if let Err(err) = server.await {
+    //                 tracing::error!("[{name}] {err}");
+    //             }
+
+    //             tracing::info!("[{name}] Stopped service on {addr}.");
+    //         }
+    //     });
+    // }
 
     #[derive(Clone, Debug, FromRef)]
     pub struct AppState {

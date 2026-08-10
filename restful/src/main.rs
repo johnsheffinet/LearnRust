@@ -61,8 +61,16 @@ pub mod config {
             &tracker,
         );
 
-        shutdown_signal.await.map_err(AppError::FailedInitCtrlC)?;
+        // shutdown_signal.await.map_err(AppError::FailedInitCtrlC)?;
 
+        if let Err(err) = shutdown_signal.await {
+            token.cancel();
+            tracker.close();
+            tracker.wait().await;
+        
+            return Err(AppError::FailedInitCtrlC(err));
+        }
+        
         tracing::info!("[Main] Intercepted shutdown signal! Cancelling child tokens...");
         token.cancel();
 

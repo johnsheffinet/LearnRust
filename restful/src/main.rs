@@ -2,11 +2,9 @@
 async fn main() -> config::AppResult<()> {
     tracing_subscriber::fmt::init();
 
-    tracing::info!("Building AppState and AppConfig...");
+    tracing::info!("Running LearnRust...");
 
-    let state = config::AppState::new().await?;
-    let shutdown_signal = tokio::signal::ctrl_c();
-    config::run_app(state, shutdown_signal).await
+    config::run_app(config::AppState::new().await?, tokio::signal::ctrl_c()).await
 }
 
 pub mod config {

@@ -136,6 +136,7 @@ pub mod config {
     pub fn http_router(state: AppState) -> Router {
         Router::new()
             .fallback(handlers::redirect_to_https)
+            .layer(tower_http::trace::TraceLayer::new_for_http())
             .with_state(state)
     }
 
@@ -146,6 +147,7 @@ pub mod config {
             .merge(items::routes::<AppState>())
             .route("/healthz", get(handlers::check_app_liveliness))
             .fallback(handlers::report_route_invalid)
+            .layer(tower_http::trace::TraceLayer::new_for_http())
             .with_state(state)
     }
 

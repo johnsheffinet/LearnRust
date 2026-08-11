@@ -780,6 +780,129 @@ mod tests {
             });
         }
     }
+    mod run_app {
+        // use super::*;
+        use crate::config::{self, AppConfig, AppError, AppState};
+        use axum_server::tls_rustls::RustlsConfig;
+        use cool_asserts::assert_matches;
+        use rcgen::generate_simple_self_signed;
+        use std::{
+            net::{IpAddr, Ipv4Addr, SocketAddr},
+            sync::Arc,
+        };
+        use tokio::sync::oneshot;
+    
+        async fn test_state() -> AppState {
+            let key_pair =
+                generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
+    
+            let tls_config = RustlsConfig::from_der(
+                vec![key_pair.cert.der().to_vec()],
+                key_pair.signing_key.serialize_der(),
+            )
+            .await
+            .unwrap();
+    
+            AppState {
+                config: AppConfig {
+                    http_addr: SocketAddr::new(
+                        IpAddr::V4(Ipv4Addr::LOCALHOST),
+                        0,
+                    ),
+                    https_addr: SocketAddr::new(
+                        IpAddr::V4(Ipv4Addr::LOCALHOST),
+                        0,
+                    ),
+                    cert_path: "test.crt".into(),
+                    key_path: "test.key".into(),
+                    tls_config: Arc::new(tls_config),
+                },
+                items: dashmap::DashMap::new(),
+            }
+        }
+    
+        #[test_log::test(tokio::test)]
+        async fn test_run_app_success() {
+            let state = test_state().await;
+    
+            let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    
+            let task = tokio::spawn(config::run_app(
+                state,
+                async move {
+                    shutdown_rx
+                        .await
+                        .map_err(|err| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                err,
+                            )
+                        })
+                },
+            ));
+    
+            // Allow run_app() to spawn the HTTP/HTTPS server tasks.
+            tokio::task::yield_now().await;
+    
+            shutdown_tx.send(()).unwrap();
+    
+            let result = task.await.unwrap();
+    
+            assert_matches!(result, Ok(()));
+        }
+    
+        #[test_log::test(tokio::test)]
+        async fn test_run_app_failure_init_shutdown_signal() {
+            let state = test_state().await;
+    
+            let result = config::run_app(
+                state,
+                async {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "test initialize shutdown signal failure",
+                    ))
+                },
+            )
+            .await;
+    
+            assert_matches!(
+                result,
+                Err(AppError::FailedInitCtrlC(_))
+            );
+        }
+    
+        #[test_log::test(tokio::test)]
+        async fn test_run_app_waits_for_shutdown_signal() {
+            let state = test_state().await;
+    
+            let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    
+            let task = tokio::spawn(config::run_app(
+                state,
+                async move {
+                    shutdown_rx
+                        .await
+                        .map_err(|err| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                err,
+                            )
+                        })
+                },
+            ));
+    
+            // run_app() should still be running because the shutdown
+            // signal hasn't completed yet.
+            tokio::task::yield_now().await;
+    
+            assert!(!task.is_finished());
+    
+            shutdown_tx.send(()).unwrap();
+    
+            assert_matches!(task.await.unwrap(), Ok(()));
+        }
+    }
     mod handlers {
         use crate::{
             config::{self, AppState},

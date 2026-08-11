@@ -873,7 +873,7 @@ mod tests {
         }
     
         #[test_log::test(tokio::test)]
-        async fn test_run_app_waits_for_shutdown_signal() {
+        async fn test_run_app_success_waits_for_shutdown_signal() {
             let state = test_state().await;
     
             let (shutdown_tx, shutdown_rx) = oneshot::channel();

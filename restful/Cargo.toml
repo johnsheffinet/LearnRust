@@ -1,5 +1,5 @@
 [package]
-name = "restful"
+name = "LearnRust"
 version = "0.1.0"
 edition = "2024"
 

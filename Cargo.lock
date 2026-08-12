@@ -3,6 +3,44 @@
 version = 4
 
 [[package]]
+name = "LearnRust"
+version = "0.1.0"
+dependencies = [
+ "ammonia",
+ "axum",
+ "axum-error-handler",
+ "axum-governor",
+ "axum-response-cache",
+ "axum-server",
+ "axum-test",
+ "axum-valid",
+ "axum_csrf",
+ "chrono",
+ "cool_asserts",
+ "dashmap",
+ "figment",
+ "http-body-util",
+ "jsonwebtoken",
+ "pretty_assertions",
+ "rcgen",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "test-case",
+ "test-log",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tokio-util",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "validator",
+]
+
+[[package]]
 name = "aead"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2145,44 +2183,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "restful"
-version = "0.1.0"
-dependencies = [
- "ammonia",
- "axum",
- "axum-error-handler",
- "axum-governor",
- "axum-response-cache",
- "axum-server",
- "axum-test",
- "axum-valid",
- "axum_csrf",
- "chrono",
- "cool_asserts",
- "dashmap",
- "figment",
- "http-body-util",
- "jsonwebtoken",
- "pretty_assertions",
- "rcgen",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "test-case",
- "test-log",
- "thiserror 2.0.18",
- "tokio",
- "tokio-test",
- "tokio-util",
- "tower",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "validator",
-]
-
-[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2859,6 +2859,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-serde"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "704b1aeb7be0d0a84fc9828cae51dab5970fee5088f83d1dd7ee6f6246fc6ff1"
+dependencies = [
+ "serde",
+ "tracing-core",
+]
+
+[[package]]
 name = "tracing-subscriber"
 version = "0.3.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2868,12 +2878,15 @@ dependencies = [
  "nu-ansi-term",
  "once_cell",
  "regex-automata",
+ "serde",
+ "serde_json",
  "sharded-slab",
  "smallvec",
  "thread_local",
  "tracing",
  "tracing-core",
  "tracing-log",
+ "tracing-serde",
 ]
 
 [[package]]

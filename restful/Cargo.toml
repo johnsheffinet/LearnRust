@@ -7,20 +7,17 @@ edition = "2024"
 ammonia = "4.1.2" # cargo add ammonia
 axum = { version = "0.8.8", features = ["macros"] } # cargo add axum --features macros
 axum_csrf = "0.11.0" # cargo add axum-csrf
-axum-error-handler = "0.2.1"
+axum-error-handler = "0.2.1" # cargo add axum-error-handler
 axum-governor = "1.0.3" # cargo add axum-governor
 axum-response-cache = "0.4.0" # cargo add axum-response-cache
 axum-server = { version = "0.8.0", features = ["tls-rustls"] } # cargo add axum-server --features tls-rustls
-# axum_thiserror = "0.1.0" # cargo add axum_thiserror
 axum-valid = "0.24.0" # cargo add axum-valid
 chrono = { version = "0.4.43", features = ["serde"] } # cargo add chrono --features serde
-dashmap = "6.2.1"
+dashmap = "6.2.1" # cargo add dashmap
 figment = { version = "0.10.19", features = ["env", "test"] } # cargo add figment --features env,test
-# futures = "0.3.32" # cargo add futures
-# get_fields = "0.1.0" # cargo add get_fields
 jsonwebtoken = { version = "10.2.0", features = ["aws_lc_rs"] } # cargo add jsonwebtoken --features aws_lc_rs
 http-body-util = "0.1.3" # cargo add http-body-util
-rustls-pki-types = "1.14.0"
+rustls-pki-types = "1.14.0" # cargo add rustls-pki-types
 serde = { version = "1.0.228", features = ["derive"] } # cargo add serde --features derive
 serde_json = "1.0.149" # cargo add serde_json
 thiserror = "2.0.18" # cargo add thiserror
@@ -29,14 +26,13 @@ tokio-util = { version = "0.7.18", features = ["rt"] } #cargo add tokio_util --f
 tower = { version = "0.5.3", features = ["limit", "buffer"] } # cargo add tower --features limit,buffer
 tower-http = { version = "0.6.8", features = ["cors", "limit", "timeout", "trace"] } # cargo add tower-http --features cors,limit,timeout,trace
 tracing = { version = "0.1.44", features = ["attributes"] } # cargo add tracing --features attributes
+tracing-subscriber = { version = "0.3.22", features = ["json", "env-filter"] } # cargo add tracing-subscriber --features json,env-filter
 tracing-subscriber = "0.3.22" # cargo add tracing-subscriber
 uuid = { version = "1.23.1", features = ["serde", "v4"] } # cargo add uuid --features serde,v4
 validator = { version = "0.20.0", features = ["derive"] } # cargo add validator --features derive
 
 [dev-dependencies]
-# assert-json-diff = "2.0.2" # cargo add assert-json-diff --dev
 axum-test = "20.1.0" # cargo add axum-test --dev
-# claims = "0.8.0" # cargo add claims --dev
 cool_asserts = "2.0.4" # cargo add cool_asserts --dev
 pretty_assertions = "1.4.1" # cargo add pretty_assertions --dev
 rcgen = "0.14.7" # cargo add rcgen --dev

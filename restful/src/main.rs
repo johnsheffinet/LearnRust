@@ -5,7 +5,8 @@ async fn main() -> config::AppResult<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    tracing::info!("Running LearnRust...");
+    // tracing::info!("Running LearnRust...");
+    tracing::info!("Running {}", env!("CARGO_PKG_NAME"));
 
     config::run_app(config::AppState::new().await?, tokio::signal::ctrl_c()).await
 }

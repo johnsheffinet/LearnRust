@@ -1,69 +1,113 @@
+@httpUrl = http://127.0.0.1:3080
+@httpsUrl = https://127.0.0.1:3443
 
-GET https://{{$processEnv HTTPS_ADDR}}/healthz
-###
+### ---------------------------------------------------------
+### HTTP
+### GET /
+### Expected: 404 Not Found
+### ---------------------------------------------------------
 
-GET https://{{$processEnv HTTPS_ADDR}}/
-###
+GET {{httpUrl}}/
 
-GET http://{{$processEnv HTTP_ADDR}}/healthz
-###
+### ---------------------------------------------------------
+### HTTP
+### GET /healthz
+### Expected: 307 Temporary Redirect
+### ---------------------------------------------------------
 
-GET http://{{$processEnv HTTP_ADDR}}/
-###
+# @no-redirect
+GET {{httpUrl}}/healthz
 
-@itemId = 0
-@name = create_item
-@value = created
-###
+### ---------------------------------------------------------
+### HTTPS
+### GET /healthz
+### Expected: 200 OK
+### ---------------------------------------------------------
 
-# @name signin
-POST http://{{host}}/login HTTP/1.1
+GET {{httpsUrl}}/healthz
+
+### ---------------------------------------------------------
+### HTTPS
+### POST /items
+### Expected: 201 Created
+### ---------------------------------------------------------
+
+# @name createItem
+POST {{httpsUrl}}/items
 Content-Type: application/json
 
 {
-  "username": "testusername",
-  "password": "testpassword"
+  "name": "integration-test",
+  "desc": "created by REST Client"
 }
 
-@token = {{signin.response.body.token}}
-###
+### ---------------------------------------------------------
+### Save the ID returned by POST /items
+### ---------------------------------------------------------
 
-# @name create_item
-POST http://{{host}}/items HTTP/1.1
-Authorization: Bearer {{token}}
+@itemId = {{createItem.response.body.$.id}}
+
+### ---------------------------------------------------------
+### HTTPS
+### GET /items
+### Expected: 200 OK
+### ---------------------------------------------------------
+
+GET {{httpsUrl}}/items
+
+### ---------------------------------------------------------
+### HTTPS
+### GET /items?name=integration-test
+### Expected: 200 OK
+### ---------------------------------------------------------
+
+GET {{httpsUrl}}/items?name=integration-test
+
+### ---------------------------------------------------------
+### HTTPS
+### GET /items/{id}
+### Expected: 200 OK
+### ---------------------------------------------------------
+
+GET {{httpsUrl}}/items/{{itemId}}
+
+### ---------------------------------------------------------
+### HTTPS
+### PUT /items/{id}
+### Expected: 200 OK
+### ---------------------------------------------------------
+
+PUT {{httpsUrl}}/items/{{itemId}}
 Content-Type: application/json
 
 {
-  "name": "{{name}}",
-  "value": "{{value}}"
+  "name": "integration-test-updated",
+  "desc": "updated by REST Client"
 }
 
-@itemId = {{create_item.response.body.id}}
-###
+### ---------------------------------------------------------
+### HTTPS
+### GET /items/{id}
+### Verify update
+### Expected: 200 OK
+### ---------------------------------------------------------
 
-# @name select_items
-GET http://{{host}}/items?name={{name}}&value={{value}} HTTP/1.1
-Authorization: Bearer {{token}}
-###
+GET {{httpsUrl}}/items/{{itemId}}
 
+### ---------------------------------------------------------
+### HTTPS
+### DELETE /items/{id}
+### Expected: 200 OK
+### ---------------------------------------------------------
 
-# @name update_item
-PUT http://{{host}}/items/{{itemId}} HTTP/1.1
-Authorization: Bearer {{token}}
-Content-Type: application/json
+DELETE {{httpsUrl}}/items/{{itemId}}
 
-{
-  "name": "update_item",
-  "value": "ok"
-}
-###
+### ---------------------------------------------------------
+### HTTPS
+### GET /items
+### Verify delete
+### Expected: 200 OK
+### The deleted item should no longer appear.
+### ---------------------------------------------------------
 
-# @name select_item
-GET http://{{host}}/items/{{itemId}} HTTP/1.1
-Authorization: Bearer {{token}}
-###
-
-# @name delete_item
-DELETE http://{{host}}/items/{{itemId}} HTTP/1.1
-Authorization: Bearer {{token}}
-###
+GET {{httpsUrl}}/items

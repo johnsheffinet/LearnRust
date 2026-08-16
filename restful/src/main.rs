@@ -5,7 +5,6 @@ async fn main() -> config::AppResult<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    // tracing::info!("Running LearnRust...");
     tracing::info!("Running {}", env!("CARGO_PKG_NAME"));
 
     config::run_app(config::AppState::new().await?, tokio::signal::ctrl_c()).await
@@ -129,13 +128,12 @@ pub mod config {
         #[tracing::instrument(skip_all, err)]
         pub async fn new() -> AppResult<Self> {
             let config = AppConfig::new().await?;
-            let items = DashMap::new();
-
+            let items = Arc::new(DashMap::new());
             Ok(Self { config, items })
         }
     }
 
-    pub type AppStore<T> = DashMap<Uuid, T>;
+    pub type AppStore<T> = Arc<DashMap<Uuid, T>>;
 
     pub fn http_router(state: AppState) -> Router {
         Router::new()
@@ -812,7 +810,7 @@ mod tests {
                     key_path: "test.key".into(),
                     tls_config: Arc::new(tls_config),
                 },
-                items: dashmap::DashMap::new(),
+                items: Arc::new(dashmap::DashMap::new()),
             }
         }
 

@@ -20,7 +20,7 @@
   resolver = "2"
 
   members = [
-      "restful"
+      "LearnRust"
   ]
   ```
 

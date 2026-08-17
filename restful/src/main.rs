@@ -1,3 +1,25 @@
+//! HTTP/HTTPS item-management service.
+//!
+//! This binary starts two servers concurrently:
+//! - An HTTP server that redirects all traffic to HTTPS.
+//! - An HTTPS (TLS) server that exposes a small CRUD API for [`items::Item`]s
+//!   plus a liveliness endpoint.
+//!
+//! Configuration is read from environment variables (see [`config::AppConfig`])
+//! and the process shuts down gracefully on `Ctrl+C`.
+
+/// Program entry point.
+///
+/// Initializes JSON-formatted tracing (configured via the `RUST_LOG`
+/// environment variable, or any other variable understood by
+/// [`tracing_subscriber::EnvFilter::from_default_env`]), builds the
+/// application state, and runs the app until a `Ctrl+C` signal is received.
+///
+/// # Errors
+///
+/// Returns an [`config::AppError`] if application state fails to initialize
+/// (e.g. missing environment variables, invalid TLS certificate/key files)
+/// or if the process fails to install the `Ctrl+C` signal handler.
 #[tokio::main]
 async fn main() -> config::AppResult<()> {
     tracing_subscriber::fmt()
@@ -10,6 +32,7 @@ async fn main() -> config::AppResult<()> {
     config::run_app(config::AppState::new().await?, tokio::signal::ctrl_c()).await
 }
 
+/// Application configuration, shared state, and top-level server orchestration.
 pub mod config {
     use crate::{
         handlers,
@@ -23,6 +46,32 @@ pub mod config {
     use tokio_util::{sync::CancellationToken, task::TaskTracker};
     use uuid::Uuid;
 
+    /// Runs the HTTP and HTTPS servers concurrently until `shutdown_signal`
+    /// resolves, then shuts both servers down gracefully.
+    ///
+    /// The HTTP server only ever redirects requests to the HTTPS server; all
+    /// application routes are served over HTTPS. Both servers are spawned as
+    /// tracked, cancellable tasks so that a shutdown signal (or a failure to
+    /// install one) cleanly stops both before this function returns.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::FailedInitCtrlC`] if `shutdown_signal` itself
+    /// resolves to an `Err`, which indicates the shutdown signal could not be
+    /// awaited (e.g. the OS failed to deliver signal notifications). In that
+    /// case both servers are cancelled and awaited before the error is
+    /// returned. Individual server errors (e.g. failure to bind a socket) are
+    /// logged rather than propagated, so that a fault in one server does not
+    /// prevent the other from running.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use tokio::signal;
+    ///
+    /// let state = config::AppState::new().await?;
+    /// config::run_app(state, signal::ctrl_c()).await?;
+    /// ```
     #[tracing::instrument(skip_all, err)]
     pub async fn run_app<F>(state: AppState, shutdown_signal: F) -> AppResult<()>
     where
@@ -84,6 +133,20 @@ pub mod config {
         Ok(())
     }
 
+    /// Spawns a named server task on `tracker`, along with a companion task
+    /// that triggers a graceful shutdown of that server once `token` is
+    /// cancelled.
+    ///
+    /// `builder` receives an [`axum_server::Handle`] and must return the
+    /// future that actually runs the server (e.g. the result of calling
+    /// `.serve(...)` on an `axum_server` builder). Any error returned by that
+    /// future is logged with the given `name` and does not panic the task.
+    ///
+    /// # Panics
+    ///
+    /// Does not panic itself; however, if `builder` or the returned future
+    /// panics, that panic will propagate to and abort the spawned task (it
+    /// will not unwind into the caller of `spawn_server`).
     pub fn spawn_server<F, B>(
         name: &'static str,
         builder: B,
@@ -118,13 +181,25 @@ pub mod config {
         });
     }
 
+    /// Shared application state, cloned into every request handler.
+    ///
+    /// Cloning is cheap: [`AppConfig`] and [`AppStore`] are internally
+    /// reference-counted, so a clone shares the same underlying data.
     #[derive(Clone, Debug, FromRef)]
     pub struct AppState {
+        /// Static application configuration (addresses, TLS material).
         pub config: AppConfig,
+        /// In-memory store of [`Item`]s, keyed by their [`Uuid`].
         pub items: AppStore<Item>,
     }
 
     impl AppState {
+        /// Builds application state by loading [`AppConfig`] from the
+        /// environment and initializing an empty item store.
+        ///
+        /// # Errors
+        ///
+        /// Propagates any [`AppError`] returned by [`AppConfig::new`].
         #[tracing::instrument(skip_all, err)]
         pub async fn new() -> AppResult<Self> {
             let config = AppConfig::new().await?;
@@ -133,8 +208,16 @@ pub mod config {
         }
     }
 
+    /// A thread-safe, reference-counted, concurrent map from [`Uuid`] to
+    /// values of type `T`, used as the in-memory backing store for
+    /// application resources.
     pub type AppStore<T> = Arc<DashMap<Uuid, T>>;
 
+    /// Builds the plaintext HTTP router.
+    ///
+    /// This router serves no application routes directly; every request
+    /// falls through to [`handlers::redirect_to_https`], which redirects the
+    /// client to the equivalent HTTPS URL.
     pub fn http_router(state: AppState) -> Router {
         Router::new()
             .fallback(handlers::redirect_to_https)
@@ -142,6 +225,11 @@ pub mod config {
             .with_state(state)
     }
 
+    /// Builds the TLS-terminated HTTPS router that serves the item API
+    /// (see [`items::routes`]) and a `/healthz` liveliness endpoint.
+    ///
+    /// Requests that don't match any known route fall through to
+    /// [`handlers::report_route_invalid`].
     pub fn https_router(state: AppState) -> Router {
         use axum::routing::get;
 
@@ -153,16 +241,52 @@ pub mod config {
             .with_state(state)
     }
 
+    /// Static configuration for the application, loaded once from the
+    /// environment at startup.
     #[derive(Clone, Debug)]
     pub struct AppConfig {
+        /// Socket address the plaintext HTTP (redirect) server binds to.
         pub http_addr: SocketAddr,
+        /// Socket address the TLS-terminated HTTPS server binds to.
         pub https_addr: SocketAddr,
+        /// Filesystem path to the PEM-encoded TLS certificate chain.
         pub cert_path: PathBuf,
+        /// Filesystem path to the PEM-encoded TLS private key.
         pub key_path: PathBuf,
+        /// Parsed TLS server configuration built from `cert_path` and
+        /// `key_path`, shared (via `Arc`) across both server tasks.
         pub tls_config: Arc<RustlsConfig>,
     }
 
     impl AppConfig {
+        /// Loads configuration from environment variables and TLS material
+        /// from disk.
+        ///
+        /// Reads the following environment variables:
+        /// - `HTTP_ADDR`: socket address for the HTTP redirect server.
+        /// - `HTTPS_ADDR`: socket address for the HTTPS server.
+        /// - `CERT_PATH`: path to a PEM file containing one or more
+        ///   certificates.
+        /// - `KEY_PATH`: path to a PEM file containing a private key.
+        ///
+        /// # Errors
+        ///
+        /// Returns an [`AppError`] if:
+        /// - any of the required environment variables are unset
+        ///   ([`AppError::FailedFindEnvVar`]);
+        /// - `HTTP_ADDR` or `HTTPS_ADDR` cannot be parsed as a
+        ///   [`SocketAddr`] ([`AppError::FailedParseSocketAddr`]);
+        /// - the certificate or key file cannot be opened
+        ///   ([`AppError::FailedOpenPublicKeyFile`],
+        ///   [`AppError::FailedOpenPrivateKeyFile`]);
+        /// - the certificate or key file cannot be parsed as PEM
+        ///   ([`AppError::FailedReadPublicKeyFile`],
+        ///   [`AppError::FailedReadPrivateKeyFile`]);
+        /// - the certificate or key file contains no usable entries
+        ///   ([`AppError::FailedFindPublicKeys`],
+        ///   [`AppError::FailedFindPrivateKeys`]);
+        /// - the certificate and key cannot be combined into a valid TLS
+        ///   configuration ([`AppError::FailedConfigTLS`]).
         #[tracing::instrument(skip_all, err)]
         pub async fn new() -> AppResult<Self> {
             let http_addr_raw = env::var("HTTP_ADDR")
@@ -222,41 +346,63 @@ pub mod config {
         }
     }
 
+    /// Convenience alias for results returned by functions in [`config`](self).
     pub type AppResult<T> = Result<T, AppError>;
 
+    /// Errors that can occur while loading configuration or running the
+    /// application's top-level lifecycle.
     #[derive(Debug, thiserror::Error)]
     pub enum AppError {
+        /// A required environment variable (named by the second field) was
+        /// not set.
         #[error("Failed to find environment variable {1}! {0}")]
         FailedFindEnvVar(#[source] std::env::VarError, String),
 
+        /// The value of an environment variable could not be parsed as a
+        /// [`std::net::SocketAddr`].
         #[error("Failed to parse socket address {1}! {0}")]
         FailedParseSocketAddr(#[source] std::net::AddrParseError, String),
 
+        /// The TLS certificate file at the given path could not be opened.
         #[error("Failed to open public key file {1}! {0}")]
         FailedOpenPublicKeyFile(#[source] std::io::Error, PathBuf),
 
+        /// The TLS certificate file at the given path could not be parsed
+        /// as PEM.
         #[error("Failed to read public key file {1}! {0}")]
         FailedReadPublicKeyFile(#[source] rustls_pki_types::pem::Error, PathBuf),
 
+        /// The TLS certificate file at the given path contained no
+        /// certificates.
         #[error("Failed to find public keys in PEM file {0}!")]
         FailedFindPublicKeys(PathBuf),
 
+        /// The TLS private key file at the given path could not be opened.
         #[error("Failed to open private key file {1}! {0}")]
         FailedOpenPrivateKeyFile(#[source] std::io::Error, PathBuf),
 
+        /// The TLS private key file at the given path could not be parsed
+        /// as PEM.
         #[error("Failed to read private key file {1}! {0}")]
         FailedReadPrivateKeyFile(#[source] rustls_pki_types::pem::Error, PathBuf),
 
+        /// The TLS private key file at the given path contained no private
+        /// keys.
         #[error("Failed to find private keys in PEM file {0}!")]
         FailedFindPrivateKeys(PathBuf),
 
+        /// The certificate and key at the given path could not be combined
+        /// into a valid [`RustlsConfig`].
         #[error("Failed to configure TLS from file {1}! {0}")]
         FailedConfigTLS(#[source] std::io::Error, PathBuf),
 
+        /// The `Ctrl+C` signal handler failed to install or await.
         #[error("Failed to initialize Ctrl+C interceptor! {0}")]
         FailedInitCtrlC(#[source] std::io::Error),
     }
 }
+
+/// Top-level HTTP request handlers not specific to any single resource.
 pub mod handlers {
     use crate::config::AppState;
     use axum::{
@@ -270,6 +416,20 @@ pub mod handlers {
     };
     use serde_json::json;
 
+    /// Redirects any request received on the plaintext HTTP server to the
+    /// equivalent path on the HTTPS server, using an HTTP `307 Temporary
+    /// Redirect`.
+    ///
+    /// The redirect target is built from [`AppConfig::https_addr`] combined
+    /// with the incoming request's path and query string.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::FailedCreateHeader`] if the computed redirect URL
+    /// is not a valid HTTP header value (e.g. it contains characters that
+    /// cannot appear in a `Location` header).
+    ///
+    /// [`AppConfig::https_addr`]: crate::config::AppConfig::https_addr
     #[tracing::instrument(skip_all, err)]
     pub async fn redirect_to_https(
         State(state): State<AppState>,
@@ -277,7 +437,7 @@ pub mod handlers {
     ) -> AppResult<impl IntoResponse> {
         let addr = &state.config.https_addr;
 
-        let path_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
+        let path_query = uri.path_and_query().map_or("/", |pq| pq.as_str());
 
         let redirect_url = format!("https://{addr}{path_query}");
 
@@ -291,11 +451,20 @@ pub mod handlers {
         ))
     }
 
+    /// Liveliness probe handler, mounted at `GET /healthz`.
+    ///
+    /// Always succeeds; its purpose is simply to confirm that the HTTPS
+    /// server is up and responding to requests.
     #[tracing::instrument(skip_all, err)]
     pub async fn check_app_liveliness() -> AppResult<impl IntoResponse> {
         Ok((StatusCode::OK, Json(json!({"status": "App is lively."}))))
     }
 
+    /// Fallback handler for the HTTPS router, invoked when a request does
+    /// not match any registered route.
+    ///
+    /// Always responds with `404 Not Found` and a JSON body describing the
+    /// invalid path.
     #[tracing::instrument(skip_all, err)]
     pub async fn report_route_invalid(uri: Uri) -> AppResult<impl IntoResponse> {
         let path = uri.path();
@@ -305,15 +474,23 @@ pub mod handlers {
         ))
     }
 
+    /// Convenience alias for results returned by handlers in
+    /// [`handlers`](self).
     type AppResult<T> = Result<T, AppError>;
 
+    /// Errors that can occur in top-level request handlers.
     #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
     pub enum AppError {
+        /// The redirect target URL could not be encoded as an HTTP header
+        /// value; responds with `400 Bad Request`.
         #[error("Failed to create header! {0}")]
         #[status_code("400")]
         FailedCreateHeader(InvalidHeaderValue),
     }
 }
+
+/// CRUD API for `\[`Item`\]` resources, backed by an in-memory
+/// [`AppStore`](crate::config::AppStore).
 pub mod items {
     use crate::config::AppStore;
     use axum::{
@@ -324,6 +501,18 @@ pub mod items {
     use axum_valid::Valid;
     use uuid::Uuid;
 
+    /// Builds the router fragment exposing the item API:
+    ///
+    /// - `GET /items` — [`select`], list/filter items.
+    /// - `POST /items` — [`create`], create a new item.
+    /// - `GET /items/{id}` — [`get`], fetch a single item.
+    /// - `PUT /items/{id}` — [`update`], partially update an item.
+    /// - `DELETE /items/{id}` — [`delete`], remove an item.
+    ///
+    /// Generic over any state type `S` from which an
+    /// [`AppStore<Item>`] can be derived via [`axum::extract::FromRef`],
+    /// so this can be merged into a router using any application state
+    /// shape that provides an item store.
     pub fn routes<S>() -> axum::Router<S>
     where
         AppStore<Item>: axum::extract::FromRef<S>,
@@ -337,6 +526,13 @@ pub mod items {
             )
     }
 
+    /// Handles `POST /items`: creates a new [`Item`] from the request body
+    /// and inserts it into the store under a freshly generated [`Uuid`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::UnprocessableEntity`] if the JSON body fails
+    /// validation (e.g. an empty `name` or `desc`).
     #[tracing::instrument(skip_all, err)]
     pub async fn create(
         State(state): State<AppStore<Item>>,
@@ -356,15 +552,19 @@ pub mod items {
         Ok((StatusCode::CREATED, Json(item_response)))
     }
 
+    /// Request body for [`create`].
     #[derive(Debug, serde::Deserialize, validator::Validate)]
     pub struct CreateJsonPayload {
+        /// The new item's name. Must be non-empty.
         #[validate(length(min = 1, message = "field in create json payload is missing!"))]
         name: String,
+        /// The new item's description. Must be non-empty.
         #[validate(length(min = 1, message = "field in create json payload is missing!"))]
         desc: String,
     }
 
     impl From<CreateJsonPayload> for Item {
+        /// Converts a validated create payload directly into an [`Item`].
         fn from(payload: CreateJsonPayload) -> Self {
             Self {
                 name: payload.name,
@@ -373,13 +573,20 @@ pub mod items {
         }
     }
 
+    /// A named item resource stored by this service.
     #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct Item {
+        /// The item's name.
         pub name: String,
+        /// The item's description.
         pub desc: String,
     }
 
     impl Item {
+        /// Applies a partial update to this item in place.
+        ///
+        /// Only fields present (`Some`) in `payload` are overwritten; `None`
+        /// fields leave the corresponding value unchanged.
         fn edit(&mut self, payload: UpdateJsonPayload) {
             if let Some(name) = payload.name {
                 self.name = name;
@@ -390,12 +597,21 @@ pub mod items {
         }
     }
 
+    /// JSON response envelope pairing an [`Item`] with its [`Uuid`].
     #[derive(Debug, serde::Serialize)]
     struct ItemResponse {
+        /// The item's unique identifier.
         id: Uuid,
+        /// The item itself.
         item: Item,
     }
 
+    /// Handles `DELETE /items/{id}`: removes and returns the item with the
+    /// given id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::NotFound`] if no item exists with the given id.
     #[tracing::instrument(skip_all, err)]
     pub async fn delete(
         State(state): State<AppStore<Item>>,
@@ -413,11 +629,19 @@ pub mod items {
         Ok((StatusCode::OK, Json(item_response)))
     }
 
+    /// Path parameters shared by the single-item routes
+    /// (`GET`/`PUT`/`DELETE /items/{id}`).
     #[derive(Debug, serde::Deserialize)]
     pub struct GetPathId {
+        /// The requested item's unique identifier.
         id: Uuid,
     }
 
+    /// Handles `GET /items/{id}`: fetches a single item by id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::NotFound`] if no item exists with the given id.
     #[tracing::instrument(skip_all, err)]
     pub async fn get(
         State(state): State<AppStore<Item>>,
@@ -433,6 +657,16 @@ pub mod items {
         Ok((StatusCode::OK, Json(item_response)))
     }
 
+    /// Handles `GET /items`: lists items, optionally filtered by substring
+    /// match on `name` and/or `desc`.
+    ///
+    /// When both `name` and `desc` filters are supplied, an item must match
+    /// both to be included in the results.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::UnprocessableEntity`] if a supplied filter
+    /// parameter is present but empty.
     #[tracing::instrument(skip_all, err)]
     pub async fn select(
         State(state): State<AppStore<Item>>,
@@ -465,14 +699,27 @@ pub mod items {
         Ok((StatusCode::OK, Json(results)))
     }
 
+    /// Query parameters accepted by [`select`].
     #[derive(Debug, serde::Deserialize, validator::Validate)]
     pub struct SelectQueryParams {
+        /// Optional substring filter applied to each item's `name`. If
+        /// present, must be non-empty.
         #[validate(length(min = 1, message = "field in select query params is missing!"))]
         name: Option<String>,
+        /// Optional substring filter applied to each item's `desc`. If
+        /// present, must be non-empty.
         #[validate(length(min = 1, message = "field in select query params is missing!"))]
         desc: Option<String>,
     }
 
+    /// Handles `PUT /items/{id}`: applies a partial update to an existing
+    /// item.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::NotFound`] if no item exists with the given id,
+    /// or [`AppError::UnprocessableEntity`] if the JSON body fails
+    /// validation.
     #[tracing::instrument(skip_all, err)]
     pub async fn update(
         State(state): State<AppStore<Item>>,
@@ -493,31 +740,45 @@ pub mod items {
         Ok((StatusCode::OK, Json(item_response)))
     }
 
+    /// Request body for [`update`]. Every field is optional; only supplied
+    /// fields are changed.
     #[derive(Debug, serde::Deserialize, validator::Validate)]
     pub struct UpdateJsonPayload {
+        /// New name for the item. If present, must be non-empty.
         #[validate(length(min = 1, message = "field in update json payload is missing!"))]
         name: Option<String>,
+        /// New description for the item. If present, must be non-empty.
         #[validate(length(min = 1, message = "field in update json payload is missing!"))]
         desc: Option<String>,
     }
 
+    /// Convenience alias for results returned by handlers in
+    /// [`items`](self).
     pub type AppResult<T> = Result<T, AppError>;
 
+    /// Errors that can occur while handling item API requests.
     #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
     pub enum AppError {
+        /// The request body or query parameters failed validation;
+        /// responds with `422 Unprocessable Entity`.
         #[error("Failed to validate request! {0}")]
         #[status_code("422")]
         #[code("UNPROCESSABLE_ENTITY")]
         UnprocessableEntity(#[from] validator::ValidationErrors),
 
+        /// No item exists with the requested id (given as a string);
+        /// responds with `404 Not Found`.
         #[error("Failed to find {0} id in request path!")]
         #[status_code("404")]
         #[code("NOT_FOUND")]
         NotFound(String),
     }
 }
+
+/// Integration and unit tests for [`config`], [`handlers`], and [`items`].
 #[cfg(test)]
 mod tests {
+    /// Tests for [`crate::config::AppConfig`] and [`crate::config::run_app`].
     mod config {
         use crate::config::{AppConfig, AppError};
         use cool_asserts::assert_matches;
@@ -664,6 +925,10 @@ mod tests {
             Some("b"); // key_file
             "failed_config_tls"
         )]
+        /// Exercises every success/failure path of [`AppConfig::new`] by
+        /// populating a jailed environment and filesystem, then asserting
+        /// the resulting [`AppError`] variant (or success) matches
+        /// `scenario`.
         fn test_create_appconfig(
             scenario: &str,
             http_addr: Option<&str>,
@@ -781,6 +1046,7 @@ mod tests {
             });
         }
     }
+    /// Tests for [`crate::config::run_app`]'s startup/shutdown lifecycle.
     mod run_app {
         use crate::config::{self, AppConfig, AppError, AppState};
         use axum_server::tls_rustls::RustlsConfig;
@@ -792,6 +1058,8 @@ mod tests {
         };
         use tokio::sync::oneshot;
 
+        /// Builds a self-signed [`AppState`] bound to OS-assigned
+        /// (`:0`) loopback ports, suitable for use in tests.
         async fn test_state() -> AppState {
             let key_pair = generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
 
@@ -814,6 +1082,8 @@ mod tests {
             }
         }
 
+        /// Verifies that [`config::run_app`] completes successfully once
+        /// its shutdown signal resolves.
         #[test_log::test(tokio::test)]
         async fn test_run_app_success() {
             let state = test_state().await;
@@ -835,6 +1105,9 @@ mod tests {
             assert_matches!(result, Ok(()));
         }
 
+        /// Verifies that [`config::run_app`] returns
+        /// [`AppError::FailedInitCtrlC`] when the shutdown signal future
+        /// itself resolves to an `Err`.
         #[test_log::test(tokio::test)]
         async fn test_run_app_failure_init_shutdown_signal() {
             let state = test_state().await;
@@ -850,6 +1123,8 @@ mod tests {
             assert_matches!(result, Err(AppError::FailedInitCtrlC(_)));
         }
 
+        /// Verifies that [`config::run_app`] keeps running (does not
+        /// complete) until its shutdown signal resolves.
         #[test_log::test(tokio::test)]
         async fn test_run_app_success_waits_for_shutdown_signal() {
             let state = test_state().await;
@@ -871,6 +1146,7 @@ mod tests {
             assert_matches!(task.await.unwrap(), Ok(()));
         }
     }
+    /// Tests for the handlers in [`crate::handlers`].
     mod handlers {
         use crate::{
             config::{self, AppState},
@@ -879,12 +1155,16 @@ mod tests {
         use axum::http::StatusCode;
         use axum_test::TestServer;
 
+        /// Builds a [`TestServer`] wrapping the router produced by
+        /// `router_fn` over a fresh [`AppState`].
         async fn test_server(router_fn: fn(AppState) -> axum::Router) -> TestServer {
             let state = AppState::new().await.unwrap();
 
             TestServer::new(router_fn(state))
         }
 
+        /// Verifies that any request to the HTTP router is redirected to
+        /// the equivalent HTTPS URL via [`handlers::redirect_to_https`].
         #[test_log::test(tokio::test)]
         async fn test_redirect_to_https_success() {
             let server = test_server(config::http_router).await;
@@ -896,6 +1176,8 @@ mod tests {
             response.assert_header("location", "https://127.0.0.1:3443/healthz");
         }
 
+        /// Verifies that [`handlers::check_app_liveliness`] resolves
+        /// successfully.
         #[test_log::test(tokio::test(start_paused = true))]
         async fn test_check_app_liveliness() {
             let task = tokio::spawn(handlers::check_app_liveliness());
@@ -905,6 +1187,8 @@ mod tests {
             assert!(task.await.unwrap().is_ok());
         }
 
+        /// Verifies that an unmatched HTTPS route falls through to
+        /// [`handlers::report_route_invalid`] with a `404` status.
         #[test_log::test(tokio::test)]
         async fn test_report_route_invalid_success() {
             let server = test_server(config::https_router).await;
@@ -914,6 +1198,7 @@ mod tests {
             response.assert_status(StatusCode::NOT_FOUND);
         }
     }
+    /// Tests for the item API in [`crate::items`].
     mod items {
         use crate::{
             config::{self, AppState},
@@ -925,6 +1210,9 @@ mod tests {
         use test_case::test_case;
         use uuid::Uuid;
 
+        /// Builds a [`TestServer`] wrapping the router produced by
+        /// `router_fn`, pre-populated with two [`Item`]s: one keyed by
+        /// [`Uuid::nil`] and one keyed by a random [`Uuid`].
         async fn test_server(router_fn: fn(AppState) -> axum::Router) -> TestServer {
             let state = AppState::new().await.unwrap();
 
@@ -972,6 +1260,7 @@ mod tests {
             StatusCode::BAD_REQUEST; // status
             "failure_invalid_desc"
         )]
+        /// Verifies `POST /items` behavior for valid and invalid payloads.
         #[test_log::test(tokio::test)]
         async fn test_create(payload: Value, status: StatusCode) {
             let server = test_server(config::https_router).await;
@@ -1004,6 +1293,8 @@ mod tests {
             StatusCode::BAD_REQUEST; // status
             "failure_invalid_id"
         )]
+        /// Verifies `DELETE /items/{id}` behavior for existing, missing,
+        /// and malformed ids.
         #[test_log::test(tokio::test)]
         async fn test_delete(pathid: String, status: StatusCode) {
             let server = test_server(config::https_router).await;
@@ -1036,6 +1327,8 @@ mod tests {
             StatusCode::BAD_REQUEST; // status
             "failure_invalid_id"
         )]
+        /// Verifies `GET /items/{id}` behavior for existing, missing, and
+        /// malformed ids.
         #[test_log::test(tokio::test)]
         async fn test_get(pathid: String, status: StatusCode) {
             let server = test_server(config::https_router).await;
@@ -1077,6 +1370,8 @@ mod tests {
         StatusCode::BAD_REQUEST; // status
         "failure_missing_filter"
         )]
+        /// Verifies `GET /items` filtering behavior across `name`/`desc`
+        /// query parameters, including validation failures.
         #[test_log::test(tokio::test)]
         async fn test_select(queryparams: String, length: usize, status: StatusCode) {
             let server = test_server(config::https_router).await;
@@ -1122,6 +1417,8 @@ mod tests {
             StatusCode::BAD_REQUEST; // status
             "failure_invalid_id"
         )]
+        /// Verifies `PUT /items/{id}` partial-update behavior for
+        /// existing, missing, and malformed ids.
         #[test_log::test(tokio::test)]
         async fn test_update(pathid: String, payload: Value, status: StatusCode) {
             let server = test_server(config::https_router).await;

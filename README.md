@@ -6,7 +6,8 @@
 
 - Install the following rust tools. 
   - Install *bacon* with `cargo install --locked bacon`. Verify *bacon* is installed with `bacon --version`. **bacon** is a popular command-line tool that acts as a background code checker and task runner. It automatically monitors your source files for changes and runs specified cargo commands, such as check or test, providing immediate feedback on errors and warnings without manual input. 
-  - Install *tarpaulin* with `cargo install cargo-tarpaulin`. Verify *tarpaulin* is installed with `cargo-tarpaulin --version`. **tarpaulin** is a code coverage reporting tool that helps developers measure how much of their code is being executed by their test suites. 
+  - Install *tarpaulin* with `cargo install cargo-tarpaulin`. Verify *tarpaulin* is installed with `cargo-tarpaulin --version`. **tarpaulin** is a code coverage reporting tool that helps developers measure how much of their code is being executed by their test suites.
+  - Use `cargo add <dependency> [—-features <feature_1><,feature_n>]
 
 - Install the following vscode extensions. 
     - github copilot: **gitHub copilot** is an AI-powered coding assistant that acts as a "pair programmer" to help developers write code faster and more efficiently. Developed by GitHub and OpenAI, it uses a large language model (specifically, the Codex model, a descendant of GPT-3) to provide contextual suggestions and automate various development tasks directly within a developer's integrated development environment (IDE).

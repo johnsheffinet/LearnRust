@@ -35,15 +35,25 @@ async fn main() -> config::AppResult<()> {
 /// Application configuration, shared state, and top-level server orchestration.
 pub mod config {
     use crate::{
+        auth::{self, Claims},
         handlers,
         items::{self, Item},
     };
-    use axum::{Router, extract::FromRef};
+    use axum::{
+        Router,
+        async_trait,
+        extract::{FromRef, FromRequestParts},
+        http::{header, request::Parts, HeaderMap, StatusCode, request::Request},
+        response::Response,
+    };
     use axum_server::{Handle, tls_rustls::RustlsConfig};
     use dashmap::DashMap;
+    use jsonwebtoken::{decode, DecodingKey, Validation};
     use rustls_pki_types::pem::PemObject;
+    use secrecy::{ExposeSecret, SecretString};
     use std::{env, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
     use tokio_util::{sync::CancellationToken, task::TaskTracker};
+    use tower::{Layer, Service, util::ServiceExt};
     use uuid::Uuid;
 
     /// Runs the HTTP and HTTPS servers concurrently until `shutdown_signal`

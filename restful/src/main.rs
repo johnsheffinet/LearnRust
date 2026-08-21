@@ -412,6 +412,319 @@ pub mod config {
     }
 }
 
+/// JWT authentication and role-based authorization for this service,
+/// implemented as ordinary `axum::middleware::from_fn`/`from_fn_with_state`
+/// handlers.
+///
+/// Two middleware functions do the work:
+/// - [`authenticate`] verifies the `Authorization: Bearer <jwt>` header,
+///   decodes [`Claims`], looks the subject up in an in-memory [`RoleStore`],
+///   and inserts an [`AuthUser`] into the request's extensions.
+/// - [`require_role`] reads that [`AuthUser`] back out and rejects the
+///   request if it doesn't hold the required role. It must run *after*
+///   [`authenticate`] on the same request, since it only reads what that
+///   middleware wrote.
+///
+/// # Examples
+///
+/// Applying both to a sub-router (see [`AuthState::new`] and
+/// [`require_role`] for the pieces used here):
+///
+/// ```ignore
+/// use axum::{middleware, routing::delete, Router};
+///
+/// let admin_only = Router::new()
+///     .route("/items/{id}", delete(items::delete))
+///     .layer(middleware::from_fn(|ext, req, next| {
+///         auth::require_role("admin", ext, req, next)
+///     }));
+///
+/// let protected = Router::new()
+///     .merge(admin_only)
+///     .layer(middleware::from_fn_with_state(
+///         auth::AuthState::new(&jwt_secret, roles.clone()),
+///         auth::authenticate,
+///     ));
+/// ```
+pub mod auth {
+    use axum::{
+        extract::{Request, State},
+        http::header,
+        middleware::Next,
+        response::{IntoResponse, Response},
+        Extension,
+    };
+    use dashmap::DashMap;
+    use jsonwebtoken::{decode, DecodingKey, Validation};
+    use secrecy::{ExposeSecret, SecretString};
+    use std::sync::Arc;
+
+    /// In-memory role assignments, keyed by the JWT `sub` (user id).
+    ///
+    /// This is a thread-safe, reference-counted, concurrent map, so cloning
+    /// a `RoleStore` is cheap and shares the same underlying data — the
+    /// same pattern used by [`AppStore`](crate::config::AppStore) for
+    /// items.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dashmap::DashMap;
+    /// use std::sync::Arc;
+    ///
+    /// let roles: Arc<DashMap<String, Vec<String>>> = Arc::new(DashMap::new());
+    /// roles.insert("alice".to_string(), vec!["admin".to_string()]);
+    ///
+    /// assert_eq!(
+    ///     roles.get("alice").map(|r| r.clone()),
+    ///     Some(vec!["admin".to_string()])
+    /// );
+    /// ```
+    pub type RoleStore = Arc<DashMap<String, Vec<String>>>;
+
+    /// JWT claims this service expects to find in a validated Bearer token.
+    ///
+    /// Decoded by [`authenticate`] via [`jsonwebtoken::decode`], which also
+    /// enforces the `exp` claim against the configured [`Validation`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use serde::{Deserialize, Serialize};
+    /// # #[derive(Debug, Clone, Deserialize, Serialize)]
+    /// # struct Claims { sub: String, exp: usize }
+    /// let claims = Claims {
+    ///     sub: "alice".to_string(),
+    ///     exp: 9_999_999_999,
+    /// };
+    ///
+    /// assert_eq!(claims.sub, "alice");
+    /// ```
+    #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+    pub struct Claims {
+        /// The token subject — the user id used to look roles up in the
+        /// [`RoleStore`].
+        pub sub: String,
+        /// Standard `exp` claim: a Unix timestamp (seconds since the
+        /// epoch) after which the token is no longer valid. Enforced by
+        /// [`jsonwebtoken::decode`] during [`authenticate`].
+        pub exp: usize,
+    }
+
+    /// The authenticated identity attached to a request's extensions by
+    /// [`authenticate`].
+    ///
+    /// Handlers can read it back out via `Extension<AuthUser>`, and
+    /// [`require_role`] reads it to perform its role check.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[derive(Clone, Debug)]
+    /// # struct AuthUser { user_id: String, roles: Vec<String> }
+    /// let user = AuthUser {
+    ///     user_id: "alice".to_string(),
+    ///     roles: vec!["admin".to_string(), "user".to_string()],
+    /// };
+    ///
+    /// assert!(user.roles.iter().any(|r| r == "admin"));
+    /// ```
+    #[derive(Clone, Debug)]
+    pub struct AuthUser {
+        /// The JWT subject (user id) this request was authenticated as.
+        pub user_id: String,
+        /// Roles held by this user, as of the [`RoleStore`] lookup
+        /// performed by [`authenticate`] for this request. Not re-checked
+        /// for the lifetime of the request, so role changes take effect on
+        /// the next request, not the current one.
+        pub roles: Vec<String>,
+    }
+
+    /// State captured by the [`authenticate`] middleware: the key/rules
+    /// used to validate incoming tokens, and the store used to resolve
+    /// roles for the validated subject.
+    ///
+    /// Built once at startup and passed to
+    /// [`middleware::from_fn_with_state`](axum::middleware::from_fn_with_state)
+    /// alongside [`authenticate`].
+    #[derive(Clone)]
+    pub struct AuthState {
+        /// Key used to verify a token's signature. Derived once from the
+        /// app's JWT secret in [`AuthState::new`].
+        decoding_key: DecodingKey,
+        /// Validation rules (algorithm, required claims, clock skew, etc.)
+        /// applied to every token. Currently [`Validation::default`].
+        validation: Validation,
+        /// Store consulted for the authenticated subject's roles.
+        roles: RoleStore,
+    }
+
+    impl AuthState {
+        /// Builds authentication state from the app's JWT signing secret
+        /// and role store.
+        ///
+        /// `jwt_secret` is read via [`ExposeSecret::expose_secret`] only
+        /// for the instant it takes to build the [`DecodingKey`] — the
+        /// exposed bytes are not retained; the [`SecretString`] itself is
+        /// never logged or stored in plain form by this function.
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// use dashmap::DashMap;
+        /// use secrecy::SecretString;
+        /// use std::sync::Arc;
+        ///
+        /// let jwt_secret = SecretString::from("super-secret-demo-key".to_string());
+        /// let roles = Arc::new(DashMap::new());
+        ///
+        /// let auth_state = auth::AuthState::new(&jwt_secret, roles);
+        /// ```
+        ///
+        /// # Panics
+        ///
+        /// Does not panic. [`DecodingKey::from_secret`] accepts any byte
+        /// slice (including an empty one) and cannot fail.
+        pub fn new(jwt_secret: &SecretString, roles: RoleStore) -> Self {
+            Self {
+                decoding_key: DecodingKey::from_secret(jwt_secret.expose_secret().as_bytes()),
+                validation: Validation::default(),
+                roles,
+            }
+        }
+    }
+
+    /// Authenticates an incoming request: validates its Bearer token and,
+    /// on success, attaches an [`AuthUser`] to the request's extensions
+    /// before passing it on to `next`.
+    ///
+    /// Intended to be layered with
+    /// [`middleware::from_fn_with_state`](axum::middleware::from_fn_with_state)
+    /// on any (sub-)router that should require authentication; downstream
+    /// handlers and middleware (such as [`require_role`]) can then read the
+    /// attached [`AuthUser`].
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use axum::{middleware, Router};
+    ///
+    /// let protected = Router::new()
+    ///     // ...routes...
+    ///     .layer(middleware::from_fn_with_state(auth_state, auth::authenticate));
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Unauthorized`] if the `Authorization` header is
+    /// missing, is not a valid UTF-8 string, does not start with
+    /// `"Bearer "`, or if the token fails to decode or validate (bad
+    /// signature, malformed claims, or an expired `exp`).
+    ///
+    /// # Panics
+    ///
+    /// Does not panic.
+    pub async fn authenticate(
+        State(state): State<AuthState>,
+        mut req: Request,
+        next: Next,
+    ) -> Result<Response, AppError> {
+        let token = req
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .ok_or(AppError::Unauthorized)?;
+
+        let token_data = decode::<Claims>(token, &state.decoding_key, &state.validation)
+            .map_err(|_| AppError::Unauthorized)?;
+
+        let roles = state
+            .roles
+            .get(&token_data.claims.sub)
+            .map(|entry| entry.clone())
+            .unwrap_or_default();
+
+        req.extensions_mut().insert(AuthUser {
+            user_id: token_data.claims.sub,
+            roles,
+        });
+
+        Ok(next.run(req).await)
+    }
+
+    /// Rejects a request unless the [`AuthUser`] attached by
+    /// [`authenticate`] holds `role`.
+    ///
+    /// Must run *after* [`authenticate`] on the same request — it only
+    /// reads the [`AuthUser`] that middleware wrote, and does not itself
+    /// validate the token.
+    ///
+    /// Because [`middleware::from_fn`](axum::middleware::from_fn) expects a
+    /// fixed function signature, `role` is supplied by wrapping this
+    /// function in a closure per call site rather than partially applying
+    /// it directly (see the module-level example).
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use axum::{middleware, routing::delete, Router};
+    ///
+    /// let admin_only = Router::new()
+    ///     .route("/items/{id}", delete(items::delete))
+    ///     .layer(middleware::from_fn(|ext, req, next| {
+    ///         auth::require_role("admin", ext, req, next)
+    ///     }));
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Forbidden`] if the authenticated user's roles do
+    /// not include `role`.
+    ///
+    /// # Panics
+    ///
+    /// Does not panic.
+    pub async fn require_role(
+        role: &'static str,
+        Extension(user): Extension<AuthUser>,
+        req: Request,
+        next: Next,
+    ) -> Result<Response, AppError> {
+        if user.roles.iter().any(|r| r == role) {
+            Ok(next.run(req).await)
+        } else {
+            Err(AppError::Forbidden)
+        }
+    }
+
+    /// Convenience alias for results returned by items in [`auth`](self).
+    pub type AppResult<T> = Result<T, AppError>;
+
+    /// Errors produced while authenticating or authorizing a request.
+    ///
+    /// Implements [`IntoResponse`] (via `#[derive(AxumErrorResponse)]`) so
+    /// it can be returned directly from [`authenticate`] and
+    /// [`require_role`]; each variant's `#[status_code]`/`#[code]`
+    /// attributes determine the resulting HTTP status and JSON error body.
+    #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
+    pub enum AppError {
+        /// Missing, malformed, or invalid/expired bearer token; responds
+        /// with `401 Unauthorized`.
+        #[error("missing or invalid bearer token")]
+        #[status_code("401")]
+        #[code("UNAUTHORIZED")]
+        Unauthorized,
+
+        /// Token is valid but the authenticated user lacks the role
+        /// required for this resource; responds with `403 Forbidden`.
+        #[error("insufficient permissions for this resource")]
+        #[status_code("403")]
+        #[code("FORBIDDEN")]
+        Forbidden,
+    }
+}
+
 /// Top-level HTTP request handlers not specific to any single resource.
 pub mod handlers {
     use crate::config::AppState;

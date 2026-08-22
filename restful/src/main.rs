@@ -35,17 +35,16 @@ async fn main() -> config::AppResult<()> {
 /// Application configuration, shared state, and top-level server orchestration.
 pub mod config {
     use crate::{
-        auth,
-        handlers,
+        auth, handlers,
         items::{self, Item},
     };
     use axum::{
+        Router,
         extract::FromRef,
         middleware,
         routing::{delete, get},
-        Router,
     };
-    use axum_server::{tls_rustls::RustlsConfig, Handle};
+    use axum_server::{Handle, tls_rustls::RustlsConfig};
     use dashmap::DashMap;
     use rustls_pki_types::pem::PemObject;
     use secrecy::SecretString;
@@ -827,14 +826,14 @@ pub mod items {
 /// ```
 pub mod auth {
     use axum::{
+        Extension,
         extract::{Request, State},
         http::header,
         middleware::Next,
-        response::{IntoResponse, Response},
-        Extension,
+        response::Response,
     };
     use dashmap::DashMap;
-    use jsonwebtoken::{decode, DecodingKey, Validation};
+    use jsonwebtoken::{DecodingKey, Validation, decode};
     use secrecy::{ExposeSecret, SecretString};
     use std::sync::Arc;
 
@@ -1574,7 +1573,7 @@ mod tests {
         };
         use axum::http::StatusCode;
         use axum_test::TestServer;
-        use jsonwebtoken::{encode, EncodingKey, Header};
+        use jsonwebtoken::{EncodingKey, Header, encode};
         use secrecy::ExposeSecret;
         use serde_json::{Value, json};
         use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -1642,16 +1641,14 @@ mod tests {
                 "admin-user".to_string(),
                 vec!["admin".to_string(), "user".to_string()],
             );
-            state.roles.insert("plain-user".to_string(), vec!["user".to_string()]);
+            state
+                .roles
+                .insert("plain-user".to_string(), vec!["user".to_string()]);
 
             let admin_token = mint_token(&state, "admin-user");
             let user_token = mint_token(&state, "plain-user");
 
-            (
-                TestServer::new(router_fn(state)).unwrap(),
-                admin_token,
-                user_token,
-            )
+            (TestServer::new(router_fn(state)), admin_token, user_token)
         }
 
         #[test_case(
@@ -1911,10 +1908,10 @@ mod tests {
     /// router rather than the full [`crate::config::https_router`].
     mod auth {
         use crate::auth::{self, AuthState, AuthUser, Claims, RoleStore};
-        use axum::{extract::Extension, http::StatusCode, middleware, routing::get, Router};
+        use axum::{Router, extract::Extension, http::StatusCode, middleware, routing::get};
         use axum_test::TestServer;
         use dashmap::DashMap;
-        use jsonwebtoken::{encode, EncodingKey, Header};
+        use jsonwebtoken::{EncodingKey, Header, encode};
         use secrecy::SecretString;
         use std::{
             sync::Arc,
@@ -1951,7 +1948,10 @@ mod tests {
         /// only).
         fn test_server() -> TestServer {
             let roles: RoleStore = Arc::new(DashMap::new());
-            roles.insert("alice".to_string(), vec!["admin".to_string(), "user".to_string()]);
+            roles.insert(
+                "alice".to_string(),
+                vec!["admin".to_string(), "user".to_string()],
+            );
             roles.insert("bob".to_string(), vec!["user".to_string()]);
 
             let auth_state = AuthState::new(&SecretString::from(TEST_SECRET.to_string()), roles);
@@ -1968,9 +1968,12 @@ mod tests {
                     get(|Extension(user): Extension<AuthUser>| async move { user.user_id }),
                 )
                 .merge(admin_only)
-                .layer(middleware::from_fn_with_state(auth_state, auth::authenticate));
+                .layer(middleware::from_fn_with_state(
+                    auth_state,
+                    auth::authenticate,
+                ));
 
-            TestServer::new(app).unwrap()
+            TestServer::new(app)
         }
 
         /// Verifies a valid token authenticates and `AuthUser` is extractable.
@@ -1981,10 +1984,7 @@ mod tests {
 
             let response = server
                 .get("/me")
-                .add_header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {token}").parse().unwrap(),
-                )
+                .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
                 .await;
 
             response.assert_status(StatusCode::OK);
@@ -2003,10 +2003,7 @@ mod tests {
         async fn test_authenticate_failure_malformed_header() {
             let response = test_server()
                 .get("/me")
-                .add_header(
-                    axum::http::header::AUTHORIZATION,
-                    "not-a-bearer-token".parse().unwrap(),
-                )
+                .add_header(axum::http::header::AUTHORIZATION, "not-a-bearer-token")
                 .await;
 
             response.assert_status(StatusCode::UNAUTHORIZED);
@@ -2030,7 +2027,7 @@ mod tests {
                 .get("/me")
                 .add_header(
                     axum::http::header::AUTHORIZATION,
-                    format!("Bearer {bad_token}").parse().unwrap(),
+                    format!("Bearer {bad_token}"),
                 )
                 .await;
 
@@ -2044,10 +2041,7 @@ mod tests {
 
             let response = test_server()
                 .get("/me")
-                .add_header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {token}").parse().unwrap(),
-                )
+                .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
                 .await;
 
             response.assert_status(StatusCode::UNAUTHORIZED);
@@ -2060,10 +2054,7 @@ mod tests {
 
             let response = test_server()
                 .get("/admin")
-                .add_header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {token}").parse().unwrap(),
-                )
+                .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
                 .await;
 
             response.assert_status(StatusCode::OK);
@@ -2077,10 +2068,7 @@ mod tests {
 
             let response = test_server()
                 .get("/admin")
-                .add_header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {token}").parse().unwrap(),
-                )
+                .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
                 .await;
 
             response.assert_status(StatusCode::FORBIDDEN);
@@ -2094,10 +2082,7 @@ mod tests {
 
             let response = test_server()
                 .get("/admin")
-                .add_header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {token}").parse().unwrap(),
-                )
+                .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
                 .await;
 
             response.assert_status(StatusCode::FORBIDDEN);

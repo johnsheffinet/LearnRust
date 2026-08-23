@@ -835,6 +835,7 @@ pub mod auth {
     use dashmap::DashMap;
     use jsonwebtoken::{DecodingKey, Validation, decode};
     use secrecy::{ExposeSecret, SecretString};
+    use serde::{Deserialize, Serialize};
     use std::sync::Arc;
 
     /// In-memory role assignments, keyed by the JWT `sub` (user id).
@@ -878,7 +879,7 @@ pub mod auth {
     ///
     /// assert_eq!(claims.sub, "alice");
     /// ```
-    #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct Claims {
         /// The token subject — the user id used to look roles up in the
         /// [`RoleStore`].
@@ -1006,7 +1007,7 @@ pub mod auth {
         State(state): State<AuthState>,
         mut req: Request,
         next: Next,
-    ) -> Result<Response, AppError> {
+    ) -> AppResult<Response> {
         let token = req
             .headers()
             .get(header::AUTHORIZATION)
@@ -1068,7 +1069,7 @@ pub mod auth {
         Extension(user): Extension<AuthUser>,
         req: Request,
         next: Next,
-    ) -> Result<Response, AppError> {
+    ) -> AppResult<Response> {
         if user.roles.iter().any(|r| r == role) {
             Ok(next.run(req).await)
         } else {

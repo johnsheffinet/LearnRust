@@ -1090,14 +1090,14 @@ pub mod auth {
     pub enum AppError {
         /// Missing, malformed, or invalid/expired bearer token; responds
         /// with `401 Unauthorized`.
-        #[error("missing or invalid bearer token")]
+        #[error("Bearer token in authorization header is missing or invalid!")]
         #[status_code("401")]
         #[code("UNAUTHORIZED")]
         Unauthorized,
 
         /// Token is valid but the authenticated user lacks the role
         /// required for this resource; responds with `403 Forbidden`.
-        #[error("insufficient permissions for this resource")]
+        #[error("Permissions to act on this resource are insufficient!")]
         #[status_code("403")]
         #[code("FORBIDDEN")]
         Forbidden,

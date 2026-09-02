@@ -35,13 +35,19 @@ async fn main() -> config::AppResult<()> {
 /// Application configuration, shared state, and top-level server orchestration.
 pub mod config {
     use crate::{
-        handlers,
+        auth, handlers,
         items::{self, Item},
     };
-    use axum::{Router, extract::FromRef};
+    use axum::{
+        Router,
+        extract::FromRef,
+        middleware,
+        routing::{delete, get},
+    };
     use axum_server::{Handle, tls_rustls::RustlsConfig};
     use dashmap::DashMap;
     use rustls_pki_types::pem::PemObject;
+    use secrecy::SecretString;
     use std::{env, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
     use tokio_util::{sync::CancellationToken, task::TaskTracker};
     use uuid::Uuid;
@@ -191,11 +197,14 @@ pub mod config {
         pub config: AppConfig,
         /// In-memory store of [`Item`]s, keyed by their [`Uuid`].
         pub items: AppStore<Item>,
+        /// In-memory RBAC store: user id -> roles, read by
+        /// [`auth::authenticate`].
+        pub roles: auth::RoleStore,
     }
 
     impl AppState {
         /// Builds application state by loading [`AppConfig`] from the
-        /// environment and initializing an empty item store.
+        /// environment and initializing empty item and role stores.
         ///
         /// # Errors
         ///
@@ -204,7 +213,12 @@ pub mod config {
         pub async fn new() -> AppResult<Self> {
             let config = AppConfig::new().await?;
             let items = Arc::new(DashMap::new());
-            Ok(Self { config, items })
+            let roles = Arc::new(DashMap::new());
+            Ok(Self {
+                config,
+                items,
+                roles,
+            })
         }
     }
 
@@ -225,16 +239,33 @@ pub mod config {
             .with_state(state)
     }
 
-    /// Builds the TLS-terminated HTTPS router that serves the item API
-    /// (see [`items::routes`]) and a `/healthz` liveliness endpoint.
+    /// Builds the TLS-terminated HTTPS router that serves the item API and a
+    /// `/healthz` liveliness endpoint.
+    ///
+    /// The item routes are authenticated via [`auth::authenticate`]; `DELETE
+    /// /items/{id}` additionally requires the `"admin"` role via
+    /// [`auth::authorize`]. `/healthz` and the fallback are unauthenticated.
     ///
     /// Requests that don't match any known route fall through to
     /// [`handlers::report_route_invalid`].
     pub fn https_router(state: AppState) -> Router {
-        use axum::routing::get;
+        let admin_only = Router::new()
+            .route("/items/{id}", delete(items::delete))
+            .layer(middleware::from_fn(|ext, req, next| {
+                auth::authorize("admin", ext, req, next)
+            }));
+
+        let items_routes = Router::new()
+            .route("/items", get(items::select).post(items::create))
+            .route("/items/{id}", get(items::get).put(items::update))
+            .merge(admin_only)
+            .layer(middleware::from_fn_with_state(
+                auth::AuthState::new(&state.config.jwt_secret, state.roles.clone()),
+                auth::authenticate,
+            ));
 
         Router::new()
-            .merge(items::routes::<AppState>())
+            .merge(items_routes)
             .route("/healthz", get(handlers::check_app_liveliness))
             .fallback(handlers::report_route_invalid)
             .layer(tower_http::trace::TraceLayer::new_for_http())
@@ -256,6 +287,9 @@ pub mod config {
         /// Parsed TLS server configuration built from `cert_path` and
         /// `key_path`, shared (via `Arc`) across both server tasks.
         pub tls_config: Arc<RustlsConfig>,
+        /// HMAC signing key for JWTs, held as a `SecretString` so it never
+        /// appears in `{:?}` output and is zeroized on drop.
+        pub jwt_secret: SecretString,
     }
 
     impl AppConfig {
@@ -268,6 +302,7 @@ pub mod config {
         /// - `CERT_PATH`: path to a PEM file containing one or more
         ///   certificates.
         /// - `KEY_PATH`: path to a PEM file containing a private key.
+        /// - `JWT_SECRET`: HMAC signing key used to sign/verify JWTs.
         ///
         /// # Errors
         ///
@@ -336,12 +371,17 @@ pub mod config {
 
             let tls_config = Arc::new(tls_config);
 
+            let jwt_secret_raw = env::var("JWT_SECRET")
+                .map_err(|src| AppError::FailedFindEnvVar(src, "JWT_SECRET".into()))?;
+            let jwt_secret = SecretString::from(jwt_secret_raw);
+
             Ok(Self {
                 http_addr,
                 https_addr,
                 cert_path,
                 key_path,
                 tls_config,
+                jwt_secret,
             })
         }
     }
@@ -500,31 +540,6 @@ pub mod items {
     };
     use axum_valid::Valid;
     use uuid::Uuid;
-
-    /// Builds the router fragment exposing the item API:
-    ///
-    /// - `GET /items` — [`select`], list/filter items.
-    /// - `POST /items` — [`create`], create a new item.
-    /// - `GET /items/{id}` — [`get`], fetch a single item.
-    /// - `PUT /items/{id}` — [`update`], partially update an item.
-    /// - `DELETE /items/{id}` — [`delete`], remove an item.
-    ///
-    /// Generic over any state type `S` from which an
-    /// [`AppStore<Item>`] can be derived via [`axum::extract::FromRef`],
-    /// so this can be merged into a router using any application state
-    /// shape that provides an item store.
-    pub fn routes<S>() -> axum::Router<S>
-    where
-        AppStore<Item>: axum::extract::FromRef<S>,
-        S: Clone + Send + Sync + 'static,
-    {
-        axum::Router::new()
-            .route("/items", axum::routing::get(select).post(create))
-            .route(
-                "/items/{id}",
-                axum::routing::get(get).delete(delete).put(update),
-            )
-    }
 
     /// Handles `POST /items`: creates a new [`Item`] from the request body
     /// and inserts it into the store under a freshly generated [`Uuid`].
@@ -775,7 +790,322 @@ pub mod items {
     }
 }
 
-/// Integration and unit tests for [`config`], [`handlers`], and [`items`].
+/// JWT authentication and role-based authorization for this service,
+/// implemented as ordinary `axum::middleware::from_fn`/`from_fn_with_state`
+/// handlers.
+///
+/// Two middleware functions do the work:
+/// - [`authenticate`] verifies the `Authorization: Bearer <jwt>` header,
+///   decodes [`Claims`], looks the subject up in an in-memory [`RoleStore`],
+///   and inserts an [`AuthUser`] into the request's extensions.
+/// - [`authorize`] reads that [`AuthUser`] back out and rejects the request
+///   if it doesn't hold the required role. It must run *after*
+///   [`authenticate`] on the same request, since it only reads what that
+///   middleware wrote.
+///
+/// # Examples
+///
+/// Applying both to a sub-router (see [`AuthState::new`] and [`authorize`]
+/// for the pieces used here):
+///
+/// ```ignore
+/// use axum::{middleware, routing::delete, Router};
+///
+/// let admin_only = Router::new()
+///     .route("/items/{id}", delete(items::delete))
+///     .layer(middleware::from_fn(|ext, req, next| {
+///         auth::authorize("admin", ext, req, next)
+///     }));
+///
+/// let protected = Router::new()
+///     .merge(admin_only)
+///     .layer(middleware::from_fn_with_state(
+///         auth::AuthState::new(&jwt_secret, roles.clone()),
+///         auth::authenticate,
+///     ));
+/// ```
+pub mod auth {
+    use axum::{
+        Extension,
+        extract::{Request, State},
+        http::header,
+        middleware::Next,
+        response::Response,
+    };
+    use dashmap::DashMap;
+    use jsonwebtoken::{DecodingKey, Validation, decode};
+    use secrecy::{ExposeSecret, SecretString};
+    use serde::{Deserialize, Serialize};
+    use std::sync::Arc;
+
+    /// In-memory role assignments, keyed by the JWT `sub` (user id).
+    ///
+    /// This is a thread-safe, reference-counted, concurrent map, so cloning
+    /// a `RoleStore` is cheap and shares the same underlying data — the
+    /// same pattern used by [`AppStore`](crate::config::AppStore) for
+    /// items.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dashmap::DashMap;
+    /// use std::sync::Arc;
+    ///
+    /// let roles: Arc<DashMap<String, Vec<String>>> = Arc::new(DashMap::new());
+    /// roles.insert("alice".to_string(), vec!["admin".to_string()]);
+    ///
+    /// assert_eq!(
+    ///     roles.get("alice").map(|r| r.clone()),
+    ///     Some(vec!["admin".to_string()])
+    /// );
+    /// ```
+    pub type RoleStore = Arc<DashMap<String, Vec<String>>>;
+
+    /// JWT claims this service expects to find in a validated Bearer token.
+    ///
+    /// Decoded by [`authenticate`] via [`jsonwebtoken::decode`], which also
+    /// enforces the `exp` claim against the configured [`Validation`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use serde::{Deserialize, Serialize};
+    /// # #[derive(Debug, Clone, Deserialize, Serialize)]
+    /// # struct Claims { sub: String, exp: usize }
+    /// let claims = Claims {
+    ///     sub: "alice".to_string(),
+    ///     exp: 9_999_999_999,
+    /// };
+    ///
+    /// assert_eq!(claims.sub, "alice");
+    /// ```
+    #[derive(Clone, Debug, Deserialize, Serialize)]
+    pub struct Claims {
+        /// The token subject — the user id used to look roles up in the
+        /// [`RoleStore`].
+        pub sub: String,
+        /// Standard `exp` claim: a Unix timestamp (seconds since the
+        /// epoch) after which the token is no longer valid. Enforced by
+        /// [`jsonwebtoken::decode`] during [`authenticate`].
+        pub exp: usize,
+    }
+
+    /// The authenticated identity attached to a request's extensions by
+    /// [`authenticate`].
+    ///
+    /// Handlers can read it back out via `Extension<AuthUser>`, and
+    /// [`authorize`] reads it to perform its role check.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[derive(Clone, Debug)]
+    /// # struct AuthUser { user_id: String, roles: Vec<String> }
+    /// let user = AuthUser {
+    ///     user_id: "alice".to_string(),
+    ///     roles: vec!["admin".to_string(), "user".to_string()],
+    /// };
+    ///
+    /// assert!(user.roles.iter().any(|r| r == "admin"));
+    /// ```
+    #[derive(Clone, Debug)]
+    pub struct AuthUser {
+        /// The JWT subject (user id) this request was authenticated as.
+        pub user_id: String,
+        /// Roles held by this user, as of the [`RoleStore`] lookup
+        /// performed by [`authenticate`] for this request. Not re-checked
+        /// for the lifetime of the request, so role changes take effect on
+        /// the next request, not the current one.
+        pub roles: Vec<String>,
+    }
+
+    /// State captured by the [`authenticate`] middleware: the key/rules
+    /// used to validate incoming tokens, and the store used to resolve
+    /// roles for the validated subject.
+    ///
+    /// Built once at startup and passed to
+    /// [`middleware::from_fn_with_state`](axum::middleware::from_fn_with_state)
+    /// alongside [`authenticate`].
+    #[derive(Clone)]
+    pub struct AuthState {
+        /// Key used to verify a token's signature. Derived once from the
+        /// app's JWT secret in [`AuthState::new`].
+        decoding_key: DecodingKey,
+        /// Validation rules (algorithm, required claims, clock skew, etc.)
+        /// applied to every token. Currently [`Validation::default`].
+        validation: Validation,
+        /// Store consulted for the authenticated subject's roles.
+        roles: RoleStore,
+    }
+
+    impl AuthState {
+        /// Builds authentication state from the app's JWT signing secret
+        /// and role store.
+        ///
+        /// `jwt_secret` is read via [`ExposeSecret::expose_secret`] only
+        /// for the instant it takes to build the [`DecodingKey`] — the
+        /// exposed bytes are not retained; the [`SecretString`] itself is
+        /// never logged or stored in plain form by this function.
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// use dashmap::DashMap;
+        /// use secrecy::SecretString;
+        /// use std::sync::Arc;
+        ///
+        /// let jwt_secret = SecretString::from("super-secret-demo-key".to_string());
+        /// let roles = Arc::new(DashMap::new());
+        ///
+        /// let auth_state = auth::AuthState::new(&jwt_secret, roles);
+        /// ```
+        ///
+        /// # Panics
+        ///
+        /// Does not panic. [`DecodingKey::from_secret`] accepts any byte
+        /// slice (including an empty one) and cannot fail.
+        pub fn new(jwt_secret: &SecretString, roles: RoleStore) -> Self {
+            Self {
+                decoding_key: DecodingKey::from_secret(jwt_secret.expose_secret().as_bytes()),
+                validation: Validation::default(),
+                roles,
+            }
+        }
+    }
+
+    /// Authenticates an incoming request: validates its Bearer token and,
+    /// on success, attaches an [`AuthUser`] to the request's extensions
+    /// before passing it on to `next`.
+    ///
+    /// Intended to be layered with
+    /// [`middleware::from_fn_with_state`](axum::middleware::from_fn_with_state)
+    /// on any (sub-)router that should require authentication; downstream
+    /// handlers and middleware (such as [`authorize`]) can then read the
+    /// attached [`AuthUser`].
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use axum::{middleware, Router};
+    ///
+    /// let protected = Router::new()
+    ///     // ...routes...
+    ///     .layer(middleware::from_fn_with_state(auth_state, auth::authenticate));
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Unauthorized`] if the `Authorization` header is
+    /// missing, is not a valid UTF-8 string, does not start with
+    /// `"Bearer "`, or if the token fails to decode or validate (bad
+    /// signature, malformed claims, or an expired `exp`).
+    ///
+    /// # Panics
+    ///
+    /// Does not panic.
+    pub async fn authenticate(
+        State(state): State<AuthState>,
+        mut req: Request,
+        next: Next,
+    ) -> AppResult<Response> {
+        let token = req
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .ok_or(AppError::Unauthorized)?;
+
+        let token_data = decode::<Claims>(token, &state.decoding_key, &state.validation)
+            .map_err(|_| AppError::Unauthorized)?;
+
+        let roles = state
+            .roles
+            .get(&token_data.claims.sub)
+            .map(|entry| entry.clone())
+            .unwrap_or_default();
+
+        req.extensions_mut().insert(AuthUser {
+            user_id: token_data.claims.sub,
+            roles,
+        });
+
+        Ok(next.run(req).await)
+    }
+
+    /// Rejects a request unless the [`AuthUser`] attached by
+    /// [`authenticate`] holds `role`.
+    ///
+    /// Must run *after* [`authenticate`] on the same request — it only
+    /// reads the [`AuthUser`] that middleware wrote, and does not itself
+    /// validate the token.
+    ///
+    /// Because [`middleware::from_fn`](axum::middleware::from_fn) expects a
+    /// fixed function signature, `role` is supplied by wrapping this
+    /// function in a closure per call site rather than partially applying
+    /// it directly (see the module-level example).
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use axum::{middleware, routing::delete, Router};
+    ///
+    /// let admin_only = Router::new()
+    ///     .route("/items/{id}", delete(items::delete))
+    ///     .layer(middleware::from_fn(|ext, req, next| {
+    ///         auth::authorize("admin", ext, req, next)
+    ///     }));
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Forbidden`] if the authenticated user's roles do
+    /// not include `role`.
+    ///
+    /// # Panics
+    ///
+    /// Does not panic.
+    pub async fn authorize(
+        role: &'static str,
+        Extension(user): Extension<AuthUser>,
+        req: Request,
+        next: Next,
+    ) -> AppResult<Response> {
+        if user.roles.iter().any(|r| r == role) {
+            Ok(next.run(req).await)
+        } else {
+            Err(AppError::Forbidden)
+        }
+    }
+
+    /// Convenience alias for results returned by items in [`auth`](self).
+    pub type AppResult<T> = Result<T, AppError>;
+
+    /// Errors produced while authenticating or authorizing a request.
+    ///
+    /// Implements [`IntoResponse`] (via `#[derive(AxumErrorResponse)]`) so
+    /// it can be returned directly from [`authenticate`] and [`authorize`];
+    /// each variant's `#[status_code]`/`#[code]` attributes determine the
+    /// resulting HTTP status and JSON error body.
+    #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
+    pub enum AppError {
+        /// Missing, malformed, or invalid/expired bearer token; responds
+        /// with `401 Unauthorized`.
+        #[error("Bearer token in authorization header is missing or invalid!")]
+        #[status_code("401")]
+        #[code("UNAUTHORIZED")]
+        Unauthorized,
+
+        /// Token is valid but the authenticated user lacks the role
+        /// required for this resource; responds with `403 Forbidden`.
+        #[error("Permissions to act on this resource are insufficient!")]
+        #[status_code("403")]
+        #[code("FORBIDDEN")]
+        Forbidden,
+    }
+}
+
+/// Integration and unit tests for [`config`], [`handlers`], [`items`], and
+/// [`auth`].
 #[cfg(test)]
 mod tests {
     /// Tests for [`crate::config::AppConfig`] and [`crate::config::run_app`].
@@ -792,7 +1122,8 @@ mod tests {
             Some("test.crt"), // cert_path
             Some("test.key"), // key_path
             Some("a"), // crt_file
-            Some("a"); // key_file
+            Some("a"), // key_file
+            Some("test-secret"); // jwt_secret
             "success"
         )]
         #[test_case(
@@ -802,7 +1133,8 @@ mod tests {
             Some("test.crt"), // cert_path
             Some("test.key"), // key_path
             Some("a"), // crt_file
-            Some("a"); // key_file
+            Some("a"), // key_file
+            Some("test-secret"); // jwt_secret
             "failed_find_http_addr_env_var"
         )]
         #[test_case(
@@ -812,7 +1144,8 @@ mod tests {
             Some("test.crt"), // cert_path
             Some("test.key"), // key_path
             Some("a"), // crt_file
-            Some("a"); // key_file
+            Some("a"), // key_file
+            Some("test-secret"); // jwt_secret
             "failed_find_https_addr_env_var"
         )]
         #[test_case(
@@ -822,7 +1155,8 @@ mod tests {
             None, // cert_path
             Some("test.key"), // key_path
             Some("a"), // crt_file
-            Some("a"); // key_file
+            Some("a"), // key_file
+            Some("test-secret"); // jwt_secret
             "failed_find_cert_path_env_var"
         )]
         #[test_case(
@@ -832,7 +1166,8 @@ mod tests {
             Some("test.crt"), // cert_path
             None, // key_path
             Some("a"), // crt_file
-            Some("a"); // key_file
+            Some("a"), // key_file
+            Some("test-secret"); // jwt_secret
             "failed_find_key_path_env_var"
         )]
         #[test_case(
@@ -842,7 +1177,8 @@ mod tests {
             Some("test.crt"), // cert_path
             Some("test.key"), // key_path
             Some("a"), // crt_file
-            Some("a"); // key_file
+            Some("a"), // key_file
+            Some("test-secret"); // jwt_secret
             "failed_parse_http_socket_addr"
         )]
         #[test_case(
@@ -852,7 +1188,8 @@ mod tests {
             Some("test.crt"), // cert_path
             Some("test.key"), // key_path
             Some("a"), // crt_file
-            Some("a"); // key_file
+            Some("a"), // key_file
+            Some("test-secret"); // jwt_secret
             "failed_parse_https_socket_addr"
         )]
         #[test_case(
@@ -862,7 +1199,8 @@ mod tests {
             Some("test.crt"), // cert_path
             Some("test.key"), // key_path
             None, // crt_file
-            Some("a"); // key_file
+            Some("a"), // key_file
+            Some("test-secret"); // jwt_secret
             "failed_open_public_key_file"
         )]
         #[test_case(
@@ -872,7 +1210,8 @@ mod tests {
             Some("test.crt"), // cert_path
             Some("test.key"), // key_path
             Some("-----BEGIN PUBLIC KEY-----"), // crt_file
-            Some("a"); // key_file
+            Some("a"), // key_file
+            Some("test-secret"); // jwt_secret
             "failed_read_public_key_file"
         )]
         #[test_case(
@@ -882,7 +1221,8 @@ mod tests {
             Some("test.crt"), // cert_path
             Some("test.key"), // key_path
             Some(""), // crt_file
-            Some("a"); // key_file
+            Some("a"), // key_file
+            Some("test-secret"); // jwt_secret
             "failed_find_public_keys"
         )]
         #[test_case(
@@ -892,7 +1232,8 @@ mod tests {
             Some("test.crt"), // cert_path
             Some("test.key"), // key_path
             Some("a"), // crt_file
-            None; // key_file
+            None, // key_file
+            Some("test-secret"); // jwt_secret
             "failed_open_private_key_file"
         )]
         #[test_case(
@@ -902,7 +1243,8 @@ mod tests {
             Some("test.crt"), // cert_path
             Some("test.key"), // key_path
             Some("a"), // crt_file
-            Some("-----BEGIN PRIVATE KEY-----"); // key_file
+            Some("-----BEGIN PRIVATE KEY-----"), // key_file
+            Some("test-secret"); // jwt_secret
             "failed_read_private_key_file"
         )]
         #[test_case(
@@ -912,7 +1254,8 @@ mod tests {
             Some("test.crt"), // cert_path
             Some("test.key"), // key_path
             Some("a"), // crt_file
-            Some(""); // key_file
+            Some(""), // key_file
+            Some("test-secret"); // jwt_secret
             "failed_find_private_keys"
         )]
         #[test_case(
@@ -922,8 +1265,20 @@ mod tests {
             Some("test.crt"), // cert_path
             Some("test.key"), // key_path
             Some("a"), // crt_file
-            Some("b"); // key_file
+            Some("b"), // key_file
+            Some("test-secret"); // jwt_secret
             "failed_config_tls"
+        )]
+        #[test_case(
+            "failed_find_jwt_secret_env_var", // scenario
+            Some("127.0.0.1:3080"), // http_addr
+            Some("127.0.0.1:3443"), // https_addr
+            Some("test.crt"), // cert_path
+            Some("test.key"), // key_path
+            Some("a"), // crt_file
+            Some("a"), // key_file
+            None; // jwt_secret
+            "failed_find_jwt_secret_env_var"
         )]
         /// Exercises every success/failure path of [`AppConfig::new`] by
         /// populating a jailed environment and filesystem, then asserting
@@ -937,6 +1292,7 @@ mod tests {
             key_path: Option<&str>,
             crt_file: Option<&str>,
             key_file: Option<&str>,
+            jwt_secret: Option<&str>,
         ) {
             let _ = Jail::try_with(|jail| {
                 let key_pair_a =
@@ -960,6 +1316,10 @@ mod tests {
 
                 if let Some(data) = key_path {
                     jail.set_env("KEY_PATH", data);
+                }
+
+                if let Some(data) = jwt_secret {
+                    jail.set_env("JWT_SECRET", data);
                 }
 
                 if let Some(data) = crt_file {
@@ -1012,6 +1372,9 @@ mod tests {
                     "failed_find_key_path_env_var" => {
                         assert_matches!(result, Err(AppError::FailedFindEnvVar(_, _)))
                     }
+                    "failed_find_jwt_secret_env_var" => {
+                        assert_matches!(result, Err(AppError::FailedFindEnvVar(_, _)))
+                    }
                     "failed_parse_http_socket_addr" => {
                         assert_matches!(result, Err(AppError::FailedParseSocketAddr(_, _)))
                     }
@@ -1052,6 +1415,7 @@ mod tests {
         use axum_server::tls_rustls::RustlsConfig;
         use cool_asserts::assert_matches;
         use rcgen::generate_simple_self_signed;
+        use secrecy::SecretString;
         use std::{
             net::{IpAddr, Ipv4Addr, SocketAddr},
             sync::Arc,
@@ -1077,8 +1441,10 @@ mod tests {
                     cert_path: "test.crt".into(),
                     key_path: "test.key".into(),
                     tls_config: Arc::new(tls_config),
+                    jwt_secret: SecretString::from("test-secret".to_string()),
                 },
                 items: Arc::new(dashmap::DashMap::new()),
+                roles: Arc::new(dashmap::DashMap::new()),
             }
         }
 
@@ -1198,22 +1564,62 @@ mod tests {
             response.assert_status(StatusCode::NOT_FOUND);
         }
     }
-    /// Tests for the item API in [`crate::items`].
+    /// Tests for the item API in [`crate::items`], including the
+    /// [`crate::auth`] middleware layered onto it.
     mod items {
         use crate::{
+            auth::Claims,
             config::{self, AppState},
             items::Item,
         };
         use axum::http::StatusCode;
         use axum_test::TestServer;
+        use jsonwebtoken::{EncodingKey, Header, encode};
+        use secrecy::ExposeSecret;
         use serde_json::{Value, json};
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
         use test_case::test_case;
         use uuid::Uuid;
 
+        /// Encodes a JWT for `sub`, signed with the app's own configured
+        /// secret, so it validates against whatever `JWT_SECRET` the test
+        /// environment has set.
+        fn mint_token(state: &AppState, sub: &str) -> String {
+            let exp = (SystemTime::now() + Duration::from_secs(3600))
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as usize;
+
+            let claims = Claims {
+                sub: sub.to_string(),
+                exp,
+            };
+
+            encode(
+                &Header::default(),
+                &claims,
+                &EncodingKey::from_secret(state.config.jwt_secret.expose_secret().as_bytes()),
+            )
+            .unwrap()
+        }
+
+        /// Adds a Bearer `Authorization` header to a test request.
+        fn bearer(token: &str) -> (axum::http::HeaderName, axum::http::HeaderValue) {
+            (
+                axum::http::header::AUTHORIZATION,
+                format!("Bearer {token}").parse().unwrap(),
+            )
+        }
+
         /// Builds a [`TestServer`] wrapping the router produced by
-        /// `router_fn`, pre-populated with two [`Item`]s: one keyed by
-        /// [`Uuid::nil`] and one keyed by a random [`Uuid`].
-        async fn test_server(router_fn: fn(AppState) -> axum::Router) -> TestServer {
+        /// `router_fn`, pre-populated with two [`Item`]s (one keyed by
+        /// [`Uuid::nil`], one keyed by a random [`Uuid`]) and a seeded
+        /// [`RoleStore`](crate::auth::RoleStore). Returns the server
+        /// alongside an admin token (roles: admin, user) and a plain user
+        /// token (roles: user).
+        async fn test_server(
+            router_fn: fn(AppState) -> axum::Router,
+        ) -> (TestServer, String, String) {
             let state = AppState::new().await.unwrap();
 
             state.items.insert(
@@ -1232,7 +1638,18 @@ mod tests {
                 },
             );
 
-            TestServer::new(router_fn(state))
+            state.roles.insert(
+                "admin-user".to_string(),
+                vec!["admin".to_string(), "user".to_string()],
+            );
+            state
+                .roles
+                .insert("plain-user".to_string(), vec!["user".to_string()]);
+
+            let admin_token = mint_token(&state, "admin-user");
+            let user_token = mint_token(&state, "plain-user");
+
+            (TestServer::new(router_fn(state)), admin_token, user_token)
         }
 
         #[test_case(
@@ -1263,9 +1680,14 @@ mod tests {
         /// Verifies `POST /items` behavior for valid and invalid payloads.
         #[test_log::test(tokio::test)]
         async fn test_create(payload: Value, status: StatusCode) {
-            let server = test_server(config::https_router).await;
+            let (server, _admin_token, user_token) = test_server(config::https_router).await;
+            let (name, value) = bearer(&user_token);
 
-            let response = server.post("/items").json(&payload).await;
+            let response = server
+                .post("/items")
+                .add_header(name, value)
+                .json(&payload)
+                .await;
 
             response.assert_status(status);
 
@@ -1294,12 +1716,16 @@ mod tests {
             "failure_invalid_id"
         )]
         /// Verifies `DELETE /items/{id}` behavior for existing, missing,
-        /// and malformed ids.
+        /// and malformed ids, using an admin-privileged token.
         #[test_log::test(tokio::test)]
         async fn test_delete(pathid: String, status: StatusCode) {
-            let server = test_server(config::https_router).await;
+            let (server, admin_token, _user_token) = test_server(config::https_router).await;
+            let (name, value) = bearer(&admin_token);
 
-            let response = server.delete(&format!("/items/{pathid}")).await;
+            let response = server
+                .delete(&format!("/items/{pathid}"))
+                .add_header(name, value)
+                .await;
 
             response.assert_status(status);
 
@@ -1331,9 +1757,13 @@ mod tests {
         /// malformed ids.
         #[test_log::test(tokio::test)]
         async fn test_get(pathid: String, status: StatusCode) {
-            let server = test_server(config::https_router).await;
+            let (server, _admin_token, user_token) = test_server(config::https_router).await;
+            let (name, value) = bearer(&user_token);
 
-            let response = server.get(&format!("/items/{pathid}")).await;
+            let response = server
+                .get(&format!("/items/{pathid}"))
+                .add_header(name, value)
+                .await;
 
             response.assert_status(status);
 
@@ -1374,9 +1804,13 @@ mod tests {
         /// query parameters, including validation failures.
         #[test_log::test(tokio::test)]
         async fn test_select(queryparams: String, length: usize, status: StatusCode) {
-            let server = test_server(config::https_router).await;
+            let (server, _admin_token, user_token) = test_server(config::https_router).await;
+            let (name, value) = bearer(&user_token);
 
-            let response = server.get(&format!("/items?{queryparams}")).await;
+            let response = server
+                .get(&format!("/items?{queryparams}"))
+                .add_header(name, value)
+                .await;
 
             response.assert_status(status);
 
@@ -1421,9 +1855,14 @@ mod tests {
         /// existing, missing, and malformed ids.
         #[test_log::test(tokio::test)]
         async fn test_update(pathid: String, payload: Value, status: StatusCode) {
-            let server = test_server(config::https_router).await;
+            let (server, _admin_token, user_token) = test_server(config::https_router).await;
+            let (name, value) = bearer(&user_token);
 
-            let response = server.put(&format!("/items/{pathid}")).json(&payload).await;
+            let response = server
+                .put(&format!("/items/{pathid}"))
+                .add_header(name, value)
+                .json(&payload)
+                .await;
 
             response.assert_status(status);
 
@@ -1438,6 +1877,216 @@ mod tests {
                     assert_eq!(body["item"]["desc"], payload["desc"],);
                 }
             }
+        }
+
+        /// Verifies a request with no `Authorization` header is rejected
+        /// before it ever reaches a handler.
+        #[test_log::test(tokio::test)]
+        async fn test_items_failure_unauthenticated() {
+            let (server, _admin_token, _user_token) = test_server(config::https_router).await;
+
+            let response = server.get("/items").await;
+
+            response.assert_status(StatusCode::UNAUTHORIZED);
+        }
+
+        /// Verifies an authenticated non-admin user is forbidden from
+        /// `DELETE /items/{id}`, distinct from the "item not found" case.
+        #[test_log::test(tokio::test)]
+        async fn test_delete_failure_forbidden_non_admin() {
+            let (server, _admin_token, user_token) = test_server(config::https_router).await;
+            let (name, value) = bearer(&user_token);
+
+            let response = server
+                .delete(&format!("/items/{}", Uuid::nil()))
+                .add_header(name, value)
+                .await;
+
+            response.assert_status(StatusCode::FORBIDDEN);
+        }
+    }
+    /// Tests for [`crate::auth`], exercised against a minimal standalone
+    /// router rather than the full [`crate::config::https_router`].
+    mod auth {
+        use crate::auth::{self, AuthState, AuthUser, Claims, RoleStore};
+        use axum::{Router, extract::Extension, http::StatusCode, middleware, routing::get};
+        use axum_test::TestServer;
+        use dashmap::DashMap;
+        use jsonwebtoken::{EncodingKey, Header, encode};
+        use secrecy::SecretString;
+        use std::{
+            sync::Arc,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        const TEST_SECRET: &str = "test-only-secret-do-not-use-in-prod";
+
+        /// Encodes a test JWT for `sub`, valid for one hour from now — or,
+        /// if `expired` is true, expired one hour ago.
+        fn mint_token(sub: &str, expired: bool) -> String {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as usize;
+            let exp = if expired { now - 3600 } else { now + 3600 };
+
+            let claims = Claims {
+                sub: sub.to_string(),
+                exp,
+            };
+
+            encode(
+                &Header::default(),
+                &claims,
+                &EncodingKey::from_secret(TEST_SECRET.as_bytes()),
+            )
+            .unwrap()
+        }
+
+        /// A minimal protected router: `authenticate` guards everything,
+        /// and `/admin` additionally requires the "admin" role via
+        /// `authorize`. Seeded with "alice" (admin + user) and "bob" (user
+        /// only).
+        fn test_server() -> TestServer {
+            let roles: RoleStore = Arc::new(DashMap::new());
+            roles.insert(
+                "alice".to_string(),
+                vec!["admin".to_string(), "user".to_string()],
+            );
+            roles.insert("bob".to_string(), vec!["user".to_string()]);
+
+            let auth_state = AuthState::new(&SecretString::from(TEST_SECRET.to_string()), roles);
+
+            let admin_only = Router::new()
+                .route("/admin", get(|| async { "admin ok" }))
+                .layer(middleware::from_fn(|ext, req, next| {
+                    auth::authorize("admin", ext, req, next)
+                }));
+
+            let app = Router::new()
+                .route(
+                    "/me",
+                    get(|Extension(user): Extension<AuthUser>| async move { user.user_id }),
+                )
+                .merge(admin_only)
+                .layer(middleware::from_fn_with_state(
+                    auth_state,
+                    auth::authenticate,
+                ));
+
+            TestServer::new(app)
+        }
+
+        /// Verifies a valid token authenticates and `AuthUser` is extractable.
+        #[test_log::test(tokio::test)]
+        async fn test_authenticate_success() {
+            let server = test_server();
+            let token = mint_token("alice", false);
+
+            let response = server
+                .get("/me")
+                .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
+                .await;
+
+            response.assert_status(StatusCode::OK);
+            response.assert_text("alice");
+        }
+
+        /// Verifies a missing `Authorization` header is rejected.
+        #[test_log::test(tokio::test)]
+        async fn test_authenticate_failure_missing_header() {
+            let response = test_server().get("/me").await;
+            response.assert_status(StatusCode::UNAUTHORIZED);
+        }
+
+        /// Verifies a header without a `Bearer ` prefix is rejected.
+        #[test_log::test(tokio::test)]
+        async fn test_authenticate_failure_malformed_header() {
+            let response = test_server()
+                .get("/me")
+                .add_header(axum::http::header::AUTHORIZATION, "not-a-bearer-token")
+                .await;
+
+            response.assert_status(StatusCode::UNAUTHORIZED);
+        }
+
+        /// Verifies a token signed with a different secret is rejected.
+        #[test_log::test(tokio::test)]
+        async fn test_authenticate_failure_invalid_signature() {
+            let claims = Claims {
+                sub: "alice".to_string(),
+                exp: usize::MAX,
+            };
+            let bad_token = encode(
+                &Header::default(),
+                &claims,
+                &EncodingKey::from_secret(b"wrong-secret"),
+            )
+            .unwrap();
+
+            let response = test_server()
+                .get("/me")
+                .add_header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {bad_token}"),
+                )
+                .await;
+
+            response.assert_status(StatusCode::UNAUTHORIZED);
+        }
+
+        /// Verifies an expired token is rejected.
+        #[test_log::test(tokio::test)]
+        async fn test_authenticate_failure_expired_token() {
+            let token = mint_token("alice", true);
+
+            let response = test_server()
+                .get("/me")
+                .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
+                .await;
+
+            response.assert_status(StatusCode::UNAUTHORIZED);
+        }
+
+        /// Verifies a user holding the required role is allowed through.
+        #[test_log::test(tokio::test)]
+        async fn test_authorize_success() {
+            let token = mint_token("alice", false); // alice: admin, user
+
+            let response = test_server()
+                .get("/admin")
+                .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
+                .await;
+
+            response.assert_status(StatusCode::OK);
+        }
+
+        /// Verifies an authenticated user lacking the required role is
+        /// forbidden.
+        #[test_log::test(tokio::test)]
+        async fn test_authorize_failure_forbidden() {
+            let token = mint_token("bob", false); // bob: user only
+
+            let response = test_server()
+                .get("/admin")
+                .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
+                .await;
+
+            response.assert_status(StatusCode::FORBIDDEN);
+        }
+
+        /// Verifies a valid token for a subject with no `RoleStore` entry
+        /// at all is treated as having zero roles, not an error.
+        #[test_log::test(tokio::test)]
+        async fn test_authorize_failure_unknown_user_has_no_roles() {
+            let token = mint_token("mallory", false); // not seeded in RoleStore
+
+            let response = test_server()
+                .get("/admin")
+                .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
+                .await;
+
+            response.assert_status(StatusCode::FORBIDDEN);
         }
     }
 }

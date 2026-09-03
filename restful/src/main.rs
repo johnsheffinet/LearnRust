@@ -217,8 +217,7 @@ pub mod config {
             let config = AppConfig::new().await?;
             let items = Arc::new(DashMap::new());
             let roles = Arc::new(DashMap::new());
-            let cache =
-                cache::CacheState::new(cache::DEFAULT_MAX_CAPACITY, cache::DEFAULT_TIME_TO_LIVE);
+            let cache = cache::CacheState::new();
             Ok(Self {
                 config,
                 items,
@@ -863,11 +862,11 @@ pub mod cache {
 
     /// Suggested `max_capacity` (entry count) for [`CacheState::new`], if
     /// the caller has no more specific requirement.
-    pub const DEFAULT_MAX_CAPACITY: u64 = 10_000;
+    const DEFAULT_MAX_CAPACITY: u64 = 10_000;
 
     /// Suggested `time_to_live` for [`CacheState::new`], if the caller has
     /// no more specific requirement.
-    pub const DEFAULT_TIME_TO_LIVE: Duration = Duration::from_secs(30);
+    const DEFAULT_TIME_TO_LIVE: Duration = Duration::from_secs(30);
 
     /// Response header set on every response returned by [`cache_response`],
     /// reporting whether it was served from the cache (`"HIT"`) or freshly
@@ -894,13 +893,13 @@ pub mod cache {
         ///
         /// ```ignore
         /// let state =
-        ///     cache::CacheState::new(cache::DEFAULT_MAX_CAPACITY, cache::DEFAULT_TIME_TO_LIVE);
+        ///     cache::CacheState::new();
         /// ```
-        pub fn new(max_capacity: u64, time_to_live: Duration) -> Self {
+        pub fn new() -> Self {
             Self {
                 cache: Cache::builder()
-                    .max_capacity(max_capacity)
-                    .time_to_live(time_to_live)
+                    .max_capacity(DEFAULT_MAX_CAPACITY)
+                    .time_to_live(DEFAULT_TIME_TO_LIVE)
                     .build(),
             }
         }
@@ -1672,10 +1671,7 @@ mod tests {
                 },
                 items: Arc::new(dashmap::DashMap::new()),
                 roles: Arc::new(dashmap::DashMap::new()),
-                cache: crate::cache::CacheState::new(
-                    crate::cache::DEFAULT_MAX_CAPACITY,
-                    crate::cache::DEFAULT_TIME_TO_LIVE,
-                ),
+                cache: crate::cache::CacheState::new(),
             }
         }
 
@@ -2423,8 +2419,7 @@ mod tests {
             let hits = Arc::new(AtomicUsize::new(0));
             let counter = hits.clone();
 
-            let cache_state =
-                CacheState::new(cache::DEFAULT_MAX_CAPACITY, cache::DEFAULT_TIME_TO_LIVE);
+            let cache_state = CacheState::new();
 
             let app = Router::new()
                 .route(
@@ -2450,17 +2445,16 @@ mod tests {
         /// underlying handler only actually runs once, and the `x-cache`
         /// header reports `MISS` then `HIT`.
         #[test_log::test(tokio::test)]
-        async fn test_cache_response_success_hit() {
+        async fn test_cache_response_success_get_methods() {
             let (server, hits) = test_server();
 
             let first = server.get("/counter").await;
+            let second = server.get("/counter").await;
+
             first.assert_status(StatusCode::OK);
             first.assert_header("x-cache", "MISS");
-
-            let second = server.get("/counter").await;
             second.assert_status(StatusCode::OK);
             second.assert_header("x-cache", "HIT");
-
             assert_eq!(first.text(), second.text());
             assert_eq!(hits.load(Ordering::SeqCst), 1);
         }
@@ -2468,7 +2462,7 @@ mod tests {
         /// Verifies non-`GET` requests always reach the handler, never the
         /// cache, and are left without an `x-cache` header.
         #[test_log::test(tokio::test)]
-        async fn test_cache_response_bypasses_non_get_methods() {
+        async fn test_cache_response_success_non_get_methods() {
             let (server, _hits) = test_server();
 
             let first = server.post("/uncached").await;
@@ -2477,13 +2471,14 @@ mod tests {
             first.assert_status(StatusCode::OK);
             second.assert_status(StatusCode::OK);
             assert!(!first.headers().contains_key("x-cache"));
+            assert_eq!(hits.load(Ordering::SeqCst), 0);
         }
 
         /// Verifies distinct query strings on the same path are cached
         /// under distinct keys (i.e. the query string is part of the key,
         /// not just the path).
         #[test_log::test(tokio::test)]
-        async fn test_cache_response_success_distinct_query_strings() {
+        async fn test_cache_response_success_distinct_query_params() {
             let (server, hits) = test_server();
 
             server
@@ -2507,17 +2502,16 @@ mod tests {
         /// Verifies query parameters in a different order are treated as
         /// the *same* cache key (parameters are sorted before keying).
         #[test_log::test(tokio::test)]
-        async fn test_cache_response_success_query_params_sorted() {
+        async fn test_cache_response_success_indistinct_query_params() {
             let (server, hits) = test_server();
 
             let first = server.get("/counter?a=1&b=2").await;
+            let second = server.get("/counter?b=2&a=1").await;
+
             first.assert_status(StatusCode::OK);
             first.assert_header("x-cache", "MISS");
-
-            let second = server.get("/counter?b=2&a=1").await;
             second.assert_status(StatusCode::OK);
             second.assert_header("x-cache", "HIT");
-
             assert_eq!(first.text(), second.text());
             assert_eq!(hits.load(Ordering::SeqCst), 1);
         }

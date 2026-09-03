@@ -860,14 +860,6 @@ pub mod cache {
     use moka::future::Cache;
     use std::time::Duration;
 
-    /// Suggested `max_capacity` (entry count) for [`CacheState::new`], if
-    /// the caller has no more specific requirement.
-    const DEFAULT_MAX_CAPACITY: u64 = 10_000;
-
-    /// Suggested `time_to_live` for [`CacheState::new`], if the caller has
-    /// no more specific requirement.
-    const DEFAULT_TIME_TO_LIVE: Duration = Duration::from_secs(30);
-
     /// Response header set on every response returned by [`cache_response`],
     /// reporting whether it was served from the cache (`"HIT"`) or freshly
     /// computed (`"MISS"`).
@@ -892,14 +884,13 @@ pub mod cache {
         /// # Examples
         ///
         /// ```ignore
-        /// let state =
-        ///     cache::CacheState::new();
+        /// let state = cache::CacheState::new();
         /// ```
         pub fn new() -> Self {
             Self {
                 cache: Cache::builder()
-                    .max_capacity(DEFAULT_MAX_CAPACITY)
-                    .time_to_live(DEFAULT_TIME_TO_LIVE)
+                    .max_capacity(10_000)
+                    .time_to_live(Duration::from_secs(30))
                     .build(),
             }
         }
@@ -2463,7 +2454,7 @@ mod tests {
         /// cache, and are left without an `x-cache` header.
         #[test_log::test(tokio::test)]
         async fn test_cache_response_success_non_get_methods() {
-            let (server, _hits) = test_server();
+            let (server, hits) = test_server();
 
             let first = server.post("/uncached").await;
             let second = server.post("/uncached").await;

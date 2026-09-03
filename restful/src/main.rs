@@ -270,7 +270,10 @@ pub mod config {
         let items_read_routes = Router::new()
             .route("/items", get(items::select))
             .route("/items/{id}", get(items::get))
-            .layer(middleware::from_fn(cache::cache_response));
+            .layer(middleware::from_fn_with_state(
+                state.cache.clone(),
+                cache::cache_response,
+            ));
 
         let items_write_routes = Router::new()
             .route("/items", post(items::create))
@@ -831,11 +834,9 @@ pub mod items {
 ///
 /// # Examples
 ///
-/// Applying it to a sub-router of only the routes that should be cached
-/// (see [`AppState`](crate::config::AppState), which derives
-/// [`FromRef`](axum::extract::FromRef) so [`CacheState`] is available to
-/// [`State`] extraction anywhere in the tree once the router's state is
-/// fixed to `AppState`):
+/// Applying it to a sub-router of only the routes that should be cached,
+/// the same way [`auth::authenticate`](crate::auth::authenticate) is
+/// layered with its own state:
 ///
 /// ```ignore
 /// use axum::{middleware, routing::get, Router};
@@ -843,7 +844,10 @@ pub mod items {
 /// let items_read_routes = Router::new()
 ///     .route("/items", get(items::select))
 ///     .route("/items/{id}", get(items::get))
-///     .layer(middleware::from_fn(cache::cache_response));
+///     .layer(middleware::from_fn_with_state(
+///         cache_state.clone(),
+///         cache::cache_response,
+///     ));
 /// ```
 pub mod cache {
     use axum::{
@@ -875,7 +879,7 @@ pub mod cache {
     ///
     /// Cloning is cheap: the underlying [`moka::future::Cache`] is itself
     /// reference-counted and internally sharded/concurrent.
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct CacheState {
         /// Cached responses, keyed by path + sorted query parameters (see
         /// [`cache_key`]).
@@ -906,7 +910,7 @@ pub mod cache {
     /// in [`CacheState`] instead of the `Response` itself, since a
     /// `Response`'s body is a one-shot stream and can't be cloned or
     /// stored directly.
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     struct CachedResponse {
         /// The original response's status code.
         status: StatusCode,
@@ -929,7 +933,7 @@ pub mod cache {
         let mut params: Vec<&str> = query.split('&').collect();
         params.sort_unstable();
 
-        format!("{}?{}", uri.path(), params.join("&"))
+        format!("{}?{}", uri.path(), params.join("&")).to_string()
     }
 
     /// Caches `GET` responses by [`cache_key`] and serves repeat requests
@@ -949,7 +953,9 @@ pub mod cache {
     /// after buffering it).
     ///
     /// Intended to be layered with
-    /// [`middleware::from_fn`](axum::middleware::from_fn) on any
+    /// [`middleware::from_fn_with_state`](axum::middleware::from_fn_with_state)
+    /// (not plain `from_fn`, which fixes its state to `()` and can't
+    /// satisfy this handler's `State<CacheState>` extractor) on any
     /// (sub-)router whose `GET` routes are safe to cache — see the
     /// [module-level example](self#examples).
     ///
@@ -1010,7 +1016,6 @@ pub mod cache {
         response
     }
 }
-
 
 /// JWT authentication and role-based authorization for this service,
 /// implemented as ordinary `axum::middleware::from_fn`/`from_fn_with_state`
@@ -2401,7 +2406,6 @@ mod tests {
         use crate::cache::{self, CacheState};
         use axum::{
             Router,
-            extract::State,
             http::StatusCode,
             middleware,
             routing::{get, post},
@@ -2419,6 +2423,9 @@ mod tests {
             let hits = Arc::new(AtomicUsize::new(0));
             let counter = hits.clone();
 
+            let cache_state =
+                CacheState::new(cache::DEFAULT_MAX_CAPACITY, cache::DEFAULT_TIME_TO_LIVE);
+
             let app = Router::new()
                 .route(
                     "/counter",
@@ -2431,10 +2438,9 @@ mod tests {
                     }),
                 )
                 .route("/uncached", post(|| async { "response" }))
-                .layer(middleware::from_fn(cache::cache_response))
-                .with_state(CacheState::new(
-                    cache::DEFAULT_MAX_CAPACITY,
-                    cache::DEFAULT_TIME_TO_LIVE,
+                .layer(middleware::from_fn_with_state(
+                    cache_state,
+                    cache::cache_response,
                 ));
 
             (TestServer::new(app), hits)

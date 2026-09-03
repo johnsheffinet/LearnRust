@@ -17,6 +17,7 @@ dashmap = "6.2.1" # cargo add dashmap
 figment = { version = "0.10.19", features = ["env", "test"] } # cargo add figment --features env,test
 jsonwebtoken = { version = "10.2.0", features = ["aws_lc_rs"] } # cargo add jsonwebtoken --features aws_lc_rs
 http-body-util = "0.1.3" # cargo add http-body-util
+moka = { version = "0.12.16", features = ["future"] } # cargo moka --features future
 rustls-pki-types = "1.14.0" # cargo add rustls-pki-types
 secrecy = "0.10" # cargo add secrecy
 serde = { version = "1.0.228", features = ["derive"] } # cargo add serde --features derive

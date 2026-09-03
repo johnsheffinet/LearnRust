@@ -35,14 +35,14 @@ async fn main() -> config::AppResult<()> {
 /// Application configuration, shared state, and top-level server orchestration.
 pub mod config {
     use crate::{
-        auth, handlers,
+        auth, cache, handlers,
         items::{self, Item},
     };
     use axum::{
         Router,
         extract::FromRef,
         middleware,
-        routing::{delete, get},
+        routing::{delete, get, post, put},
     };
     use axum_server::{Handle, tls_rustls::RustlsConfig};
     use dashmap::DashMap;
@@ -200,6 +200,9 @@ pub mod config {
         /// In-memory RBAC store: user id -> roles, read by
         /// [`auth::authenticate`].
         pub roles: auth::RoleStore,
+        /// Response cache read/written by [`cache::cache_response`],
+        /// applied to the read-only item routes in [`https_router`].
+        pub cache: cache::CacheState,
     }
 
     impl AppState {
@@ -214,10 +217,13 @@ pub mod config {
             let config = AppConfig::new().await?;
             let items = Arc::new(DashMap::new());
             let roles = Arc::new(DashMap::new());
+            let cache =
+                cache::CacheState::new(cache::DEFAULT_MAX_CAPACITY, cache::DEFAULT_TIME_TO_LIVE);
             Ok(Self {
                 config,
                 items,
                 roles,
+                cache,
             })
         }
     }
@@ -244,7 +250,10 @@ pub mod config {
     ///
     /// The item routes are authenticated via [`auth::authenticate`]; `DELETE
     /// /items/{id}` additionally requires the `"admin"` role via
-    /// [`auth::authorize`]. `/healthz` and the fallback are unauthenticated.
+    /// [`auth::authorize`]. `GET /items` and `GET /items/{id}` are served
+    /// through [`cache::cache_response`], so a repeat read is answered
+    /// straight from the cache instead of the store; `POST`/`PUT`/`DELETE`
+    /// are never cached. `/healthz` and the fallback are unauthenticated.
     ///
     /// Requests that don't match any known route fall through to
     /// [`handlers::report_route_invalid`].
@@ -255,9 +264,24 @@ pub mod config {
                 auth::authorize("admin", ext, req, next)
             }));
 
+        // Cache is only layered over the read-only GET routes, so writes on
+        // "/items" and "/items/{id}" (registered separately below) are
+        // never cached.
+        let items_read_routes = Router::new()
+            .route("/items", get(items::select))
+            .route("/items/{id}", get(items::get))
+            .layer(middleware::from_fn_with_state(
+                state.cache.clone(),
+                cache::cache_response,
+            ));
+
+        let items_write_routes = Router::new()
+            .route("/items", post(items::create))
+            .route("/items/{id}", put(items::update));
+
         let items_routes = Router::new()
-            .route("/items", get(items::select).post(items::create))
-            .route("/items/{id}", get(items::get).put(items::update))
+            .merge(items_read_routes)
+            .merge(items_write_routes)
             .merge(admin_only)
             .layer(middleware::from_fn_with_state(
                 auth::AuthState::new(&state.config.jwt_secret, state.roles.clone()),
@@ -787,6 +811,209 @@ pub mod items {
         #[status_code("404")]
         #[code("NOT_FOUND")]
         NotFound(String),
+    }
+}
+
+/// A response cache for idempotent, read-only routes, implemented as an
+/// ordinary `axum::middleware::from_fn` handler backed by a [`moka`] cache.
+///
+/// [`cache_response`] is the middleware itself: layered onto a router (or
+/// sub-router), it caches the full [`Response`] for every `GET` request by
+/// path + sorted query parameters, and serves that cached response directly
+/// on a repeat request instead of re-invoking the handler. Non-`GET`
+/// requests (which this service's API only uses for mutations) always fall
+/// straight through to the handler and are never cached, so a stale write
+/// is never possible. Every response — hit or miss — carries an `x-cache`
+/// header set to `"HIT"` or `"MISS"`, so callers can tell which happened.
+///
+/// The cache itself lives in [`CacheState`], which — like
+/// [`AppStore`](crate::config::AppStore) and
+/// [`RoleStore`](crate::auth::RoleStore) — is internally reference-counted
+/// and internally concurrent, so cloning it is cheap and requires no
+/// `Mutex`/`RwLock` of its own.
+///
+/// # Examples
+///
+/// Applying it to a sub-router of only the routes that should be cached,
+/// the same way [`auth::authenticate`](crate::auth::authenticate) is
+/// layered with its own state:
+///
+/// ```ignore
+/// use axum::{middleware, routing::get, Router};
+///
+/// let items_read_routes = Router::new()
+///     .route("/items", get(items::select))
+///     .route("/items/{id}", get(items::get))
+///     .layer(middleware::from_fn_with_state(
+///         cache_state.clone(),
+///         cache::cache_response,
+///     ));
+/// ```
+pub mod cache {
+    use axum::{
+        body::{Body, Bytes},
+        extract::{Request, State},
+        http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri},
+        middleware::Next,
+        response::Response,
+    };
+    use http_body_util::BodyExt;
+    use moka::future::Cache;
+    use std::time::Duration;
+
+    /// Suggested `max_capacity` (entry count) for [`CacheState::new`], if
+    /// the caller has no more specific requirement.
+    pub const DEFAULT_MAX_CAPACITY: u64 = 10_000;
+
+    /// Suggested `time_to_live` for [`CacheState::new`], if the caller has
+    /// no more specific requirement.
+    pub const DEFAULT_TIME_TO_LIVE: Duration = Duration::from_secs(30);
+
+    /// Response header set on every response returned by [`cache_response`],
+    /// reporting whether it was served from the cache (`"HIT"`) or freshly
+    /// computed (`"MISS"`).
+    const CACHE_STATUS_HEADER: HeaderName = HeaderName::from_static("x-cache");
+
+    /// Shared response cache state, cloned into every request that passes
+    /// through [`cache_response`].
+    ///
+    /// Cloning is cheap: the underlying [`moka::future::Cache`] is itself
+    /// reference-counted and internally sharded/concurrent.
+    #[derive(Clone, Debug)]
+    pub struct CacheState {
+        /// Cached responses, keyed by path + sorted query parameters (see
+        /// [`cache_key`]).
+        cache: Cache<String, CachedResponse>,
+    }
+
+    impl CacheState {
+        /// Builds an empty response cache with the given `max_capacity`
+        /// (entry count) and `time_to_live`.
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// let state =
+        ///     cache::CacheState::new(cache::DEFAULT_MAX_CAPACITY, cache::DEFAULT_TIME_TO_LIVE);
+        /// ```
+        pub fn new(max_capacity: u64, time_to_live: Duration) -> Self {
+            Self {
+                cache: Cache::builder()
+                    .max_capacity(max_capacity)
+                    .time_to_live(time_to_live)
+                    .build(),
+            }
+        }
+    }
+
+    /// The parts of a [`Response`] needed to reconstruct it later; stored
+    /// in [`CacheState`] instead of the `Response` itself, since a
+    /// `Response`'s body is a one-shot stream and can't be cloned or
+    /// stored directly.
+    #[derive(Clone, Debug)]
+    struct CachedResponse {
+        /// The original response's status code.
+        status: StatusCode,
+        /// The original response's headers, replayed as-is on a hit (the
+        /// `x-cache` header is overwritten separately on every reply).
+        headers: HeaderMap,
+        /// The original response's body, fully buffered.
+        body: Bytes,
+    }
+
+    /// Builds the cache key for `uri`: its path, plus its query parameters
+    /// (if any) sorted so that two requests differing only in parameter
+    /// order land on the same cache entry. The method is not part of the
+    /// key, since [`cache_response`] only ever caches `GET` requests.
+    fn cache_key(uri: &Uri) -> String {
+        let Some(query) = uri.query() else {
+            return uri.path().to_string();
+        };
+
+        let mut params: Vec<&str> = query.split('&').collect();
+        params.sort_unstable();
+
+        format!("{}?{}", uri.path(), params.join("&")).to_string()
+    }
+
+    /// Caches `GET` responses by [`cache_key`] and serves repeat requests
+    /// straight from the cache, bypassing `next` (and therefore the
+    /// handler and everything after this middleware) entirely on a hit.
+    /// Every response leaving this middleware carries an `x-cache: HIT` or
+    /// `x-cache: MISS` header reporting what happened.
+    ///
+    /// Any request whose method is not `GET` is passed straight to `next`
+    /// without consulting or populating the cache, since this service only
+    /// uses other methods for mutations that must never be served stale.
+    ///
+    /// On a `GET` miss, the response returned by `next` is buffered in
+    /// full so it can be stored in the cache, then re-emitted as a fresh
+    /// `Response` built from those same buffered bytes (a `Response`'s
+    /// body can't be read twice, so the original can't be reused directly
+    /// after buffering it).
+    ///
+    /// Intended to be layered with
+    /// [`middleware::from_fn_with_state`](axum::middleware::from_fn_with_state)
+    /// (not plain `from_fn`, which fixes its state to `()` and can't
+    /// satisfy this handler's `State<CacheState>` extractor) on any
+    /// (sub-)router whose `GET` routes are safe to cache — see the
+    /// [module-level example](self#examples).
+    ///
+    /// # Panics
+    ///
+    /// Does not panic: rebuilding a [`Response`] from a previously valid
+    /// status/header/body triple cannot fail.
+    pub async fn cache_response(
+        State(state): State<CacheState>,
+        req: Request,
+        next: Next,
+    ) -> Response {
+        if req.method() != Method::GET {
+            return next.run(req).await;
+        }
+
+        let key = cache_key(req.uri());
+
+        if let Some(cached) = state.cache.get(&key).await {
+            let mut response = Response::builder()
+                .status(cached.status)
+                .body(Body::from(cached.body.clone()))
+                .expect("rebuilding a response from previously valid parts cannot fail");
+            *response.headers_mut() = cached.headers.clone();
+            response
+                .headers_mut()
+                .insert(CACHE_STATUS_HEADER, HeaderValue::from_static("HIT"));
+
+            return response;
+        }
+
+        let response = next.run(req).await;
+        let (parts, body) = response.into_parts();
+
+        // Buffer the body so it can both be cached and still returned.
+        let bytes = match body.collect().await {
+            Ok(collected) => collected.to_bytes(),
+            Err(_) => Bytes::new(),
+        };
+
+        state
+            .cache
+            .insert(
+                key,
+                CachedResponse {
+                    status: parts.status,
+                    headers: parts.headers.clone(),
+                    body: bytes.clone(),
+                },
+            )
+            .await;
+
+        let mut response = Response::from_parts(parts, Body::from(bytes));
+        response
+            .headers_mut()
+            .insert(CACHE_STATUS_HEADER, HeaderValue::from_static("MISS"));
+
+        response
     }
 }
 
@@ -1445,6 +1672,10 @@ mod tests {
                 },
                 items: Arc::new(dashmap::DashMap::new()),
                 roles: Arc::new(dashmap::DashMap::new()),
+                cache: crate::cache::CacheState::new(
+                    crate::cache::DEFAULT_MAX_CAPACITY,
+                    crate::cache::DEFAULT_TIME_TO_LIVE,
+                ),
             }
         }
 
@@ -1565,7 +1796,8 @@ mod tests {
         }
     }
     /// Tests for the item API in [`crate::items`], including the
-    /// [`crate::auth`] middleware layered onto it.
+    /// [`crate::auth`] middleware and [`crate::cache`] middleware layered
+    /// onto it.
     mod items {
         use crate::{
             auth::Claims,
@@ -1904,6 +2136,85 @@ mod tests {
 
             response.assert_status(StatusCode::FORBIDDEN);
         }
+
+        /// Verifies that a repeated `GET /items/{id}` is served from the
+        /// [`crate::cache`] layer: after the first request populates the
+        /// cache, a direct mutation of the underlying store (bypassing the
+        /// API entirely) is not reflected in the second response.
+        #[test_log::test(tokio::test)]
+        async fn test_get_success_served_from_cache() {
+            let state = AppState::new().await.unwrap();
+            let id = Uuid::nil();
+
+            state.items.insert(
+                id,
+                Item {
+                    name: "test".to_string(),
+                    desc: "test".to_string(),
+                },
+            );
+            state
+                .roles
+                .insert("plain-user".to_string(), vec!["user".to_string()]);
+
+            let user_token = mint_token(&state, "plain-user");
+            let items = state.items.clone();
+
+            let server = TestServer::new(config::https_router(state));
+            let (name, value) = bearer(&user_token);
+
+            let first = server
+                .get(&format!("/items/{id}"))
+                .add_header(name.clone(), value.clone())
+                .await;
+            first.assert_status(StatusCode::OK);
+
+            // Mutate the store directly, bypassing PUT, so a fresh (non-cached)
+            // response would differ from what was already returned above.
+            items.insert(
+                id,
+                Item {
+                    name: "changed".to_string(),
+                    desc: "changed".to_string(),
+                },
+            );
+
+            let second = server
+                .get(&format!("/items/{id}"))
+                .add_header(name, value)
+                .await;
+            second.assert_status(StatusCode::OK);
+
+            assert_eq!(first.text(), second.text());
+        }
+
+        /// Verifies that `POST /items` is never served from the cache:
+        /// two identical creation requests each insert a distinct item.
+        #[test_log::test(tokio::test)]
+        async fn test_create_success_bypasses_cache() {
+            let (server, _admin_token, user_token) = test_server(config::https_router).await;
+            let (name, value) = bearer(&user_token);
+            let payload = json!({"name":"dup", "desc":"dup"});
+
+            let first = server
+                .post("/items")
+                .add_header(name.clone(), value.clone())
+                .json(&payload)
+                .await;
+            first.assert_status(StatusCode::CREATED);
+
+            let second = server
+                .post("/items")
+                .add_header(name, value)
+                .json(&payload)
+                .await;
+            second.assert_status(StatusCode::CREATED);
+
+            let first_body: Value = first.json();
+            let second_body: Value = second.json();
+
+            assert_ne!(first_body["id"], second_body["id"]);
+        }
     }
     /// Tests for [`crate::auth`], exercised against a minimal standalone
     /// router rather than the full [`crate::config::https_router`].
@@ -2087,6 +2398,128 @@ mod tests {
                 .await;
 
             response.assert_status(StatusCode::FORBIDDEN);
+        }
+    }
+    /// Tests for [`crate::cache`], exercised against a minimal standalone
+    /// router rather than the full [`crate::config::https_router`].
+    mod cache {
+        use crate::cache::{self, CacheState};
+        use axum::{
+            Router,
+            http::StatusCode,
+            middleware,
+            routing::{get, post},
+        };
+        use axum_test::TestServer;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        /// A minimal router with one GET route (counts each time it's
+        /// actually invoked) wrapped in [`cache::cache_response`], and one
+        /// POST route left unwrapped for comparison.
+        fn test_server() -> (TestServer, Arc<AtomicUsize>) {
+            let hits = Arc::new(AtomicUsize::new(0));
+            let counter = hits.clone();
+
+            let cache_state =
+                CacheState::new(cache::DEFAULT_MAX_CAPACITY, cache::DEFAULT_TIME_TO_LIVE);
+
+            let app = Router::new()
+                .route(
+                    "/counter",
+                    get(move || {
+                        let counter = counter.clone();
+                        async move {
+                            counter.fetch_add(1, Ordering::SeqCst);
+                            "response"
+                        }
+                    }),
+                )
+                .route("/uncached", post(|| async { "response" }))
+                .layer(middleware::from_fn_with_state(
+                    cache_state,
+                    cache::cache_response,
+                ));
+
+            (TestServer::new(app), hits)
+        }
+
+        /// Verifies a second identical `GET` is served from the cache: the
+        /// underlying handler only actually runs once, and the `x-cache`
+        /// header reports `MISS` then `HIT`.
+        #[test_log::test(tokio::test)]
+        async fn test_cache_response_success_hit() {
+            let (server, hits) = test_server();
+
+            let first = server.get("/counter").await;
+            first.assert_status(StatusCode::OK);
+            first.assert_header("x-cache", "MISS");
+
+            let second = server.get("/counter").await;
+            second.assert_status(StatusCode::OK);
+            second.assert_header("x-cache", "HIT");
+
+            assert_eq!(first.text(), second.text());
+            assert_eq!(hits.load(Ordering::SeqCst), 1);
+        }
+
+        /// Verifies non-`GET` requests always reach the handler, never the
+        /// cache, and are left without an `x-cache` header.
+        #[test_log::test(tokio::test)]
+        async fn test_cache_response_bypasses_non_get_methods() {
+            let (server, _hits) = test_server();
+
+            let first = server.post("/uncached").await;
+            let second = server.post("/uncached").await;
+
+            first.assert_status(StatusCode::OK);
+            second.assert_status(StatusCode::OK);
+            assert!(!first.headers().contains_key("x-cache"));
+        }
+
+        /// Verifies distinct query strings on the same path are cached
+        /// under distinct keys (i.e. the query string is part of the key,
+        /// not just the path).
+        #[test_log::test(tokio::test)]
+        async fn test_cache_response_success_distinct_query_strings() {
+            let (server, hits) = test_server();
+
+            server
+                .get("/counter?a=1")
+                .await
+                .assert_status(StatusCode::OK);
+            server
+                .get("/counter?a=2")
+                .await
+                .assert_status(StatusCode::OK);
+            server
+                .get("/counter?a=1")
+                .await
+                .assert_status(StatusCode::OK);
+
+            // Two distinct query strings -> two underlying handler calls;
+            // the repeat of "?a=1" is served from the cache.
+            assert_eq!(hits.load(Ordering::SeqCst), 2);
+        }
+
+        /// Verifies query parameters in a different order are treated as
+        /// the *same* cache key (parameters are sorted before keying).
+        #[test_log::test(tokio::test)]
+        async fn test_cache_response_success_query_params_sorted() {
+            let (server, hits) = test_server();
+
+            let first = server.get("/counter?a=1&b=2").await;
+            first.assert_status(StatusCode::OK);
+            first.assert_header("x-cache", "MISS");
+
+            let second = server.get("/counter?b=2&a=1").await;
+            second.assert_status(StatusCode::OK);
+            second.assert_header("x-cache", "HIT");
+
+            assert_eq!(first.text(), second.text());
+            assert_eq!(hits.load(Ordering::SeqCst), 1);
         }
     }
 }

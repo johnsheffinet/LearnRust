@@ -877,6 +877,12 @@ pub mod cache {
         cache: Cache<String, CachedResponse>,
     }
 
+    impl Default for CacheState {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl CacheState {
         /// Builds an empty response cache with the given `max_capacity`
         /// (entry count) and `time_to_live`.

@@ -1204,7 +1204,9 @@ pub mod cache {
                     .build(),
             }
         }
+    }
 
+    impl Default for CacheState {
         /// Builds an empty response cache using this service's defaults:
         /// [`DEFAULT_MAX_CAPACITY`] and [`DEFAULT_TIME_TO_LIVE`].
         ///
@@ -1213,7 +1215,7 @@ pub mod cache {
         /// ```ignore
         /// let state = cache::CacheState::default();
         /// ```
-        pub fn default() -> Self {
+        fn default() -> Self {
             Self::new(DEFAULT_MAX_CAPACITY, DEFAULT_TIME_TO_LIVE)
         }
     }
@@ -2883,6 +2885,7 @@ mod tests {
                 .await;
 
             response.assert_status_ok();
+
             response.assert_header("access-control-allow-origin", "https://yourapp.example.com");
         }
 
@@ -2891,21 +2894,29 @@ mod tests {
         /// the server, is what enforces the block based on its absence.
         #[test_log::test(tokio::test)]
         async fn test_cors_layer_failure_disallowed_origin() {
-            let server = test_server();
+            use axum::{
+                Router,
+                http::{Request, StatusCode, header::ORIGIN},
+                routing::get,
+            };
+            use tower::ServiceExt;
 
-            let response = server
-                .get("/ping")
-                .add_header(axum::http::header::ORIGIN, "https://evil.example.com")
-                .await;
+            let app = Router::new()
+                .route("/ping", get(|| async { "pong" }))
+                .layer(cors::cors_layer());
 
-            assert!(
-                !response
-                    .headers()
-                    .contains_key("access-control-allow-origin")
-            );
+            let request = Request::builder()
+                .uri("/ping")
+                .header(ORIGIN, "https://evil.example.com")
+                .body(axum::body::Body::empty())
+                .unwrap();
+
+            let response = app.oneshot(request).await.unwrap();
+
+            assert_eq!(response.status(), StatusCode::OK);
+            assert!(response.headers().get(ORIGIN).is_none());
         }
     }
-
     /// Tests for [`crate::csrf`].
     mod csrf {
         use crate::csrf;

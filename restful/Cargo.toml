@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 ammonia = "4.1.2" # cargo add ammonia
-axum = { version = "0.8.8", features = ["macros"] } # cargo add axum --features macros
+axum = { version = "0.8.9", features = ["macros"] } # cargo add axum --features macros
 axum_csrf = "0.11.0" # cargo add axum-csrf
 axum-error-handler = "0.2.1" # cargo add axum-error-handler
 axum-governor = "1.0.3" # cargo add axum-governor

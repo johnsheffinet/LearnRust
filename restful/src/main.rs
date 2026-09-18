@@ -5,6 +5,12 @@
 //! - An HTTPS (TLS) server that exposes a small CRUD API for [`items::Item`]s
 //!   plus a liveliness endpoint.
 //!
+//! The HTTPS router applies every layer discussed in this service's build-
+//! out: CORS ([`cors`]), rate limiting ([`governor`]), hardened response
+//! headers ([`xss`]), request/response tracing ([`trace`]), response
+//! caching ([`cache`]), CSRF protection ([`csrf`]), and JWT
+//! authentication/authorization ([`auth`]).
+//!
 //! Configuration is read from environment variables (see [`config::AppConfig`])
 //! and the process shuts down gracefully on `Ctrl+C`.
 
@@ -18,8 +24,9 @@
 /// # Errors
 ///
 /// Returns an [`config::AppError`] if application state fails to initialize
-/// (e.g. missing environment variables, invalid TLS certificate/key files)
-/// or if the process fails to install the `Ctrl+C` signal handler.
+/// (e.g. missing environment variables, invalid TLS certificate/key files,
+/// invalid rate-limit configuration) or if the process fails to install the
+/// `Ctrl+C` signal handler.
 #[tokio::main]
 async fn main() -> config::AppResult<()> {
     tracing_subscriber::fmt()
@@ -32,11 +39,260 @@ async fn main() -> config::AppResult<()> {
     config::run_app(config::AppState::new().await?, tokio::signal::ctrl_c()).await
 }
 
+/// Adds hardened response headers (XSS/clickjacking/MIME-sniffing
+/// mitigation) to every response.
+pub mod xss {
+    use axum::{extract::Request, http::HeaderValue, middleware::Next, response::Response};
+
+    /// Adds headers that stop a browser from rendering or executing this
+    /// API's JSON responses as HTML/script, even if a client is tricked
+    /// into navigating to one directly.
+    pub async fn xss_layer(req: Request, next: Next) -> Response {
+        let mut res = next.run(req).await;
+        let headers = res.headers_mut();
+
+        headers.insert(
+            "x-content-type-options",
+            HeaderValue::from_static("nosniff"),
+        );
+        headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+        headers.insert(
+            "content-security-policy",
+            HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
+        );
+        headers.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
+
+        res
+    }
+}
+
+/// CORS policy for this service.
+pub mod cors {
+    use axum::http::{HeaderValue, Method, header};
+    use tower_http::cors::CorsLayer;
+
+    /// Allows the configured frontend origin to call this API, restricted
+    /// to the methods/headers this service actually uses. No credentials
+    /// mode: auth is via `Authorization: Bearer`, not cookies.
+    pub fn cors_layer() -> CorsLayer {
+        CorsLayer::new()
+            .allow_origin(
+                "https://yourapp.example.com"
+                    .parse::<HeaderValue>()
+                    .expect("valid static origin"),
+            )
+            .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+            .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+            .allow_credentials(false)
+    }
+}
+
+/// Double-submit-cookie CSRF check.
+///
+/// Only meaningful if/when this service adopts cookie-based sessions —
+/// with the current Bearer-JWT auth model, browsers never attach
+/// `Authorization` automatically, so CSRF isn't exploitable yet. Kept as
+/// defense-in-depth and scoped to the write routes (see
+/// [`config::https_router`]).
+pub mod csrf {
+    use axum::{
+        extract::Request,
+        http::{HeaderMap, StatusCode},
+        middleware::Next,
+        response::{IntoResponse, Response},
+    };
+
+    const CSRF_HEADER: &str = "x-csrf-token";
+    const CSRF_COOKIE: &str = "csrf_token";
+
+    /// Rejects the request unless a header value matches a cookie value
+    /// the server previously issued.
+    pub async fn csrf_layer(headers: HeaderMap, req: Request, next: Next) -> Response {
+        let header_token = headers.get(CSRF_HEADER).and_then(|v| v.to_str().ok());
+
+        let cookie_token = headers
+            .get(axum::http::header::COOKIE)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|cookies| {
+                cookies
+                    .split(';')
+                    .find_map(|c| c.trim().strip_prefix(&format!("{CSRF_COOKIE}=")))
+            });
+
+        match (header_token, cookie_token) {
+            (Some(h), Some(c)) if h == c => next.run(req).await,
+            _ => (StatusCode::FORBIDDEN, "CSRF token missing or mismatched").into_response(),
+        }
+    }
+}
+
+/// Per-peer-IP rate limiting via `governor`/`tower_governor` (GCRA
+/// algorithm).
+pub mod governor {
+    use governor::middleware::NoOpMiddleware;
+    use std::{sync::Arc, time::Duration};
+    use tower_governor::{
+        governor::{GovernorConfig, GovernorConfigBuilder},
+        key_extractor::PeerIpKeyExtractor,
+    };
+
+    /// This service's rate-limit config type: GCRA, keyed by peer IP.
+    pub type GovConfig = GovernorConfig<PeerIpKeyExtractor, NoOpMiddleware>;
+
+    /// Convenience alias for results returned by items in [`governor`](self).
+    pub type AppResult<T> = Result<T, AppError>;
+
+    /// Errors that can occur while building rate-limit state.
+    #[derive(Debug, thiserror::Error)]
+    pub enum AppError {
+        /// The `per_second`/`burst_size` values were invalid (e.g. zero).
+        #[error("Failed to build governor configuration!")]
+        FailedConfigGov,
+    }
+
+    /// Builds the rate-limit configuration for the given `per_second`
+    /// steady-state rate and `burst_size` allowance.
+    pub fn new(per_second: u64, burst_size: u32) -> AppResult<Arc<GovConfig>> {
+        GovernorConfigBuilder::default()
+            .key_extractor(PeerIpKeyExtractor)
+            .per_second(per_second)
+            .burst_size(burst_size)
+            .finish()
+            .map(Arc::new)
+            .ok_or(AppError::FailedConfigGov)
+    }
+
+    /// Builds the rate-limit configuration with this service's defaults:
+    /// 2 requests/sec/IP steady state, with bursts up to 20 before
+    /// throttling kicks in.
+    pub fn default() -> AppResult<Arc<GovConfig>> {
+        new(2, 20)
+    }
+
+    /// Spawns a background task that purges stale rate-limit buckets from
+    /// `config`'s limiter every 60 seconds, so memory doesn't grow
+    /// unbounded as distinct peer IPs come and go.
+    pub fn spawn_task(config: Arc<GovConfig>) {
+        let limiter = config.limiter().clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                limiter.retain_recent();
+            }
+        });
+    }
+}
+
+/// Request/response tracing — the span-building hook used by
+/// `tower_http::trace::TraceLayer`, plus a middleware that logs each
+/// request/response's status, headers, and body.
+///
+/// Headers/body are logged via plain `tracing::info!` fields, formatted
+/// through `tracing_subscriber`'s default JSON layer. That formatter
+/// re-escapes any quotes inside the nested header/body JSON text (turning
+/// `"` into `\"` in the log output) — accepted here as a simplification
+/// over maintaining a custom unescaped-JSON `Layer`; the escaped output is
+/// still valid JSON and every standard JSON log viewer parses it fine.
+pub mod trace {
+    use axum::{
+        body::{Body, Bytes},
+        extract::Request,
+        http::HeaderMap,
+        middleware::Next,
+        response::Response,
+    };
+    use http_body_util::BodyExt;
+    use serde_json::Value;
+
+    /// Headers whose values are replaced with `"[REDACTED]"` before being
+    /// logged, since they carry credentials that must never appear in
+    /// logs.
+    const REDACTED: &[&str] = &["authorization", "cookie"];
+
+    fn headers_json(headers: &HeaderMap) -> Value {
+        headers
+            .iter()
+            .map(|(name, value)| {
+                let v = if REDACTED.contains(&name.as_str().to_ascii_lowercase().as_str()) {
+                    "[REDACTED]".to_string()
+                } else {
+                    value.to_str().unwrap_or("[non-utf8]").to_string()
+                };
+                (name.to_string(), v)
+            })
+            .collect()
+    }
+
+    fn body_json(bytes: &Bytes) -> Value {
+        serde_json::from_slice(bytes)
+            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(bytes).to_string()))
+    }
+
+    /// Builds the span `TraceLayer::make_span_with` opens for each
+    /// request, carrying a per-request id that every log line inside it —
+    /// including `trace_body_layer`'s — automatically inherits.
+    pub fn make_span(req: &axum::http::Request<axum::body::Body>) -> tracing::Span {
+        let request_id = uuid::Uuid::new_v4();
+        tracing::info_span!(
+            "http_request",
+            request_id = %request_id,
+            method = %req.method(),
+            uri = %req.uri(),
+        )
+    }
+
+    /// Logs method/uri/headers/body on the way in, and status/headers/body
+    /// on the way out, as one `tracing::info!` line each.
+    pub async fn trace_body_layer(req: Request, next: Next) -> Response {
+        let method = req.method().to_string();
+        let uri = req.uri().to_string();
+        let req_headers = headers_json(req.headers());
+
+        let (parts, body) = req.into_parts();
+        let bytes = body
+            .collect()
+            .await
+            .map(|b| b.to_bytes())
+            .unwrap_or_default();
+
+        tracing::info!(
+            method = %method,
+            uri = %uri,
+            headers = %req_headers,
+            body = %body_json(&bytes),
+            "request"
+        );
+
+        let req = Request::from_parts(parts, Body::from(bytes));
+        let res = next.run(req).await;
+
+        let status = res.status().as_u16();
+        let res_headers = headers_json(res.headers());
+        let (parts, body) = res.into_parts();
+        let bytes = body
+            .collect()
+            .await
+            .map(|b| b.to_bytes())
+            .unwrap_or_default();
+
+        tracing::info!(
+            status = %status,
+            headers = %res_headers,
+            body = %body_json(&bytes),
+            "response"
+        );
+
+        Response::from_parts(parts, Body::from(bytes))
+    }
+}
+
 /// Application configuration, shared state, and top-level server orchestration.
 pub mod config {
     use crate::{
-        auth, cache, handlers,
+        auth, cache, cors, csrf, governor, handlers,
         items::{self, Item},
+        trace, xss,
     };
     use axum::{
         Router,
@@ -50,6 +306,7 @@ pub mod config {
     use secrecy::SecretString;
     use std::{env, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
     use tokio_util::{sync::CancellationToken, task::TaskTracker};
+    use tower_governor::GovernorLayer;
     use uuid::Uuid;
 
     /// Runs the HTTP and HTTPS servers concurrently until `shutdown_signal`
@@ -98,7 +355,9 @@ pub mod config {
             move |handle| {
                 axum_server::bind(http_config.http_addr)
                     .handle(handle)
-                    .serve(http_router(http_state).into_make_service())
+                    .serve(
+                        http_router(http_state).into_make_service_with_connect_info::<SocketAddr>(),
+                    )
             },
             token.child_token(),
             &tracker,
@@ -112,7 +371,9 @@ pub mod config {
                     (*https_config.tls_config).clone(),
                 )
                 .handle(handle)
-                .serve(https_router(https_state).into_make_service())
+                .serve(
+                    https_router(https_state).into_make_service_with_connect_info::<SocketAddr>(),
+                )
             },
             token.child_token(),
             &tracker,
@@ -189,8 +450,9 @@ pub mod config {
 
     /// Shared application state, cloned into every request handler.
     ///
-    /// Cloning is cheap: [`AppConfig`] and [`AppStore`] are internally
-    /// reference-counted, so a clone shares the same underlying data.
+    /// Cloning is cheap: [`AppConfig`], [`AppStore`], and the other fields
+    /// are internally reference-counted, so a clone shares the same
+    /// underlying data.
     #[derive(Clone, Debug, FromRef)]
     pub struct AppState {
         /// Static application configuration (addresses, TLS material).
@@ -198,31 +460,39 @@ pub mod config {
         /// In-memory store of [`Item`]s, keyed by their [`Uuid`].
         pub items: AppStore<Item>,
         /// In-memory RBAC store: user id -> roles, read by
-        /// [`auth::authenticate`].
+        /// [`auth::authn_layer`].
         pub roles: auth::RoleStore,
-        /// Response cache read/written by [`cache::cache_response`],
-        /// applied to the read-only item routes in [`https_router`].
+        /// Response cache read/written by [`cache::cache_layer`], applied
+        /// to the read-only item routes in [`https_router`].
         pub cache: cache::CacheState,
+        /// Rate-limiter state (GCRA via `governor`), keyed by peer IP.
+        pub gvrnr: Arc<governor::GovConfig>,
     }
 
     impl AppState {
         /// Builds application state by loading [`AppConfig`] from the
-        /// environment and initializing empty item and role stores.
+        /// environment and initializing empty item and role stores, a
+        /// default response cache, and default rate-limit state.
         ///
         /// # Errors
         ///
-        /// Propagates any [`AppError`] returned by [`AppConfig::new`].
+        /// Propagates any [`AppError`] returned by [`AppConfig::new`], or
+        /// [`AppError::FailedConfigGov`] if the rate-limit configuration is
+        /// invalid.
         #[tracing::instrument(skip_all, err)]
         pub async fn new() -> AppResult<Self> {
             let config = AppConfig::new().await?;
             let items = Arc::new(DashMap::new());
             let roles = Arc::new(DashMap::new());
-            let cache = cache::CacheState::new();
+            let cache = cache::CacheState::default();
+            let gvrnr = governor::default()?;
+
             Ok(Self {
                 config,
                 items,
                 roles,
                 cache,
+                gvrnr,
             })
         }
     }
@@ -245,22 +515,30 @@ pub mod config {
     }
 
     /// Builds the TLS-terminated HTTPS router that serves the item API and a
-    /// `/healthz` liveliness endpoint.
+    /// `/healthz` liveliness endpoint, with every layer applied:
     ///
-    /// The item routes are authenticated via [`auth::authenticate`]; `DELETE
-    /// /items/{id}` additionally requires the `"admin"` role via
-    /// [`auth::authorize`]. `GET /items` and `GET /items/{id}` are served
-    /// through [`cache::cache_response`], so a repeat read is answered
-    /// straight from the cache instead of the store; `POST`/`PUT`/`DELETE`
-    /// are never cached. `/healthz` and the fallback are unauthenticated.
+    /// - [`cors::cors_layer`] (outermost — preflight `OPTIONS` never
+    ///   touches anything below it)
+    /// - [`GovernorLayer`] (per-peer-IP rate limiting)
+    /// - [`xss::xss_layer`] (hardened response headers)
+    /// - [`trace::trace_body_layer`] (request/response status, headers,
+    ///   body logging)
+    /// - `tower_http`'s [`tower_http::trace::TraceLayer`] (span per
+    ///   request, via [`trace::make_span`])
+    /// - [`auth::authn_layer`] (JWT authentication, applied to every item
+    ///   route)
+    /// - Per-route-group: [`cache::cache_layer`] on the read routes;
+    ///   [`csrf::csrf_layer`] and, for `DELETE`, [`auth::authz_layer`] on
+    ///   the write routes.
     ///
-    /// Requests that don't match any known route fall through to
+    /// `/healthz` and the fallback are unauthenticated. Requests that
+    /// don't match any known route fall through to
     /// [`handlers::report_route_invalid`].
     pub fn https_router(state: AppState) -> Router {
-        let admin_only = Router::new()
+        let items_admin_routes = Router::new()
             .route("/items/{id}", delete(items::delete))
             .layer(middleware::from_fn(|ext, req, next| {
-                auth::authorize("admin", ext, req, next)
+                auth::authz_layer("admin", ext, req, next)
             }));
 
         // Cache is only layered over the read-only GET routes, so writes on
@@ -271,28 +549,47 @@ pub mod config {
             .route("/items/{id}", get(items::get))
             .layer(middleware::from_fn_with_state(
                 state.cache.clone(),
-                cache::cache_response,
+                cache::cache_layer,
             ));
 
+        // POST/PUT open to any authenticated user; DELETE stays admin-only
+        // via `items_admin_routes`. (If you also want `create`
+        // admin-restricted, move `post(items::create)` into
+        // `items_admin_routes` instead, the same way `delete` is handled.)
         let items_write_routes = Router::new()
             .route("/items", post(items::create))
-            .route("/items/{id}", put(items::update));
+            .route("/items/{id}", put(items::update))
+            .merge(items_admin_routes) // DELETE joins here, already wrapped in `authz_layer`
+            .layer(middleware::from_fn(csrf::csrf_layer)); // covers POST, PUT, DELETE
 
         let items_routes = Router::new()
             .merge(items_read_routes)
             .merge(items_write_routes)
-            .merge(admin_only)
             .layer(middleware::from_fn_with_state(
                 auth::AuthState::new(&state.config.jwt_secret, state.roles.clone()),
-                auth::authenticate,
+                auth::authn_layer,
             ));
+
+        governor::spawn_task(state.gvrnr.clone());
 
         Router::new()
             .merge(items_routes)
             .route("/healthz", get(handlers::check_app_liveliness))
             .fallback(handlers::report_route_invalid)
-            .layer(tower_http::trace::TraceLayer::new_for_http())
+            .layer(
+                tower::ServiceBuilder::new()
+                    .layer(
+                        tower_http::trace::TraceLayer::new_for_http()
+                            .make_span_with(trace::make_span)
+                            .on_request(())
+                            .on_response(()),
+                    )
+                    .layer(middleware::from_fn(trace::trace_body_layer))
+                    .layer(middleware::from_fn(xss::xss_layer)),
+            )
+            .layer(GovernorLayer::new(state.gvrnr.clone()))
             .with_state(state)
+            .layer(cors::cors_layer()) // outermost: preflight OPTIONS skips everything else
     }
 
     /// Static configuration for the application, loaded once from the
@@ -458,6 +755,10 @@ pub mod config {
         /// into a valid [`RustlsConfig`].
         #[error("Failed to configure TLS from file {1}! {0}")]
         FailedConfigTLS(#[source] std::io::Error, PathBuf),
+
+        /// The rate-limit configuration was invalid.
+        #[error("Failed to configure rate limiter! {0}")]
+        FailedConfigGov(#[from] crate::governor::AppError),
 
         /// The `Ctrl+C` signal handler failed to install or await.
         #[error("Failed to initialize Ctrl+C interceptor! {0}")]
@@ -816,7 +1117,7 @@ pub mod items {
 /// A response cache for idempotent, read-only routes, implemented as an
 /// ordinary `axum::middleware::from_fn` handler backed by a [`moka`] cache.
 ///
-/// [`cache_response`] is the middleware itself: layered onto a router (or
+/// [`cache_layer`] is the middleware itself: layered onto a router (or
 /// sub-router), it caches the full [`Response`] for every `GET` request by
 /// path + sorted query parameters, and serves that cached response directly
 /// on a repeat request instead of re-invoking the handler. Non-`GET`
@@ -834,7 +1135,7 @@ pub mod items {
 /// # Examples
 ///
 /// Applying it to a sub-router of only the routes that should be cached,
-/// the same way [`auth::authenticate`](crate::auth::authenticate) is
+/// the same way [`auth::authn_layer`](crate::auth::authn_layer) is
 /// layered with its own state:
 ///
 /// ```ignore
@@ -845,7 +1146,7 @@ pub mod items {
 ///     .route("/items/{id}", get(items::get))
 ///     .layer(middleware::from_fn_with_state(
 ///         cache_state.clone(),
-///         cache::cache_response,
+///         cache::cache_layer,
 ///     ));
 /// ```
 pub mod cache {
@@ -860,13 +1161,21 @@ pub mod cache {
     use moka::future::Cache;
     use std::time::Duration;
 
-    /// Response header set on every response returned by [`cache_response`],
+    /// Suggested `max_capacity` (entry count) for [`CacheState::new`], if
+    /// the caller has no more specific requirement.
+    pub const DEFAULT_MAX_CAPACITY: u64 = 10_000;
+
+    /// Suggested `time_to_live` for [`CacheState::new`], if the caller has
+    /// no more specific requirement.
+    pub const DEFAULT_TIME_TO_LIVE: Duration = Duration::from_secs(30);
+
+    /// Response header set on every response returned by [`cache_layer`],
     /// reporting whether it was served from the cache (`"HIT"`) or freshly
     /// computed (`"MISS"`).
     const CACHE_STATUS_HEADER: HeaderName = HeaderName::from_static("x-cache");
 
     /// Shared response cache state, cloned into every request that passes
-    /// through [`cache_response`].
+    /// through [`cache_layer`].
     ///
     /// Cloning is cheap: the underlying [`moka::future::Cache`] is itself
     /// reference-counted and internally sharded/concurrent.
@@ -877,12 +1186,6 @@ pub mod cache {
         cache: Cache<String, CachedResponse>,
     }
 
-    impl Default for CacheState {
-        fn default() -> Self {
-            Self::new()
-        }
-    }
-
     impl CacheState {
         /// Builds an empty response cache with the given `max_capacity`
         /// (entry count) and `time_to_live`.
@@ -890,15 +1193,28 @@ pub mod cache {
         /// # Examples
         ///
         /// ```ignore
-        /// let state = cache::CacheState::new();
+        /// let state =
+        ///     cache::CacheState::new(cache::DEFAULT_MAX_CAPACITY, cache::DEFAULT_TIME_TO_LIVE);
         /// ```
-        pub fn new() -> Self {
+        pub fn new(max_capacity: u64, time_to_live: Duration) -> Self {
             Self {
                 cache: Cache::builder()
-                    .max_capacity(10_000)
-                    .time_to_live(Duration::from_secs(30))
+                    .max_capacity(max_capacity)
+                    .time_to_live(time_to_live)
                     .build(),
             }
+        }
+
+        /// Builds an empty response cache using this service's defaults:
+        /// [`DEFAULT_MAX_CAPACITY`] and [`DEFAULT_TIME_TO_LIVE`].
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// let state = cache::CacheState::default();
+        /// ```
+        pub fn default() -> Self {
+            Self::new(DEFAULT_MAX_CAPACITY, DEFAULT_TIME_TO_LIVE)
         }
     }
 
@@ -920,7 +1236,7 @@ pub mod cache {
     /// Builds the cache key for `uri`: its path, plus its query parameters
     /// (if any) sorted so that two requests differing only in parameter
     /// order land on the same cache entry. The method is not part of the
-    /// key, since [`cache_response`] only ever caches `GET` requests.
+    /// key, since [`cache_layer`] only ever caches `GET` requests.
     fn cache_key(uri: &Uri) -> String {
         let Some(query) = uri.query() else {
             return uri.path().to_string();
@@ -929,7 +1245,7 @@ pub mod cache {
         let mut params: Vec<&str> = query.split('&').collect();
         params.sort_unstable();
 
-        format!("{}?{}", uri.path(), params.join("&")).to_string()
+        format!("{}?{}", uri.path(), params.join("&"))
     }
 
     /// Caches `GET` responses by [`cache_key`] and serves repeat requests
@@ -941,25 +1257,7 @@ pub mod cache {
     /// Any request whose method is not `GET` is passed straight to `next`
     /// without consulting or populating the cache, since this service only
     /// uses other methods for mutations that must never be served stale.
-    ///
-    /// On a `GET` miss, the response returned by `next` is buffered in
-    /// full so it can be stored in the cache, then re-emitted as a fresh
-    /// `Response` built from those same buffered bytes (a `Response`'s
-    /// body can't be read twice, so the original can't be reused directly
-    /// after buffering it).
-    ///
-    /// Intended to be layered with
-    /// [`middleware::from_fn_with_state`](axum::middleware::from_fn_with_state)
-    /// (not plain `from_fn`, which fixes its state to `()` and can't
-    /// satisfy this handler's `State<CacheState>` extractor) on any
-    /// (sub-)router whose `GET` routes are safe to cache — see the
-    /// [module-level example](self#examples).
-    ///
-    /// # Panics
-    ///
-    /// Does not panic: rebuilding a [`Response`] from a previously valid
-    /// status/header/body triple cannot fail.
-    pub async fn cache_response(
+    pub async fn cache_layer(
         State(state): State<CacheState>,
         req: Request,
         next: Next,
@@ -1018,33 +1316,33 @@ pub mod cache {
 /// handlers.
 ///
 /// Two middleware functions do the work:
-/// - [`authenticate`] verifies the `Authorization: Bearer <jwt>` header,
+/// - [`authn_layer`] verifies the `Authorization: Bearer <jwt>` header,
 ///   decodes [`Claims`], looks the subject up in an in-memory [`RoleStore`],
 ///   and inserts an [`AuthUser`] into the request's extensions.
-/// - [`authorize`] reads that [`AuthUser`] back out and rejects the request
-///   if it doesn't hold the required role. It must run *after*
-///   [`authenticate`] on the same request, since it only reads what that
+/// - [`authz_layer`] reads that [`AuthUser`] back out and rejects the
+///   request if it doesn't hold the required role. It must run *after*
+///   [`authn_layer`] on the same request, since it only reads what that
 ///   middleware wrote.
 ///
 /// # Examples
 ///
-/// Applying both to a sub-router (see [`AuthState::new`] and [`authorize`]
+/// Applying both to a sub-router (see [`AuthState::new`] and [`authz_layer`]
 /// for the pieces used here):
 ///
 /// ```ignore
 /// use axum::{middleware, routing::delete, Router};
 ///
-/// let admin_only = Router::new()
+/// let items_admin_routes = Router::new()
 ///     .route("/items/{id}", delete(items::delete))
 ///     .layer(middleware::from_fn(|ext, req, next| {
-///         auth::authorize("admin", ext, req, next)
+///         auth::authz_layer("admin", ext, req, next)
 ///     }));
 ///
 /// let protected = Router::new()
-///     .merge(admin_only)
+///     .merge(items_admin_routes)
 ///     .layer(middleware::from_fn_with_state(
 ///         auth::AuthState::new(&jwt_secret, roles.clone()),
-///         auth::authenticate,
+///         auth::authn_layer,
 ///     ));
 /// ```
 pub mod auth {
@@ -1058,7 +1356,6 @@ pub mod auth {
     use dashmap::DashMap;
     use jsonwebtoken::{DecodingKey, Validation, decode};
     use secrecy::{ExposeSecret, SecretString};
-    use serde::{Deserialize, Serialize};
     use std::sync::Arc;
 
     /// In-memory role assignments, keyed by the JWT `sub` (user id).
@@ -1086,7 +1383,7 @@ pub mod auth {
 
     /// JWT claims this service expects to find in a validated Bearer token.
     ///
-    /// Decoded by [`authenticate`] via [`jsonwebtoken::decode`], which also
+    /// Decoded by [`authn_layer`] via [`jsonwebtoken::decode`], which also
     /// enforces the `exp` claim against the configured [`Validation`].
     ///
     /// # Examples
@@ -1102,22 +1399,22 @@ pub mod auth {
     ///
     /// assert_eq!(claims.sub, "alice");
     /// ```
-    #[derive(Clone, Debug, Deserialize, Serialize)]
+    #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
     pub struct Claims {
         /// The token subject — the user id used to look roles up in the
         /// [`RoleStore`].
         pub sub: String,
         /// Standard `exp` claim: a Unix timestamp (seconds since the
         /// epoch) after which the token is no longer valid. Enforced by
-        /// [`jsonwebtoken::decode`] during [`authenticate`].
+        /// [`jsonwebtoken::decode`] during [`authn_layer`].
         pub exp: usize,
     }
 
     /// The authenticated identity attached to a request's extensions by
-    /// [`authenticate`].
+    /// [`authn_layer`].
     ///
     /// Handlers can read it back out via `Extension<AuthUser>`, and
-    /// [`authorize`] reads it to perform its role check.
+    /// [`authz_layer`] reads it to perform its role check.
     ///
     /// # Examples
     ///
@@ -1136,19 +1433,19 @@ pub mod auth {
         /// The JWT subject (user id) this request was authenticated as.
         pub user_id: String,
         /// Roles held by this user, as of the [`RoleStore`] lookup
-        /// performed by [`authenticate`] for this request. Not re-checked
+        /// performed by [`authn_layer`] for this request. Not re-checked
         /// for the lifetime of the request, so role changes take effect on
         /// the next request, not the current one.
         pub roles: Vec<String>,
     }
 
-    /// State captured by the [`authenticate`] middleware: the key/rules
+    /// State captured by the [`authn_layer`] middleware: the key/rules
     /// used to validate incoming tokens, and the store used to resolve
     /// roles for the validated subject.
     ///
     /// Built once at startup and passed to
     /// [`middleware::from_fn_with_state`](axum::middleware::from_fn_with_state)
-    /// alongside [`authenticate`].
+    /// alongside [`authn_layer`].
     #[derive(Clone)]
     pub struct AuthState {
         /// Key used to verify a token's signature. Derived once from the
@@ -1203,7 +1500,7 @@ pub mod auth {
     /// Intended to be layered with
     /// [`middleware::from_fn_with_state`](axum::middleware::from_fn_with_state)
     /// on any (sub-)router that should require authentication; downstream
-    /// handlers and middleware (such as [`authorize`]) can then read the
+    /// handlers and middleware (such as [`authz_layer`]) can then read the
     /// attached [`AuthUser`].
     ///
     /// # Examples
@@ -1213,7 +1510,7 @@ pub mod auth {
     ///
     /// let protected = Router::new()
     ///     // ...routes...
-    ///     .layer(middleware::from_fn_with_state(auth_state, auth::authenticate));
+    ///     .layer(middleware::from_fn_with_state(auth_state, auth::authn_layer));
     /// ```
     ///
     /// # Errors
@@ -1226,11 +1523,11 @@ pub mod auth {
     /// # Panics
     ///
     /// Does not panic.
-    pub async fn authenticate(
+    pub async fn authn_layer(
         State(state): State<AuthState>,
         mut req: Request,
         next: Next,
-    ) -> AppResult<Response> {
+    ) -> Result<Response, AppError> {
         let token = req
             .headers()
             .get(header::AUTHORIZATION)
@@ -1256,9 +1553,9 @@ pub mod auth {
     }
 
     /// Rejects a request unless the [`AuthUser`] attached by
-    /// [`authenticate`] holds `role`.
+    /// [`authn_layer`] holds `role`.
     ///
-    /// Must run *after* [`authenticate`] on the same request — it only
+    /// Must run *after* [`authn_layer`] on the same request — it only
     /// reads the [`AuthUser`] that middleware wrote, and does not itself
     /// validate the token.
     ///
@@ -1266,18 +1563,6 @@ pub mod auth {
     /// fixed function signature, `role` is supplied by wrapping this
     /// function in a closure per call site rather than partially applying
     /// it directly (see the module-level example).
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// use axum::{middleware, routing::delete, Router};
-    ///
-    /// let admin_only = Router::new()
-    ///     .route("/items/{id}", delete(items::delete))
-    ///     .layer(middleware::from_fn(|ext, req, next| {
-    ///         auth::authorize("admin", ext, req, next)
-    ///     }));
-    /// ```
     ///
     /// # Errors
     ///
@@ -1287,12 +1572,12 @@ pub mod auth {
     /// # Panics
     ///
     /// Does not panic.
-    pub async fn authorize(
+    pub async fn authz_layer(
         role: &'static str,
         Extension(user): Extension<AuthUser>,
         req: Request,
         next: Next,
-    ) -> AppResult<Response> {
+    ) -> Result<Response, AppError> {
         if user.roles.iter().any(|r| r == role) {
             Ok(next.run(req).await)
         } else {
@@ -1306,7 +1591,7 @@ pub mod auth {
     /// Errors produced while authenticating or authorizing a request.
     ///
     /// Implements [`IntoResponse`] (via `#[derive(AxumErrorResponse)]`) so
-    /// it can be returned directly from [`authenticate`] and [`authorize`];
+    /// it can be returned directly from [`authn_layer`] and [`authz_layer`];
     /// each variant's `#[status_code]`/`#[code]` attributes determine the
     /// resulting HTTP status and JSON error body.
     #[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
@@ -1327,8 +1612,9 @@ pub mod auth {
     }
 }
 
-/// Integration and unit tests for [`config`], [`handlers`], [`items`], and
-/// [`auth`].
+/// Integration and unit tests for [`config`], [`handlers`], [`items`],
+/// [`auth`], [`cache`], [`xss`], [`cors`], [`csrf`], [`governor`], and
+/// [`trace`].
 #[cfg(test)]
 mod tests {
     /// Tests for [`crate::config::AppConfig`] and [`crate::config::run_app`].
@@ -1668,7 +1954,8 @@ mod tests {
                 },
                 items: Arc::new(dashmap::DashMap::new()),
                 roles: Arc::new(dashmap::DashMap::new()),
-                cache: crate::cache::CacheState::new(),
+                cache: crate::cache::CacheState::default(),
+                gvrnr: crate::governor::default().unwrap(),
             }
         }
 
@@ -1746,11 +2033,16 @@ mod tests {
         use axum_test::TestServer;
 
         /// Builds a [`TestServer`] wrapping the router produced by
-        /// `router_fn` over a fresh [`AppState`].
+        /// `router_fn` over a fresh [`AppState`]. The router is built via
+        /// `into_make_service_with_connect_info` since `https_router` now
+        /// carries a `GovernorLayer`, which needs a real `ConnectInfo` to
+        /// key its per-IP rate limiter.
         async fn test_server(router_fn: fn(AppState) -> axum::Router) -> TestServer {
             let state = AppState::new().await.unwrap();
 
-            TestServer::new(router_fn(state))
+            TestServer::new(
+                router_fn(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
         }
 
         /// Verifies that any request to the HTTP router is redirected to
@@ -1841,7 +2133,9 @@ mod tests {
         /// [`Uuid::nil`], one keyed by a random [`Uuid`]) and a seeded
         /// [`RoleStore`](crate::auth::RoleStore). Returns the server
         /// alongside an admin token (roles: admin, user) and a plain user
-        /// token (roles: user).
+        /// token (roles: user). The router is built via
+        /// `into_make_service_with_connect_info` since `https_router` now
+        /// carries a `GovernorLayer`.
         async fn test_server(
             router_fn: fn(AppState) -> axum::Router,
         ) -> (TestServer, String, String) {
@@ -1874,7 +2168,11 @@ mod tests {
             let admin_token = mint_token(&state, "admin-user");
             let user_token = mint_token(&state, "plain-user");
 
-            (TestServer::new(router_fn(state)), admin_token, user_token)
+            let server = TestServer::new(
+                router_fn(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            );
+
+            (server, admin_token, user_token)
         }
 
         #[test_case(
@@ -1911,6 +2209,8 @@ mod tests {
             let response = server
                 .post("/items")
                 .add_header(name, value)
+                .add_header("x-csrf-token", "test-csrf-token")
+                .add_header(axum::http::header::COOKIE, "csrf_token=test-csrf-token")
                 .json(&payload)
                 .await;
 
@@ -1950,6 +2250,8 @@ mod tests {
             let response = server
                 .delete(&format!("/items/{pathid}"))
                 .add_header(name, value)
+                .add_header("x-csrf-token", "test-csrf-token")
+                .add_header(axum::http::header::COOKIE, "csrf_token=test-csrf-token")
                 .await;
 
             response.assert_status(status);
@@ -2086,6 +2388,8 @@ mod tests {
             let response = server
                 .put(&format!("/items/{pathid}"))
                 .add_header(name, value)
+                .add_header("x-csrf-token", "test-csrf-token")
+                .add_header(axum::http::header::COOKIE, "csrf_token=test-csrf-token")
                 .json(&payload)
                 .await;
 
@@ -2125,6 +2429,8 @@ mod tests {
             let response = server
                 .delete(&format!("/items/{}", Uuid::nil()))
                 .add_header(name, value)
+                .add_header("x-csrf-token", "test-csrf-token")
+                .add_header(axum::http::header::COOKIE, "csrf_token=test-csrf-token")
                 .await;
 
             response.assert_status(StatusCode::FORBIDDEN);
@@ -2153,7 +2459,11 @@ mod tests {
             let user_token = mint_token(&state, "plain-user");
             let items = state.items.clone();
 
-            let server = TestServer::new(config::https_router(state));
+            let server = TestServer::new(
+                config::https_router(state)
+                    .into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            );
+
             let (name, value) = bearer(&user_token);
 
             let first = server
@@ -2192,6 +2502,8 @@ mod tests {
             let first = server
                 .post("/items")
                 .add_header(name.clone(), value.clone())
+                .add_header("x-csrf-token", "test-csrf-token")
+                .add_header(axum::http::header::COOKIE, "csrf_token=test-csrf-token")
                 .json(&payload)
                 .await;
             first.assert_status(StatusCode::CREATED);
@@ -2199,6 +2511,8 @@ mod tests {
             let second = server
                 .post("/items")
                 .add_header(name, value)
+                .add_header("x-csrf-token", "test-csrf-token")
+                .add_header(axum::http::header::COOKIE, "csrf_token=test-csrf-token")
                 .json(&payload)
                 .await;
             second.assert_status(StatusCode::CREATED);
@@ -2247,10 +2561,10 @@ mod tests {
             .unwrap()
         }
 
-        /// A minimal protected router: `authenticate` guards everything,
+        /// A minimal protected router: `authn_layer` guards everything,
         /// and `/admin` additionally requires the "admin" role via
-        /// `authorize`. Seeded with "alice" (admin + user) and "bob" (user
-        /// only).
+        /// `authz_layer`. Seeded with "alice" (admin + user) and "bob"
+        /// (user only).
         fn test_server() -> TestServer {
             let roles: RoleStore = Arc::new(DashMap::new());
             roles.insert(
@@ -2264,7 +2578,7 @@ mod tests {
             let admin_only = Router::new()
                 .route("/admin", get(|| async { "admin ok" }))
                 .layer(middleware::from_fn(|ext, req, next| {
-                    auth::authorize("admin", ext, req, next)
+                    auth::authz_layer("admin", ext, req, next)
                 }));
 
             let app = Router::new()
@@ -2275,7 +2589,7 @@ mod tests {
                 .merge(admin_only)
                 .layer(middleware::from_fn_with_state(
                     auth_state,
-                    auth::authenticate,
+                    auth::authn_layer,
                 ));
 
             TestServer::new(app)
@@ -2410,13 +2724,13 @@ mod tests {
         };
 
         /// A minimal router with one GET route (counts each time it's
-        /// actually invoked) wrapped in [`cache::cache_response`], and one
+        /// actually invoked) wrapped in [`cache::cache_layer`], and one
         /// POST route left unwrapped for comparison.
         fn test_server() -> (TestServer, Arc<AtomicUsize>) {
             let hits = Arc::new(AtomicUsize::new(0));
             let counter = hits.clone();
 
-            let cache_state = CacheState::new();
+            let cache_state = CacheState::default();
 
             let app = Router::new()
                 .route(
@@ -2432,7 +2746,7 @@ mod tests {
                 .route("/uncached", post(|| async { "response" }))
                 .layer(middleware::from_fn_with_state(
                     cache_state,
-                    cache::cache_response,
+                    cache::cache_layer,
                 ));
 
             (TestServer::new(app), hits)
@@ -2442,7 +2756,7 @@ mod tests {
         /// underlying handler only actually runs once, and the `x-cache`
         /// header reports `MISS` then `HIT`.
         #[test_log::test(tokio::test)]
-        async fn test_cache_response_success_get_methods() {
+        async fn test_cache_layer_success_get_methods() {
             let (server, hits) = test_server();
 
             let first = server.get("/counter").await;
@@ -2459,7 +2773,7 @@ mod tests {
         /// Verifies non-`GET` requests always reach the handler, never the
         /// cache, and are left without an `x-cache` header.
         #[test_log::test(tokio::test)]
-        async fn test_cache_response_success_non_get_methods() {
+        async fn test_cache_layer_success_non_get_methods() {
             let (server, hits) = test_server();
 
             let first = server.post("/uncached").await;
@@ -2475,7 +2789,7 @@ mod tests {
         /// under distinct keys (i.e. the query string is part of the key,
         /// not just the path).
         #[test_log::test(tokio::test)]
-        async fn test_cache_response_success_distinct_query_params() {
+        async fn test_cache_layer_success_distinct_query_params() {
             let (server, hits) = test_server();
 
             server
@@ -2499,7 +2813,7 @@ mod tests {
         /// Verifies query parameters in a different order are treated as
         /// the *same* cache key (parameters are sorted before keying).
         #[test_log::test(tokio::test)]
-        async fn test_cache_response_success_indistinct_query_params() {
+        async fn test_cache_layer_success_indistinct_query_params() {
             let (server, hits) = test_server();
 
             let first = server.get("/counter?a=1&b=2").await;
@@ -2511,6 +2825,254 @@ mod tests {
             second.assert_header("x-cache", "HIT");
             assert_eq!(first.text(), second.text());
             assert_eq!(hits.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    /// Tests for [`crate::xss`].
+    mod xss {
+        use crate::xss;
+        use axum::{Router, middleware, routing::get};
+        use axum_test::TestServer;
+
+        fn test_server() -> TestServer {
+            let app = Router::new()
+                .route("/ping", get(|| async { "pong" }))
+                .layer(middleware::from_fn(xss::xss_layer));
+            TestServer::new(app)
+        }
+
+        /// Verifies every hardened header is present on the response.
+        #[test_log::test(tokio::test)]
+        async fn test_xss_layer_success_adds_headers() {
+            let server = test_server();
+            let response = server.get("/ping").await;
+
+            response.assert_status_ok();
+            response.assert_header("x-content-type-options", "nosniff");
+            response.assert_header("x-frame-options", "DENY");
+            response.assert_header(
+                "content-security-policy",
+                "default-src 'none'; frame-ancestors 'none'",
+            );
+            response.assert_header("referrer-policy", "no-referrer");
+        }
+    }
+
+    /// Tests for [`crate::cors`].
+    mod cors {
+        use crate::cors;
+        use axum::{Router, routing::get};
+        use axum_test::TestServer;
+
+        fn test_server() -> TestServer {
+            let app = Router::new()
+                .route("/ping", get(|| async { "pong" }))
+                .layer(cors::cors_layer());
+            TestServer::new(app)
+        }
+
+        /// Verifies a request from the configured origin gets the matching
+        /// `access-control-allow-origin` header back.
+        #[test_log::test(tokio::test)]
+        async fn test_cors_layer_success_allowed_origin() {
+            let server = test_server();
+
+            let response = server
+                .get("/ping")
+                .add_header(axum::http::header::ORIGIN, "https://yourapp.example.com")
+                .await;
+
+            response.assert_status_ok();
+            response.assert_header("access-control-allow-origin", "https://yourapp.example.com");
+        }
+
+        /// Verifies a disallowed origin gets no
+        /// `access-control-allow-origin` header at all — the browser, not
+        /// the server, is what enforces the block based on its absence.
+        #[test_log::test(tokio::test)]
+        async fn test_cors_layer_failure_disallowed_origin() {
+            let server = test_server();
+
+            let response = server
+                .get("/ping")
+                .add_header(axum::http::header::ORIGIN, "https://evil.example.com")
+                .await;
+
+            assert!(
+                !response
+                    .headers()
+                    .contains_key("access-control-allow-origin")
+            );
+        }
+    }
+
+    /// Tests for [`crate::csrf`].
+    mod csrf {
+        use crate::csrf;
+        use axum::{Router, http::StatusCode, middleware, routing::get};
+        use axum_test::TestServer;
+
+        fn test_server() -> TestServer {
+            let app = Router::new()
+                .route("/items", get(|| async { "ok" }))
+                .layer(middleware::from_fn(csrf::csrf_layer));
+            TestServer::new(app)
+        }
+
+        /// Verifies a request succeeds when the header and cookie tokens
+        /// match.
+        #[test_log::test(tokio::test)]
+        async fn test_csrf_layer_success_matching_token() {
+            let response = test_server()
+                .get("/items")
+                .add_header("x-csrf-token", "abc123")
+                .add_header(axum::http::header::COOKIE, "csrf_token=abc123")
+                .await;
+
+            response.assert_status_ok();
+        }
+
+        /// Verifies a request is rejected when the header token doesn't
+        /// match the cookie token.
+        #[test_log::test(tokio::test)]
+        async fn test_csrf_layer_failure_mismatched_token() {
+            let response = test_server()
+                .get("/items")
+                .add_header("x-csrf-token", "abc123")
+                .add_header(axum::http::header::COOKIE, "csrf_token=different")
+                .await;
+
+            response.assert_status(StatusCode::FORBIDDEN);
+        }
+
+        /// Verifies a request with no CSRF header or cookie at all is
+        /// rejected.
+        #[test_log::test(tokio::test)]
+        async fn test_csrf_layer_failure_missing_token() {
+            let response = test_server().get("/items").await;
+            response.assert_status(StatusCode::FORBIDDEN);
+        }
+    }
+
+    /// Tests for [`crate::governor`], exercised against a minimal
+    /// standalone router.
+    mod governor {
+        use crate::governor;
+        use axum::{
+            Router, extract::connect_info::IntoMakeServiceWithConnectInfo, http::StatusCode,
+            routing::get,
+        };
+        use axum_test::TestServer;
+        use std::net::SocketAddr;
+        use tower_governor::GovernorLayer;
+
+        /// Builds a fresh rate-limited router (1 req/sec, burst of 3) each
+        /// call, wrapped in a real TCP transport so `PeerIpKeyExtractor`
+        /// has a genuine `ConnectInfo` to read.
+        fn test_server() -> TestServer {
+            let config = governor::new(1, 3).unwrap();
+
+            let app: IntoMakeServiceWithConnectInfo<Router, SocketAddr> = Router::new()
+                .route("/ping", get(|| async { "pong" }))
+                .layer(GovernorLayer::new(config.clone()))
+                .into_make_service_with_connect_info::<SocketAddr>();
+
+            TestServer::new(app)
+        }
+
+        /// Verifies requests within the burst allowance all succeed.
+        #[test_log::test(tokio::test)]
+        async fn test_governor_success_under_burst() {
+            let server = test_server();
+
+            for _ in 0..3 {
+                server.get("/ping").await.assert_status(StatusCode::OK);
+            }
+        }
+
+        /// Verifies exceeding the burst allowance triggers `429`.
+        #[test_log::test(tokio::test)]
+        async fn test_governor_failure_exceeds_burst() {
+            let server = test_server();
+
+            for _ in 0..3 {
+                server.get("/ping").await.assert_status(StatusCode::OK);
+            }
+
+            server
+                .get("/ping")
+                .await
+                .assert_status(StatusCode::TOO_MANY_REQUESTS);
+        }
+
+        /// Verifies `governor::default()` builds successfully with this
+        /// service's standard 2/sec, burst-20 configuration.
+        #[test_log::test(tokio::test)]
+        async fn test_governor_default_success() {
+            assert!(governor::default().is_ok());
+        }
+    }
+
+    /// Tests for [`crate::trace`], verifying header redaction end-to-end
+    /// by capturing actual log output through a custom `tracing` writer.
+    mod trace {
+        use crate::trace;
+        use axum::{Router, body::Body, http::Request, middleware, routing::get};
+        use std::sync::{Arc, Mutex};
+        use tower::ServiceExt;
+
+        /// A `tracing_subscriber` writer that appends into a shared
+        /// buffer instead of stdout, so the test can inspect exactly what
+        /// was logged.
+        #[derive(Clone)]
+        struct BufWriter(Arc<Mutex<Vec<u8>>>);
+
+        impl std::io::Write for BufWriter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for BufWriter {
+            type Writer = BufWriter;
+            fn make_writer(&'a self) -> Self::Writer {
+                self.clone()
+            }
+        }
+
+        /// Verifies `trace_body_layer` redacts the `authorization` header
+        /// value in its logged output, and never logs the raw token.
+        #[test_log::test(tokio::test)]
+        async fn test_trace_body_layer_redacts_authorization() {
+            let buf = Arc::new(Mutex::new(Vec::new()));
+            let subscriber = tracing_subscriber::fmt()
+                .json()
+                .with_writer(BufWriter(buf.clone()))
+                .finish();
+
+            let app = Router::new()
+                .route("/ping", get(|| async { "pong" }))
+                .layer(middleware::from_fn(trace::trace_body_layer));
+
+            let req = Request::builder()
+                .uri("/ping")
+                .header("authorization", "Bearer super-secret-token")
+                .body(Body::empty())
+                .unwrap();
+
+            let guard = tracing::subscriber::set_default(subscriber);
+            let response = app.oneshot(req).await.unwrap();
+            drop(guard);
+
+            assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+            let logged = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
+            assert!(logged.contains("REDACTED"));
+            assert!(!logged.contains("super-secret-token"));
         }
     }
 }

@@ -87,45 +87,86 @@ pub mod cors {
     }
 }
 
-/// Double-submit-cookie CSRF check.
+/// CSRF protection via [`axum_csrf`].
 ///
-/// Only meaningful if/when this service adopts cookie-based sessions —
-/// with the current Bearer-JWT auth model, browsers never attach
-/// `Authorization` automatically, so CSRF isn't exploitable yet. Kept as
-/// defense-in-depth and scoped to the write routes (see
-/// [`config::https_router`]).
+/// The write routes in [`config::https_router`] are wrapped in an
+/// [`axum_csrf::CsrfLayer`], which implements the double-submit cookie
+/// pattern:
+///
+/// - On any request that is *not* a state-changing method, if no
+///   `csrf_token` cookie is present, the layer issues a signed one via
+///   `Set-Cookie`.
+/// - On state-changing requests (`POST`/`PUT`/`DELETE`), the handler's
+///   [`CsrfValidated`] extractor reads the signed `csrf_token` cookie the
+///   layer surfaced into request extensions, then verifies it against the
+///   plaintext `x-csrf-token` header the client supplied. A mismatch (or a
+///   missing cookie/header) is rejected with `403 Forbidden`.
+///
+/// Only meaningful if/when this service adopts cookie-based sessions — with
+/// the current Bearer-JWT auth model, browsers never attach `Authorization`
+/// automatically, so CSRF isn't exploitable yet. Kept as defense-in-depth
+/// and scoped to the write routes (see [`config::https_router`]).
+///
+/// [`CsrfToken`]: axum_csrf::CsrfToken
 pub mod csrf {
-    use axum::{
-        extract::Request,
-        http::{HeaderMap, StatusCode},
-        middleware::Next,
-        response::{IntoResponse, Response},
-    };
+    use crate::items;
+    use axum::{RequestPartsExt, extract::FromRequestParts, http::request::Parts};
+    use axum_csrf::{CsrfConfig, CsrfLayer, CsrfToken};
 
-    const CSRF_HEADER: &str = "x-csrf-token";
-    const CSRF_COOKIE: &str = "csrf_token";
+    /// Header the client must echo the cookie's token back in on
+    /// state-changing requests.
+    pub const CSRF_HEADER: &str = "x-csrf-token";
 
-    /// Rejects the request unless a header value matches a cookie value
-    /// the server previously issued.
-    pub async fn csrf_layer(headers: HeaderMap, req: Request, next: Next) -> Response {
-        let header_token = headers.get(CSRF_HEADER).and_then(|v| v.to_str().ok());
+    /// Builds the CSRF middleware layer for this service.
+    ///
+    /// `CsrfLayer::new` generates a fresh signing key for the process, so
+    /// the same layer instance (or a clone of it) must be applied to every
+    /// route that participates in the double-submit check — mixing layers
+    /// with different keys would make issued cookies fail verification.
+    pub fn csrf_layer() -> CsrfLayer {
+        CsrfLayer::new(CsrfConfig::default())
+    }
 
-        let cookie_token = headers
-            .get(axum::http::header::COOKIE)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|cookies| {
-                cookies
-                    .split(';')
-                    .find_map(|c| c.trim().strip_prefix(&format!("{CSRF_COOKIE}=")))
-            });
+    /// Extractor that validates the CSRF double-submit token on a handler.
+    ///
+    /// Rejects with [`items::AppError::CsrfTokenInvalid`] if the layer
+    /// didn't surface a [`CsrfToken`] (i.e. the request never passed
+    /// through [`csrf_layer`]), if the `x-csrf-token` header is missing or
+    /// non-UTF-8, or if it doesn't verify against the signed cookie.
+    pub struct CsrfValidated;
 
-        match (header_token, cookie_token) {
-            (Some(h), Some(c)) if h == c => next.run(req).await,
-            _ => (StatusCode::FORBIDDEN, "CSRF token missing or mismatched").into_response(),
+    impl<S> FromRequestParts<S> for CsrfValidated
+    where
+        S: Send + Sync,
+    {
+        type Rejection = items::AppError;
+
+        async fn from_request_parts(
+            parts: &mut Parts,
+            _state: &S,
+        ) -> Result<Self, Self::Rejection> {
+            // `CsrfToken` is inserted into request extensions by the
+            // `CsrfLayer` middleware, not resolved from router state, so
+            // extract it without threading `state` through.
+            let token: CsrfToken = parts
+                .extract::<CsrfToken>()
+                .await
+                .map_err(|_| items::AppError::CsrfTokenInvalid)?;
+
+            let submitted = parts
+                .headers
+                .get(CSRF_HEADER)
+                .and_then(|value| value.to_str().ok())
+                .ok_or(items::AppError::CsrfTokenInvalid)?;
+
+            token
+                .verify(submitted)
+                .map_err(|_| items::AppError::CsrfTokenInvalid)?;
+
+            Ok(Self)
         }
     }
 }
-
 /// Per-peer-IP rate limiting via `governor`/`tower_governor` (GCRA
 /// algorithm).
 pub mod governor {
@@ -231,7 +272,7 @@ pub mod trace {
 
     /// Builds the span `TraceLayer::make_span_with` opens for each
     /// request, carrying a per-request id that every log line inside it —
-    /// including `trace_body_layer`'s — automatically inherits.
+    /// including `trace_layer`'s — automatically inherits.
     pub fn make_span(req: &axum::http::Request<axum::body::Body>) -> tracing::Span {
         let request_id = uuid::Uuid::new_v4();
         tracing::info_span!(
@@ -244,7 +285,7 @@ pub mod trace {
 
     /// Logs method/uri/headers/body on the way in, and status/headers/body
     /// on the way out, as one `tracing::info!` line each.
-    pub async fn trace_body_layer(req: Request, next: Next) -> Response {
+    pub async fn trace_layer(req: Request, next: Next) -> Response {
         let method = req.method().to_string();
         let uri = req.uri().to_string();
         let req_headers = headers_json(req.headers());
@@ -521,7 +562,7 @@ pub mod config {
     ///   touches anything below it)
     /// - [`GovernorLayer`] (per-peer-IP rate limiting)
     /// - [`xss::xss_layer`] (hardened response headers)
-    /// - [`trace::trace_body_layer`] (request/response status, headers,
+    /// - [`trace::trace_layer`] (request/response status, headers,
     ///   body logging)
     /// - `tower_http`'s [`tower_http::trace::TraceLayer`] (span per
     ///   request, via [`trace::make_span`])
@@ -560,7 +601,7 @@ pub mod config {
             .route("/items", post(items::create))
             .route("/items/{id}", put(items::update))
             .merge(items_admin_routes) // DELETE joins here, already wrapped in `authz_layer`
-            .layer(middleware::from_fn(csrf::csrf_layer)); // covers POST, PUT, DELETE
+            .layer(csrf::csrf_layer()); // covers POST, PUT, DELETE
 
         let items_routes = Router::new()
             .merge(items_read_routes)
@@ -584,7 +625,7 @@ pub mod config {
                             .on_request(())
                             .on_response(()),
                     )
-                    .layer(middleware::from_fn(trace::trace_body_layer))
+                    .layer(middleware::from_fn(trace::trace_layer))
                     .layer(middleware::from_fn(xss::xss_layer)),
             )
             .layer(GovernorLayer::new(state.gvrnr.clone()))
@@ -856,9 +897,9 @@ pub mod handlers {
 /// CRUD API for `\[`Item`\]` resources, backed by an in-memory
 /// [`AppStore`](crate::config::AppStore).
 pub mod items {
-    use crate::config::AppStore;
+    use crate::{config::AppStore, csrf::CsrfValidated};
     use axum::{
-        extract::{Json, Path, Query, State},
+        extract::{/*HeaderMap, */ Json, Path, Query, State},
         http::StatusCode,
         response::IntoResponse,
     };
@@ -871,10 +912,13 @@ pub mod items {
     /// # Errors
     ///
     /// Returns [`AppError::UnprocessableEntity`] if the JSON body fails
-    /// validation (e.g. an empty `name` or `desc`).
+    /// validation (e.g. an empty `name` or `desc`), or
+    /// [`AppError::CsrfTokenInvalid`] if the submitted `x-csrf-token`
+    /// header does not match the signed `csrf_token` cookie.
     #[tracing::instrument(skip_all, err)]
     pub async fn create(
         State(state): State<AppStore<Item>>,
+        _csrf: CsrfValidated,
         Valid(Json(payload)): Valid<Json<CreateJsonPayload>>,
     ) -> AppResult<impl IntoResponse> {
         let id = uuid::Uuid::new_v4();
@@ -950,11 +994,14 @@ pub mod items {
     ///
     /// # Errors
     ///
-    /// Returns [`AppError::NotFound`] if no item exists with the given id.
+    /// Returns [`AppError::NotFound`] if no item exists with the given id,
+    /// or [`AppError::CsrfTokenInvalid`] if the submitted `x-csrf-token`
+    /// header does not match the signed `csrf_token` cookie.
     #[tracing::instrument(skip_all, err)]
     pub async fn delete(
         State(state): State<AppStore<Item>>,
         Path(GetPathId { id }): Path<GetPathId>,
+        _csrf: CsrfValidated,
     ) -> AppResult<impl IntoResponse> {
         let (_, item) = state
             .remove(&id)
@@ -1057,12 +1104,14 @@ pub mod items {
     /// # Errors
     ///
     /// Returns [`AppError::NotFound`] if no item exists with the given id,
-    /// or [`AppError::UnprocessableEntity`] if the JSON body fails
-    /// validation.
+    /// [`AppError::UnprocessableEntity`] if the JSON body fails validation,
+    /// or [`AppError::CsrfTokenInvalid`] if the submitted `x-csrf-token`
+    /// header does not match the signed `csrf_token` cookie.
     #[tracing::instrument(skip_all, err)]
     pub async fn update(
         State(state): State<AppStore<Item>>,
         Path(GetPathId { id }): Path<GetPathId>,
+        _csrf: CsrfValidated,
         Valid(Json(payload)): Valid<Json<UpdateJsonPayload>>,
     ) -> AppResult<impl IntoResponse> {
         let mut item = state
@@ -1111,6 +1160,13 @@ pub mod items {
         #[status_code("404")]
         #[code("NOT_FOUND")]
         NotFound(String),
+
+        /// The submitted `x-csrf-token` header did not match the signed
+        /// `csrf_token` cookie, or either was absent.
+        #[error("Failed to find or match CSRF tokens!")]
+        #[status_code("403")]
+        #[code("FORBIDDEN")]
+        CsrfTokenInvalid,
     }
 }
 
@@ -2920,51 +2976,93 @@ mod tests {
     /// Tests for [`crate::csrf`].
     mod csrf {
         use crate::csrf;
-        use axum::{Router, http::StatusCode, middleware, routing::get};
+        use axum::{
+            Router,
+            http::{header, StatusCode},
+            routing::{get, post},
+        };
+        use axum_csrf::{CsrfConfig, CsrfLayer};
         use axum_test::TestServer;
 
+        /// Minimal router: a GET route to trigger `CsrfLayer` cookie issuance,
+        /// and a POST route that extracts `CsrfValidated` so the double-submit
+        /// check actually runs.
         fn test_server() -> TestServer {
             let app = Router::new()
                 .route("/items", get(|| async { "ok" }))
-                .layer(middleware::from_fn(csrf::csrf_layer));
+                .route("/items", post(|_csrf: csrf::CsrfValidated| async { "ok" }))
+                .layer(CsrfLayer::new(CsrfConfig::default()));
             TestServer::new(app)
         }
 
-        /// Verifies a request succeeds when the header and cookie tokens
-        /// match.
+        /// Pulls the `csrf_token` value out of a response's `Set-Cookie` header.
+        fn extract_csrf_cookie(response: &axum_test::TestResponse) -> String {
+            response
+                .headers()
+                .get_all(header::SET_COOKIE)
+                .iter()
+                .filter_map(|v| v.to_str().ok())
+                .find_map(|cookie| {
+                    cookie
+                        .strip_prefix("csrf_token=")
+                        .and_then(|rest| rest.split(';').next())
+                        .map(str::to_string)
+                })
+                .expect("CsrfLayer should issue a csrf_token cookie")
+        }
+
+        /// Header and cookie match → request succeeds.
+        /// A priming GET is needed first so the layer issues a real token.
         #[test_log::test(tokio::test)]
         async fn test_csrf_layer_success_matching_token() {
-            let response = test_server()
-                .get("/items")
-                .add_header("x-csrf-token", "abc123")
-                .add_header(axum::http::header::COOKIE, "csrf_token=abc123")
+            let server = test_server();
+
+            // Priming request: triggers CsrfLayer to issue a signed cookie.
+            let primed = server.get("/items").await;
+            primed.assert_status_ok();
+            let token = extract_csrf_cookie(&primed);
+
+            // Write request: echo the token in both cookie and header.
+            let response = server
+                .post("/items")
+                .add_header("x-csrf-token", &token)
+                .add_header(header::COOKIE, format!("csrf_token={token}"))
                 .await;
 
             response.assert_status_ok();
         }
 
-        /// Verifies a request is rejected when the header token doesn't
-        /// match the cookie token.
+        /// Header doesn't match the (valid) cookie → rejected with 403.
         #[test_log::test(tokio::test)]
         async fn test_csrf_layer_failure_mismatched_token() {
-            let response = test_server()
-                .get("/items")
-                .add_header("x-csrf-token", "abc123")
-                .add_header(axum::http::header::COOKIE, "csrf_token=different")
+            let server = test_server();
+
+            let primed = server.get("/items").await;
+            primed.assert_status_ok();
+            let token = extract_csrf_cookie(&primed);
+
+            // Cookie is valid, but the header is tampered with.
+            let response = server
+                .post("/items")
+                .add_header("x-csrf-token", "not-the-real-token")
+                .add_header(header::COOKIE, format!("csrf_token={token}"))
                 .await;
 
             response.assert_status(StatusCode::FORBIDDEN);
         }
 
-        /// Verifies a request with no CSRF header or cookie at all is
-        /// rejected.
+        /// No CSRF credentials at all → rejected with 403.
+        /// Must hit a route that extracts `CsrfValidated`; the layer alone
+        /// won't reject the request.
         #[test_log::test(tokio::test)]
         async fn test_csrf_layer_failure_missing_token() {
-            let response = test_server().get("/items").await;
+            let server = test_server();
+
+            // No cookie, no header, straight POST.
+            let response = server.post("/items").await;
             response.assert_status(StatusCode::FORBIDDEN);
         }
     }
-
     /// Tests for [`crate::governor`], exercised against a minimal
     /// standalone router.
     mod governor {
@@ -3055,10 +3153,10 @@ mod tests {
             }
         }
 
-        /// Verifies `trace_body_layer` redacts the `authorization` header
+        /// Verifies `trace_layer` redacts the `authorization` header
         /// value in its logged output, and never logs the raw token.
         #[test_log::test(tokio::test)]
-        async fn test_trace_body_layer_redacts_authorization() {
+        async fn test_trace_layer_redacts_authorization() {
             let buf = Arc::new(Mutex::new(Vec::new()));
             let subscriber = tracing_subscriber::fmt()
                 .json()
@@ -3067,7 +3165,7 @@ mod tests {
 
             let app = Router::new()
                 .route("/ping", get(|| async { "pong" }))
-                .layer(middleware::from_fn(trace::trace_body_layer));
+                .layer(middleware::from_fn(trace::trace_layer));
 
             let req = Request::builder()
                 .uri("/ping")

@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 axum = { version = "0.8.9", features = ["macros"] } # cargo add axum --features macros
-# axum_csrf = { version = "0.11.0", features = ["layer"] } # cargo add axum-csrf --features layer
 axum-error-handler = "0.2.1" # cargo add axum-error-handler
 # axum-governor = "1.0.3" # cargo add axum-governor — unused in source
 # axum-response-cache = "0.4.0" # cargo add axum-response-cache — unused in source

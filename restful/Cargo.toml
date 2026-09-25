@@ -10,7 +10,6 @@ axum-error-handler = "0.2.1" # cargo add axum-error-handler
 # axum-response-cache = "0.4.0" # cargo add axum-response-cache — unused in source
 axum-server = { version = "0.8.0", features = ["tls-rustls"] } # cargo add axum-server --features tls-rustls
 axum-valid = "0.24.0" # cargo add axum-valid
-# chrono = { version = "0.4.43", features = ["serde"] } # cargo add chrono --features serde — unused in source
 dashmap = "6.2.1" # cargo add dashmap
 figment = { version = "0.10.19", features = ["env", "test"] } # cargo add figment --features env,test
 governor = "0.10.4" # cargo add governor

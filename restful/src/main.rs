@@ -38,33 +38,7 @@ async fn main() -> config::AppResult<()> {
 
     config::run_app(config::AppState::new().await?, tokio::signal::ctrl_c()).await
 }
-
-/// Adds hardened response headers (XSS/clickjacking/MIME-sniffing
-/// mitigation) to every response.
-pub mod xss {
-    use axum::{extract::Request, http::HeaderValue, middleware::Next, response::Response};
-
-    /// Adds headers that stop a browser from rendering or executing this
-    /// API's JSON responses as HTML/script, even if a client is tricked
-    /// into navigating to one directly.
-    pub async fn xss_layer(req: Request, next: Next) -> Response {
-        let mut res = next.run(req).await;
-        let headers = res.headers_mut();
-
-        headers.insert(
-            "x-content-type-options",
-            HeaderValue::from_static("nosniff"),
-        );
-        headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
-        headers.insert(
-            "content-security-policy",
-            HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
-        );
-        headers.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
-
-        res
-    }
-}
+mod xss;
 
 /// CORS policy for this service.
 pub mod cors {
@@ -2138,10 +2112,7 @@ mod tests {
         /// `csrf_token` cookie and the `x-csrf-token` header.
         async fn csrf_token(server: &TestServer, token: &str) -> String {
             let (name, value) = bearer(token);
-            let response = server
-                .get("/csrf-token")
-                .add_header(name, value)
-                .await;
+            let response = server.get("/csrf-token").add_header(name, value).await;
             response.assert_status(StatusCode::OK);
 
             response
@@ -2870,34 +2841,6 @@ mod tests {
     }
 
     /// Tests for [`crate::xss`].
-    mod xss {
-        use crate::xss;
-        use axum::{Router, middleware, routing::get};
-        use axum_test::TestServer;
-
-        fn test_server() -> TestServer {
-            let app = Router::new()
-                .route("/ping", get(|| async { "pong" }))
-                .layer(middleware::from_fn(xss::xss_layer));
-            TestServer::new(app)
-        }
-
-        /// Verifies every hardened header is present on the response.
-        #[test_log::test(tokio::test)]
-        async fn test_xss_layer_success_adds_headers() {
-            let server = test_server();
-            let response = server.get("/ping").await;
-
-            response.assert_status_ok();
-            response.assert_header("x-content-type-options", "nosniff");
-            response.assert_header("x-frame-options", "DENY");
-            response.assert_header(
-                "content-security-policy",
-                "default-src 'none'; frame-ancestors 'none'",
-            );
-            response.assert_header("referrer-policy", "no-referrer");
-        }
-    }
 
     /// Tests for [`crate::cors`].
     mod cors {

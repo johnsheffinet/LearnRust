@@ -11,7 +11,7 @@
     "ANTHROPIC_BASE_URL": "https://openrouter.ai/api",
     "ANTHROPIC_AUTH_TOKEN": "${localEnv:OPENROUTER_API_KEY}",
     "ANTHROPIC_API_KEY": "",
-    "ANTHROPIC_DEFAULT_FABLE_MODEL": "openrouter/free"
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "openrouter/free[1m]"
   },
   "postCreateCommand": "cargo install cargo-tarpaulin --locked",
   "customizations": {

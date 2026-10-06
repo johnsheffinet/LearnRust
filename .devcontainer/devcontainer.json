@@ -4,7 +4,8 @@
   "features": {
     "ghcr.io/devcontainers/features/rust:1": {"version": "stable"},
     "ghcr.io/devcontainers/features/node:2.1.0": {},
-    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
+    "ghcr.io/devcontainers/features/git-lfs:1": {}
   },
   "containerEnv": {
     "ANTHROPIC_BASE_URL": "https://openrouter.ai/api",

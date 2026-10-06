@@ -1,0 +1,23 @@
+{
+  "name": "Rust & Claude Code",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/devcontainers/features/rust:1": {"version": "stable"},
+    "ghcr.io/devcontainers/features/node:2.1.0": {},
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
+  },
+  "containerEnv": {
+    "ANTHROPIC_BASE_URL": "https://openrouter.ai/api",
+    "ANTHROPIC_AUTH_TOKEN": "${localEnv:OPENROUTER_API_KEY}",
+    "ANTHROPIC_API_KEY": "",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "openrouter/free"
+  },
+  "postCreateCommand": "cargo install cargo-tarpaulin --locked",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "humao.rest-client"
+      ]
+    }
+  }
+}

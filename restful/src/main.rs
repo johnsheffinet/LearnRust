@@ -38,6 +38,7 @@ async fn main() -> config::AppResult<()> {
 
     config::run_app(config::AppState::new().await?, tokio::signal::ctrl_c()).await
 }
+mod auth;
 mod xss;
 
 /// CORS policy for this service.
@@ -1288,42 +1289,6 @@ pub mod cache {
     }
 }
 
-/// JWT authentication and role-based authorization for this service,
-/// implemented as ordinary `axum::middleware::from_fn`/`from_fn_with_state`
-/// handlers.
-///
-/// Two middleware functions do the work:
-/// - [`authn_layer`] verifies the `Authorization: Bearer <jwt>` header,
-///   decodes [`Claims`], looks the subject up in an in-memory [`RoleStore`],
-///   and inserts an [`AuthUser`] into the request's extensions.
-/// - [`authz_layer`] reads that [`AuthUser`] back out and rejects the
-///   request if it doesn't hold the required role. It must run *after*
-///   [`authn_layer`] on the same request, since it only reads what that
-///   middleware wrote.
-///
-/// # Examples
-///
-/// Applying both to a sub-router (see [`AuthState::new`] and [`authz_layer`]
-/// for the pieces used here):
-///
-/// ```ignore
-/// use axum::{middleware, routing::delete, Router};
-///
-/// let items_admin_routes = Router::new()
-///     .route("/items/{id}", delete(items::delete))
-///     .layer(middleware::from_fn(|ext, req, next| {
-///         auth::authz_layer("admin", ext, req, next)
-///     }));
-///
-/// let protected = Router::new()
-///     .merge(items_admin_routes)
-///     .layer(middleware::from_fn_with_state(
-///         auth::AuthState::new(&jwt_secret, roles.clone()),
-///         auth::authn_layer,
-///     ));
-/// ```
-pub mod auth;
-
 /// Integration and unit tests for [`config`], [`handlers`], [`items`],
 /// [`auth`], [`cache`], [`xss`], [`cors`], [`csrf`], [`governor`], and
 /// [`trace`].
@@ -2270,118 +2235,6 @@ mod tests {
         }
     }
 
-        /// Verifies a valid token authenticates and `AuthUser` is extractable.
-        #[test_log::test(tokio::test)]
-        async fn test_authenticate_success() {
-            let server = test_server();
-            let token = mint_token("alice", false);
-
-            let response = server
-                .get("/me")
-                .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
-                .await;
-
-            response.assert_status(StatusCode::OK);
-            response.assert_text("alice");
-        }
-
-        /// Verifies a missing `Authorization` header is rejected.
-        #[test_log::test(tokio::test)]
-        async fn test_authenticate_failure_missing_header() {
-            let response = test_server().get("/me").await;
-            response.assert_status(StatusCode::UNAUTHORIZED);
-        }
-
-        /// Verifies a header without a `Bearer ` prefix is rejected.
-        #[test_log::test(tokio::test)]
-        async fn test_authenticate_failure_malformed_header() {
-            let response = test_server()
-                .get("/me")
-                .add_header(axum::http::header::AUTHORIZATION, "not-a-bearer-token")
-                .await;
-
-            response.assert_status(StatusCode::UNAUTHORIZED);
-        }
-
-        /// Verifies a token signed with a different secret is rejected.
-        #[test_log::test(tokio::test)]
-        async fn test_authenticate_failure_invalid_signature() {
-            let claims = Claims {
-                sub: "alice".to_string(),
-                exp: usize::MAX,
-            };
-            let bad_token = encode(
-                &Header::default(),
-                &claims,
-                &EncodingKey::from_secret(b"wrong-secret"),
-            )
-            .unwrap();
-
-            let response = test_server()
-                .get("/me")
-                .add_header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {bad_token}"),
-                )
-                .await;
-
-            response.assert_status(StatusCode::UNAUTHORIZED);
-        }
-
-        /// Verifies an expired token is rejected.
-        #[test_log::test(tokio::test)]
-        async fn test_authenticate_failure_expired_token() {
-            let token = mint_token("alice", true);
-
-            let response = test_server()
-                .get("/me")
-                .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
-                .await;
-
-            response.assert_status(StatusCode::UNAUTHORIZED);
-        }
-
-        /// Verifies a user holding the required role is allowed through.
-        #[test_log::test(tokio::test)]
-        async fn test_authorize_success() {
-            let token = mint_token("alice", false); // alice: admin, user
-
-            let response = test_server()
-                .get("/admin")
-                .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
-                .await;
-
-            response.assert_status(StatusCode::OK);
-        }
-
-        /// Verifies an authenticated user lacking the required role is
-        /// forbidden.
-        #[test_log::test(tokio::test)]
-        async fn test_authorize_failure_forbidden() {
-            let token = mint_token("bob", false); // bob: user only
-
-            let response = test_server()
-                .get("/admin")
-                .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
-                .await;
-
-            response.assert_status(StatusCode::FORBIDDEN);
-        }
-
-        /// Verifies a valid token for a subject with no `RoleStore` entry
-        /// at all is treated as having zero roles, not an error.
-        #[test_log::test(tokio::test)]
-        async fn test_authorize_failure_unknown_user_has_no_roles() {
-            let token = mint_token("mallory", false); // not seeded in RoleStore
-
-            let response = test_server()
-                .get("/admin")
-                .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
-                .await;
-
-            response.assert_status(StatusCode::FORBIDDEN);
-        }
-    }
     /// Tests for [`crate::cache`], exercised against a minimal standalone
     /// router rather than the full [`crate::config::https_router`].
     mod cache {

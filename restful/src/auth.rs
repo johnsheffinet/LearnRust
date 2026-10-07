@@ -48,6 +48,81 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error; 
 
+/*
+use ...
+
+#[derive(Debug, Error, AxumErrorResponse)]
+pub enum AppError {
+    #[error("Failed to find or read bearer token in authorization header!")]
+    #[status_code("401")]
+    #[code("UNAUTHORIZED")]
+    Unauthorized,
+
+    #[error("Failed to act with sufficient privilege!")]
+    #[status_code("403")]
+    #[code("FORBIDDEN")]
+    Forbidden,
+}
+#[derive(Clone)]
+pub struct AuthState {
+    decoding_key: DecodingKey,
+    validation: Validation,
+    roles: RoleStore,
+}
+impl AuthState {
+    pub fn new(jwt_secret: &SecretString, roles: RoleStore) -> Self {
+        Self {
+            decoding_key: DecodingKey::from_secret(jwt_secret.expose_secret().as_bytes()),
+            validation: Validation::default(),
+            roles,
+        }
+    }
+}
+#[derive(Clone, Debug)]
+pub struct AuthUser {
+    pub user_id: String,
+    pub roles: Vec<String>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Claims {
+    pub sub: String,
+    pub exp: usize,
+}
+type AppResult<T> = Result<T, AppError>;
+type RoleStore = Arc<DashMap<String, Vec<String>>>;
+fn authn_layer(
+    State(state): State<AuthState>,
+    mut req: Request,
+    next: Next
+) -> AppResult<Response> {
+    let token = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or(AppError::Unauthorized)?;
+    let claims = decode::<Claims>;
+    let user_id = claims.claims.sub;
+    let roles = ;
+    req.extension_mut().insert(AuthUser {
+        user_id,
+        roles,
+    });
+    Ok(next.run(req).await)
+}
+fn authz_layer(
+    role: &'static str,
+    Extension(user): Extension<AuthUser>,
+    req; Request,
+    next: Next
+) -> AppResult<Response> {
+    if user.roles.iter().any(|r| r == role)
+        Ok(next.run(req).await)
+    else
+        Err(AppError::Unauthorized)
+}
+ */
+
 /// Errors produced while authenticating or authorizing a request.
 ///
 /// Implements [`IntoResponse`] (via `#[derive(AxumErrorResponse)]`) so
@@ -56,14 +131,14 @@ use thiserror::Error;
 /// resulting HTTP status and JSON error body.
 #[derive(Debug, Error, AxumErrorResponse)]
 pub enum AppError {
-    /// Missing, malformed, or invalid/expired bearer token; responds
+    /// Missing, invalid, or expired bearer token; responds
     /// with `401 Unauthorized`.
     #[error("Failed to find or read bearer token in authorization header!")]
     #[status_code("401")]
     #[code("UNAUTHORIZED")]
     Unauthorized,
 
-    /// Token is valid but the authenticated user lacks the role
+    /// Bearer token is valid but the authenticated user lacks the role
     /// required for this resource; responds with `403 Forbidden`.
     #[error("Failed to act with insufficient permissions!")]
     #[status_code("403")]
@@ -251,17 +326,19 @@ pub async fn authn_layer(
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or(AppError::Unauthorized)?;
 
-    let token_data = decode::<Claims>(token, &state.decoding_key, &state.validation)
+    let claims = decode::<Claims>(token, &state.decoding_key, &state.validation)
         .map_err(|_| AppError::Unauthorized)?;
 
+    let user_id = claims.claims.sub;
+    
     let roles = state
         .roles
-        .get(&token_data.claims.sub)
+        .get(&user_id)
         .map(|entry| entry.clone())
         .unwrap_or_default();
 
     req.extensions_mut().insert(AuthUser {
-        user_id: token_data.claims.sub,
+        user_id,
         roles,
     });
 

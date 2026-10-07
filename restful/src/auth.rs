@@ -45,28 +45,28 @@ use jsonwebtoken::{DecodingKey, Validation, decode};
 use secrecy::{ExposeSecret, SecretString};
 use std::sync::Arc;
 
-/// In-memory role assignments, keyed by the JWT `sub` (user id).
+/// Errors produced while authenticating or authorizing a request.
 ///
-/// This is a thread-safe, reference-counted, concurrent map, so cloning
-/// a `RoleStore` is cheap and shares the same underlying data — the
-/// same pattern used by [`AppStore`](crate::config::AppStore) for
-/// items.
-///
-/// # Examples
-///
-/// ```
-/// use dashmap::DashMap;
-/// use std::sync::Arc;
-///
-/// let roles: Arc<DashMap<String, Vec<String>>> = Arc::new(DashMap::new());
-/// roles.insert("alice".to_string(), vec!["admin".to_string()]);
-///
-/// assert_eq!(
-///     roles.get("alice").map(|r| r.clone()),
-///     Some(vec!["admin".to_string()])
-/// );
-/// ```
-pub type RoleStore = Arc<DashMap<String, Vec<String>>>;
+/// Implements [`IntoResponse`] (via `#[derive(AxumErrorResponse)]`) so
+/// it can be returned directly from [`authn_layer`] and [`authz_layer`];
+/// each variant's `#[status_code]`/`#[code]` attributes determine the
+/// resulting HTTP status and JSON error body.
+#[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
+pub enum AppError {
+    /// Missing, malformed, or invalid/expired bearer token; responds
+    /// with `401 Unauthorized`.
+    #[error("Bearer token in authorization header is missing or invalid!")]
+    #[status_code("401")]
+    #[code("UNAUTHORIZED")]
+    Unauthorized,
+
+    /// Token is valid but the authenticated user lacks the role
+    /// required for this resource; responds with `403 Forbidden`.
+    #[error("Permissions to act on this resource are insufficient!")]
+    #[status_code("403")]
+    #[code("FORBIDDEN")]
+    Forbidden,
+}
 
 /// JWT claims this service expects to find in a validated Bearer token.
 ///
@@ -180,6 +180,32 @@ impl AuthState {
     }
 }
 
+/// In-memory role assignments, keyed by the JWT `sub` (user id).
+///
+/// This is a thread-safe, reference-counted, concurrent map, so cloning
+/// a `RoleStore` is cheap and shares the same underlying data — the
+/// same pattern used by [`AppStore`](crate::config::AppStore) for
+/// items.
+///
+/// # Examples
+///
+/// ```
+/// use dashmap::DashMap;
+/// use std::sync::Arc;
+///
+/// let roles: Arc<DashMap<String, Vec<String>>> = Arc::new(DashMap::new());
+/// roles.insert("alice".to_string(), vec!["admin".to_string()]);
+///
+/// assert_eq!(
+///     roles.get("alice").map(|r| r.clone()),
+///     Some(vec!["admin".to_string()])
+/// );
+/// ```
+pub type RoleStore = Arc<DashMap<String, Vec<String>>>;
+
+/// Convenience alias for results returned by items in [`auth`](self).
+pub type AppResult<T> = Result<T, AppError>;
+
 /// Authenticates an incoming request: validates its Bearer token and,
 /// on success, attaches an [`AuthUser`] to the request's extensions
 /// before passing it on to `next`.
@@ -272,37 +298,9 @@ pub async fn authz_layer(
     }
 }
 
-/// Convenience alias for results returned by items in [`auth`](self).
-pub type AppResult<T> = Result<T, AppError>;
-
-/// Errors produced while authenticating or authorizing a request.
-///
-/// Implements [`IntoResponse`] (via `#[derive(AxumErrorResponse)]`) so
-/// it can be returned directly from [`authn_layer`] and [`authz_layer`];
-/// each variant's `#[status_code]`/`#[code]` attributes determine the
-/// resulting HTTP status and JSON error body.
-#[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
-pub enum AppError {
-    /// Missing, malformed, or invalid/expired bearer token; responds
-    /// with `401 Unauthorized`.
-    #[error("Bearer token in authorization header is missing or invalid!")]
-    #[status_code("401")]
-    #[code("UNAUTHORIZED")]
-    Unauthorized,
-
-    /// Token is valid but the authenticated user lacks the role
-    /// required for this resource; responds with `403 Forbidden`.
-    #[error("Permissions to act on this resource are insufficient!")]
-    #[status_code("403")]
-    #[code("FORBIDDEN")]
-    Forbidden,
-}
-
-/// Tests for [`crate::auth`], exercised against a minimal standalone
-/// router rather than the full [`crate::config::https_router`].
 #[cfg(test)]
 mod tests {
-    use crate::auth::{self, AuthState, AuthUser, Claims, RoleStore};
+    use super::{AuthState, AuthUser, Claims, RoleStore, authn_layer, authz_layer};
     use axum::{Router, extract::Extension, http::StatusCode, middleware, routing::get};
     use axum_test::TestServer;
     use dashmap::DashMap;
@@ -354,7 +352,7 @@ mod tests {
         let admin_only = Router::new()
             .route("/admin", get(|| async { "admin ok" }))
             .layer(middleware::from_fn(|ext, req, next| {
-                auth::authz_layer("admin", ext, req, next)
+                authz_layer("admin", ext, req, next)
             }));
 
         let app = Router::new()
@@ -365,7 +363,7 @@ mod tests {
             .merge(admin_only)
             .layer(middleware::from_fn_with_state(
                 auth_state,
-                auth::authn_layer,
+                authn_layer,
             ));
 
         TestServer::new(app)
@@ -483,75 +481,3 @@ mod tests {
         response.assert_status(StatusCode::FORBIDDEN);
     }
 }
-    /// Tests for [`crate::auth`], exercised against a minimal standalone
-    /// router rather than the full [`crate::config::https_router`].
-    mod auth {
-        use crate::auth::{self, AuthState, AuthUser, Claims, RoleStore};
-        use axum::{Router, extract::Extension, http::StatusCode, middleware, routing::get};
-        use axum_test::TestServer;
-        use dashmap::DashMap;
-        use jsonwebtoken::{EncodingKey, Header, encode};
-        use secrecy::SecretString;
-        use std::{
-            sync::Arc,
-            time::{SystemTime, UNIX_EPOCH},
-        };
-
-        const TEST_SECRET: &str = "test-only-secret-do-not-use-in-prod";
-
-        /// Encodes a test JWT for `sub`, valid for one hour from now — or,
-        /// if `expired` is true, expired one hour ago.
-        fn mint_token(sub: &str, expired: bool) -> String {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as usize;
-            let exp = if expired { now - 3600 } else { now + 3600 };
-
-            let claims = Claims {
-                sub: sub.to_string(),
-                exp,
-            };
-
-            encode(
-                &Header::default(),
-                &claims,
-                &EncodingKey::from_secret(TEST_SECRET.as_bytes()),
-            )
-            .unwrap()
-        }
-
-        /// A minimal protected router: `authn_layer` guards everything,
-        /// and `/admin` additionally requires the "admin" role via
-        /// `authz_layer`. Seeded with "alice" (admin + user) and "bob"
-        /// (user only).
-        fn test_server() -> TestServer {
-            let roles: RoleStore = Arc::new(DashMap::new());
-            roles.insert(
-                "alice".to_string(),
-                vec!["admin".to_string(), "user".to_string()],
-            );
-            roles.insert("bob".to_string(), vec!["user".to_string()]);
-
-            let auth_state = AuthState::new(&SecretString::from(TEST_SECRET.to_string()), roles);
-
-            let admin_only = Router::new()
-                .route("/admin", get(|| async { "admin ok" }))
-                .layer(middleware::from_fn(|ext, req, next| {
-                    auth::authz_layer("admin", ext, req, next)
-                }));
-
-            let app = Router::new()
-                .route(
-                    "/me",
-                    get(|Extension(user): Extension<AuthUser>| async move { user.user_id }),
-                )
-                .merge(admin_only)
-                .layer(middleware::from_fn_with_state(
-                    auth_state,
-                    auth::authn_layer,
-                ));
-
-            TestServer::new(app)
-        }
-

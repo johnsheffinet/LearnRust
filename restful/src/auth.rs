@@ -40,10 +40,13 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use axum_error_handler::AxumErrorResponse;
 use dashmap::DashMap;
 use jsonwebtoken::{DecodingKey, Validation, decode};
 use secrecy::{ExposeSecret, SecretString};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use thiserror::Error; 
 
 /// Errors produced while authenticating or authorizing a request.
 ///
@@ -51,18 +54,18 @@ use std::sync::Arc;
 /// it can be returned directly from [`authn_layer`] and [`authz_layer`];
 /// each variant's `#[status_code]`/`#[code]` attributes determine the
 /// resulting HTTP status and JSON error body.
-#[derive(Debug, thiserror::Error, axum_error_handler::AxumErrorResponse)]
+#[derive(Debug, Error, AxumErrorResponse)]
 pub enum AppError {
     /// Missing, malformed, or invalid/expired bearer token; responds
     /// with `401 Unauthorized`.
-    #[error("Bearer token in authorization header is missing or invalid!")]
+    #[error("Failed to find or read bearer token in authorization header!")]
     #[status_code("401")]
     #[code("UNAUTHORIZED")]
     Unauthorized,
 
     /// Token is valid but the authenticated user lacks the role
     /// required for this resource; responds with `403 Forbidden`.
-    #[error("Permissions to act on this resource are insufficient!")]
+    #[error("Failed to act with insufficient permissions!")]
     #[status_code("403")]
     #[code("FORBIDDEN")]
     Forbidden,
@@ -86,7 +89,7 @@ pub enum AppError {
 ///
 /// assert_eq!(claims.sub, "alice");
 /// ```
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Claims {
     /// The token subject — the user id used to look roles up in the
     /// [`RoleStore`].
@@ -240,7 +243,7 @@ pub async fn authn_layer(
     State(state): State<AuthState>,
     mut req: Request,
     next: Next,
-) -> Result<Response, AppError> {
+) -> AppResult<Response> {
     let token = req
         .headers()
         .get(header::AUTHORIZATION)
@@ -290,7 +293,7 @@ pub async fn authz_layer(
     Extension(user): Extension<AuthUser>,
     req: Request,
     next: Next,
-) -> Result<Response, AppError> {
+) -> AppResult<Response> {
     if user.roles.iter().any(|r| r == role) {
         Ok(next.run(req).await)
     } else {
@@ -393,7 +396,7 @@ mod tests {
 
     /// Verifies a header without a `Bearer ` prefix is rejected.
     #[test_log::test(tokio::test)]
-    async fn test_authenticate_failure_malformed_header() {
+    async fn test_authenticate_failure_invalid_header() {
         let response = test_server()
             .get("/me")
             .add_header(axum::http::header::AUTHORIZATION, "not-a-bearer-token")
@@ -404,7 +407,7 @@ mod tests {
 
     /// Verifies a token signed with a different secret is rejected.
     #[test_log::test(tokio::test)]
-    async fn test_authenticate_failure_invalid_signature() {
+    async fn test_authenticate_failure_invalid_token() {
         let claims = Claims {
             sub: "alice".to_string(),
             exp: usize::MAX,

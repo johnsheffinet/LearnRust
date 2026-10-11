@@ -82,10 +82,31 @@ use std::{
 use thiserror::Error;
 use uuid::Uuid;
 
-// ---------------------------------------------------------------------------
-// Enums
-// ---------------------------------------------------------------------------
-
+/*
+#[derive()]
+enum AppError {}
+#[derive()]
+struct AuthState {}
+impl Default for AuthState {}
+impl AuthState {}
+#[derive()]
+struct AuthUser {}
+#[derive()]
+struct Claims {}
+#[derive()]
+struct TokenResponse {}
+#[derive()]
+struct TokenState {}
+type AppResult<T>
+type RoleStore
+type TokenStore
+#[]
+fn authn_layer()
+fn authz_layer()
+fn issue_token()
+fn renew_token()
+fn revoke_token()
+ */
 /// Errors produced while authenticating, authorizing, or managing tokens.
 ///
 /// Implements [`IntoResponse`] (via `#[derive(AxumErrorResponse)]`) so it

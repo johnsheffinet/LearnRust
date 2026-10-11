@@ -100,11 +100,15 @@ struct TokenState {}
 type AppResult<T>
 type RoleStore
 type TokenStore
-#[]
+#[tracing::instrument(skip_all, err)]
 fn authn_layer()
+#[tracing::instrument(skip_all, err)]
 fn authz_layer()
+#[tracing::instrument(skip_all, err)]
 fn issue_token()
+#[tracing::instrument(skip_all, err)]
 fn renew_token()
+#[tracing::instrument(skip_all, err)]
 fn revoke_token()
  */
 /// Errors produced while authenticating, authorizing, or managing tokens.

@@ -83,33 +83,33 @@ use thiserror::Error;
 use uuid::Uuid;
 
 /*
-#[derive()]
-enum AppError {}
-#[derive()]
-struct AuthState {}
+#[derive(Debug, Error, AxumErrorResponse)]
+pub enum AppError {}
+#[derive(Clone)]
+pub struct AuthState {}
 impl Default for AuthState {}
 impl AuthState {}
-#[derive()]
-struct AuthUser {}
-#[derive()]
-struct Claims {}
-#[derive()]
-struct TokenResponse {}
-#[derive()]
-struct TokenState {}
-type AppResult<T>
-type RoleStore
-type TokenStore
-#[tracing::instrument(skip_all, err)]
-fn authn_layer()
-#[tracing::instrument(skip_all, err)]
-fn authz_layer()
-#[tracing::instrument(skip_all, err)]
-fn issue_token()
-#[tracing::instrument(skip_all, err)]
-fn renew_token()
-#[tracing::instrument(skip_all, err)]
-fn revoke_token()
+#[derive(Clone, Debug)]
+pub struct AuthUser {}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Claims {}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TokenResponse {}
+#[derive(Clone, Debug, Default)]
+pub struct TokenState {}
+pub type AppResult<T> = Result<T, AppError>;
+pub type RoleStore = Arc<DashMap<String, Vec<String>>>;
+pub type TokenStore = Arc<DashMap<String,TokenState>>;
+#[tracing::instrument(skip_all, fields(method = %req.method(), uri = %req.uri()), err)]
+pub async fn authn_layer()
+#[tracing::instrument(skip_all, fields(role = %role, method = %req.method(), uri = %req.uri()), err)]
+pub async fn authz_layer()
+#[tracing::instrument(skip_all, fields(sub = %user.user_id), err)]
+pub async fn issue_token()
+#[tracing::instrument(skip_all, fields(sub = %user.user_id), err)]
+pub async fn renew_token()
+#[tracing::instrument(skip_all, fields(sub = %user.user_id), err)]
+pub async fn revoke_token()
  */
 /// Errors produced while authenticating, authorizing, or managing tokens.
 ///

@@ -84,7 +84,28 @@ use uuid::Uuid;
 
 /*
 #[derive(Debug, Error, AxumErrorResponse)]
-pub enum AppError {}
+pub enum AppError {
+#[error("Failed to read bearer token!")]
+#[status_code("401")]
+#[code("UNAUTHORIZED")]
+Unauthorized,
+
+#[error("Failed with inadequate role!")]
+#[status_code("403")]
+#[code("FORBIDDEN")]
+Forbidden,
+
+#[error("Failed to set expiry in bearer token!")]
+#[status_code("422")]
+#[code("UNPROCESSABLE_ENTITY")]
+UnprocessableEntity,
+
+#[error("Failed to sign bearer token! {0}")]
+#[status_code("500")]
+#[code("INTERNAL_SERVER_ERROR")]
+InternalServerError(#[from] jsonwebtoken::errors::Error),
+}
+
 #[derive(Clone)]
 pub struct AuthState {}
 impl Default for AuthState {}

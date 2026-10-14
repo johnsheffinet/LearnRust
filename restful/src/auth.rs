@@ -82,67 +82,10 @@ use std::{
 use thiserror::Error;
 use uuid::Uuid;
 
-/*
-#[derive(Debug, Error, AxumErrorResponse)]
-pub enum AppError {
-    #[error("Failed to read bearer token!")]
-    #[status_code("401")]
-    #[code("UNAUTHORIZED")]
-    Unauthorized,
-    
-    #[error("Failed with inadequate role!")]
-    #[status_code("403")]
-    #[code("FORBIDDEN")]
-    Forbidden,
-    
-    #[error("Failed to set expiry in bearer token!")]
-    #[status_code("422")]
-    #[code("UNPROCESSABLE_ENTITY")]
-    UnprocessableEntity,
-    
-    #[error("Failed to sign bearer token! {0}")]
-    #[status_code("500")]
-    #[code("INTERNAL_SERVER_ERROR")]
-    InternalServerError(#[from] jsonwebtoken::errors::Error),
-}
-#[derive(Clone)]
-pub struct AuthState {
-    decoding_key: DecodingKey,
-    encoding_key: EncodingKey,
-    validation: Validation,
-    roles: RoleStore,
-    tokens: TokenStore,
-}
-impl Default for AuthState {
-    pub async default() -> AppResult<Self> {}
-}
-impl AuthState {
-    pub async fn new(
-        jwt_secret: &SecretString, roles: RoleStore, tokens: TokenStore
-    ) -> AppResult<Self> {}
-}
-#[derive(Clone, Debug)]
-pub struct AuthUser {}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Claims {}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TokenResponse {}
-#[derive(Clone, Debug, Default)]
-pub struct TokenState {}
-pub type AppResult<T> = Result<T, AppError>;
-pub type RoleStore = Arc<DashMap<String, Vec<String>>>;
-pub type TokenStore = Arc<DashMap<String,TokenState>>;
-#[tracing::instrument(skip_all, fields(method = %req.method(), uri = %req.uri()), err)]
-pub async fn authn_layer()
-#[tracing::instrument(skip_all, fields(role = %role, method = %req.method(), uri = %req.uri()), err)]
-pub async fn authz_layer()
-#[tracing::instrument(skip_all, fields(sub = %user.user_id), err)]
-pub async fn issue_token()
-#[tracing::instrument(skip_all, fields(sub = %user.user_id), err)]
-pub async fn renew_token()
-#[tracing::instrument(skip_all, fields(sub = %user.user_id), err)]
-pub async fn revoke_token()
- */
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
 /// Errors produced while authenticating, authorizing, or managing tokens.
 ///
 /// Implements [`IntoResponse`] (via `#[derive(AxumErrorResponse)]`) so it
@@ -181,7 +124,7 @@ pub enum AppError {
     /// The computed `exp` for a new token overflowed the clock, or the
     /// configured lifetime truncated to zero. Responds with
     /// `422 Unprocessable Entity` when reached from a request; when
-    /// returned by [`AuthState::with_ttl`] it is a startup-time
+    /// returned by [`AuthState::new_for_ttl`] it is a startup-time
     /// configuration failure.
     #[error("Failed to set expiry in bearer token!")]
     #[status_code("422")]
@@ -192,6 +135,142 @@ pub enum AppError {
 // ---------------------------------------------------------------------------
 // Structs
 // ---------------------------------------------------------------------------
+
+/// State captured by the [`authn_layer`] middleware and shared with the
+/// lifecycle handlers: the keys used to sign and verify tokens, the
+/// validation rules, the role store, the token store, and the lifetime
+/// assigned to newly minted tokens.
+///
+/// Built once at startup and passed to
+/// [`middleware::from_fn_with_state`](axum::middleware::from_fn_with_state)
+/// alongside [`authn_layer`].
+#[derive(Clone)]
+pub struct AuthState {
+    /// Key used to verify a token's signature. Derived once from the
+    /// app's JWT secret in [`AuthState::new_for_ttl`].
+    decoding_key: DecodingKey,
+    /// Key used to sign tokens minted by [`issue_token`] and
+    /// [`renew_token`]. Derived from the same secret as `decoding_key`.
+    encoding_key: EncodingKey,
+    /// Validation rules (algorithm, required claims, clock skew, etc.)
+    /// applied to every token. Currently [`Validation::default`].
+    validation: Validation,
+    /// Store consulted for the authenticated subject's roles.
+    roles: RoleStore,
+    /// Store consulted for the subject's current token version, and
+    /// updated by the lifecycle handlers.
+    tokens: TokenStore,
+    /// Lifetime of tokens minted by this service, in whole seconds.
+    ///
+    /// Stored truncated to seconds because `exp` is a second-resolution
+    /// Unix timestamp; a sub-second remainder would be lost anyway.
+    token_ttl: u64,
+}
+
+impl AuthState {
+    /// Builds authentication state from the app's JWT signing secret, role
+    /// store, and token store, with the default one-hour token lifetime.
+    ///
+    /// See [`AuthState::new_for_ttl`] to override the lifetime.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::UnprocessableEntity`] only if the one-hour
+    /// default is invalid, which cannot happen — the `Result` is returned
+    /// so callers can `?` it uniformly with [`AuthState::new_for_ttl`].
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use dashmap::DashMap;
+    /// use secrecy::SecretString;
+    /// use std::sync::Arc;
+    ///
+    /// let jwt_secret = SecretString::from("super-secret-demo-key".to_string());
+    /// let roles = Arc::new(DashMap::new());
+    /// let tokens = Arc::new(DashMap::new());
+    ///
+    /// let auth_state = auth::AuthState::new(&jwt_secret, roles, tokens)?;
+    /// ```
+    pub fn new(
+        jwt_secret: &SecretString,
+        roles: RoleStore,
+        tokens: TokenStore,
+    ) -> AppResult<Self> {
+        Self::new_for_ttl(jwt_secret, roles, tokens, Duration::from_secs(60 * 60))
+    }
+
+    /// Builds authentication state with an explicit token lifetime.
+    ///
+    /// `jwt_secret` is read via [`ExposeSecret::expose_secret`] only for
+    /// the instant it takes to build the keys — the exposed bytes are not
+    /// retained; the [`SecretString`] itself is never logged or stored in
+    /// plain form by this function.
+    ///
+    /// Exposed mainly so tests can mint short-lived tokens without
+    /// sleeping, and so a deployment that needs a different lifetime can
+    /// set one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::UnprocessableEntity`] if `token_ttl` truncates
+    /// to zero seconds. A zero lifetime produces a token whose `exp`
+    /// equals its mint time, which [`jsonwebtoken::decode`] rejects as
+    /// already expired — so the token would be dead on arrival, and a
+    /// caller passing a sub-second duration almost certainly meant
+    /// something else. Rejecting it here turns a confusing runtime `401`
+    /// into a clear configuration failure.
+    ///
+    /// # Panics
+    ///
+    /// Does not panic. `DecodingKey::from_secret` /
+    /// `EncodingKey::from_secret` accept any byte slice (including an empty
+    /// one) and cannot fail.
+    pub fn new_for_ttl(
+        jwt_secret: &SecretString,
+        roles: RoleStore,
+        tokens: TokenStore,
+        token_ttl: Duration,
+    ) -> AppResult<Self> {
+        // Check the truncated value, not the `Duration` itself: a
+        // sub-second duration is not zero, but `as_secs()` on it is.
+        let token_ttl = token_ttl.as_secs();
+        if token_ttl < 1 {
+            return Err(AppError::UnprocessableEntity);
+        }
+
+        let secret = jwt_secret.expose_secret().as_bytes();
+
+        Ok(Self {
+            decoding_key: DecodingKey::from_secret(secret),
+            encoding_key: EncodingKey::from_secret(secret),
+            validation: Validation::default(),
+            roles,
+            tokens,
+            token_ttl,
+        })
+    }
+
+    /// Signs a token for `sub` at the given version, returning the encoded
+    /// JWT and the `jti` embedded in it.
+    ///
+    /// Returned as `(token, jti)` — the token first, the identifier second
+    /// — matching how every call site destructures it.
+    fn sign(&self, sub: &str, ver: u64) -> AppResult<(String, String)> {
+        let jti = Uuid::new_v4().to_string();
+
+        let claims = Claims {
+            sub: sub.to_owned(),
+            exp: exp_from_ttl(self.token_ttl)?,
+            jti: jti.clone(),
+            ver,
+        };
+
+        let token = encode(&Header::default(), &claims, &self.encoding_key)?;
+
+        Ok((token, jti))
+    }
+}
 
 /// The authenticated identity attached to a request's extensions by
 /// [`authn_layer`].
@@ -221,135 +300,6 @@ pub struct AuthUser {
     /// lifetime of the request, so role changes take effect on the next
     /// request, not the current one.
     pub roles: Vec<String>,
-}
-
-/// State captured by the [`authn_layer`] middleware and shared with the
-/// lifecycle handlers: the keys used to sign and verify tokens, the
-/// validation rules, the role store, the token store, and the lifetime
-/// assigned to newly minted tokens.
-///
-/// Built once at startup and passed to
-/// [`middleware::from_fn_with_state`](axum::middleware::from_fn_with_state)
-/// alongside [`authn_layer`].
-#[derive(Clone)]
-pub struct AuthState {
-    /// Key used to verify a token's signature. Derived once from the
-    /// app's JWT secret in [`AuthState::new`].
-    decoding_key: DecodingKey,
-    /// Key used to sign tokens minted by [`issue_token`] and
-    /// [`renew_token`]. Derived from the same secret as `decoding_key`.
-    encoding_key: EncodingKey,
-    /// Validation rules (algorithm, required claims, clock skew, etc.)
-    /// applied to every token. Currently [`Validation::default`].
-    validation: Validation,
-    /// Store consulted for the authenticated subject's roles.
-    roles: RoleStore,
-    /// Store consulted for the subject's current token version, and
-    /// updated by the lifecycle handlers.
-    tokens: TokenStore,
-    /// Lifetime of tokens minted by this service, in seconds.
-    token_ttl: u64,
-}
-
-impl AuthState {
-    /// Builds authentication state from the app's JWT signing secret, role
-    /// store, and token store.
-    ///
-    /// `jwt_secret` is read via [`ExposeSecret::expose_secret`] only for
-    /// the instant it takes to build the keys — the exposed bytes are not
-    /// retained; the [`SecretString`] itself is never logged or stored in
-    /// plain form by this function.
-    ///
-    /// Tokens minted through this state live for one hour.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`AppError::UnprocessableEntity`] only if the one-hour
-    /// default is invalid, which cannot happen — the `Result` is returned
-    /// so callers can `?` it uniformly with [`AuthState::with_ttl`].
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// use dashmap::DashMap;
-    /// use secrecy::SecretString;
-    /// use std::sync::Arc;
-    ///
-    /// let jwt_secret = SecretString::from("super-secret-demo-key".to_string());
-    /// let roles = Arc::new(DashMap::new());
-    /// let tokens = Arc::new(DashMap::new());
-    ///
-    /// let auth_state = auth::AuthState::new(&jwt_secret, roles, tokens)?;
-    /// ```
-    ///
-    /// # Panics
-    ///
-    /// Does not panic. `DecodingKey::from_secret` /
-    /// `EncodingKey::from_secret` accept any byte slice (including an empty
-    /// one) and cannot fail.
-    pub fn new(jwt_secret: &SecretString, roles: RoleStore, tokens: TokenStore) -> AppResult<Self> {
-        Self::with_ttl(jwt_secret, roles, tokens, Duration::from_secs(60 * 60))
-    }
-
-    /// Signs a token for `sub` at the given version, returning the encoded
-    /// JWT and the `jti` embedded in it.
-    fn sign(&self, sub: &str, ver: u64) -> AppResult<(String, String)> {
-        let jti = Uuid::new_v4().to_string();
-
-        let claims = Claims {
-            sub: sub.to_string(),
-            exp: exp_from_ttl(self.token_ttl)?,
-            jti: jti.clone(),
-            ver,
-        };
-
-        let token = encode(&Header::default(), &claims, &self.encoding_key)?;
-
-        Ok((token, jti))
-    }
-
-    /// Like [`AuthState::new`], but with an explicit token lifetime.
-    ///
-    /// Exposed mainly so tests can mint short-lived tokens without
-    /// sleeping.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`AppError::UnprocessableEntity`] if `token_ttl` truncates
-    /// to zero seconds. A zero lifetime produces a token whose `exp`
-    /// equals its mint time, which [`jsonwebtoken::decode`] rejects as
-    /// already expired — so the token would be dead on arrival, and a
-    /// caller passing a sub-second duration almost certainly meant
-    /// something else. Rejecting it here turns a confusing runtime `401`
-    /// into a clear configuration failure.
-    ///
-    /// # Panics
-    ///
-    /// Does not panic.
-    pub fn with_ttl(
-        jwt_secret: &SecretString,
-        roles: RoleStore,
-        tokens: TokenStore,
-        token_ttl: Duration,
-    ) -> AppResult<Self> {
-        // Check the truncated value, not the `Duration` itself: a
-        // sub-second duration is not zero, but `as_secs()` on it is.
-        let token_ttl = token_ttl.as_secs();
-        if token_ttl == 0 {
-            return Err(AppError::UnprocessableEntity);
-        }
-
-        let secret = jwt_secret.expose_secret().as_bytes();
-
-        Ok(Self {
-            decoding_key: DecodingKey::from_secret(secret),
-            encoding_key: EncodingKey::from_secret(secret),
-            validation: Validation::default(),
-            roles,
-            tokens,
-            token_ttl,
-        })
-    }
 }
 
 /// JWT claims this service expects to find in a validated Bearer token.
@@ -505,6 +455,11 @@ pub type TokenStore = Arc<DashMap<String, TokenState>>;
 /// # Panics
 ///
 /// Does not panic.
+#[tracing::instrument(
+    skip_all,
+    fields(method = %req.method(), uri = %req.uri()),
+    err
+)]
 pub async fn authn_layer(
     State(state): State<AuthState>,
     mut req: Request,
@@ -564,6 +519,11 @@ pub async fn authn_layer(
 /// # Panics
 ///
 /// Does not panic.
+#[tracing::instrument(
+    skip_all,
+    fields(role = %role, method = %req.method(), uri = %req.uri()),
+    err
+)]
 pub async fn authz_layer(
     role: &'static str,
     Extension(user): Extension<AuthUser>,
@@ -585,7 +545,8 @@ pub async fn authz_layer(
 ///
 /// Factored out of [`AuthState::sign`] so the `exp` math is a pure function
 /// of the clock and a duration, testable without constructing an
-/// [`AuthState`].
+/// [`AuthState`] — and so the `u64`-to-`usize` cast and both error
+/// mappings live in one place.
 fn exp_from_ttl(token_ttl: u64) -> AppResult<usize> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -608,12 +569,13 @@ fn exp_from_ttl(token_ttl: u64) -> AppResult<usize> {
 ///
 /// # Errors
 ///
-/// Returns [`AppError::InternalServerError`] if the token cannot be signed, or
-/// [`AppError::UnprocessableEntity`] if the computed `exp` overflows.
+/// Returns [`AppError::InternalServerError`] if the token cannot be signed,
+/// or [`AppError::UnprocessableEntity`] if the computed `exp` overflows.
 ///
 /// # Panics
 ///
 /// Does not panic.
+#[tracing::instrument(skip_all, fields(sub = %user.user_id), err)]
 pub async fn issue_token(
     State(state): State<AuthState>,
     Extension(user): Extension<AuthUser>,
@@ -657,6 +619,7 @@ pub async fn issue_token(
 /// # Panics
 ///
 /// Does not panic.
+#[tracing::instrument(skip_all, fields(sub = %user.user_id), err)]
 pub async fn renew_token(
     State(state): State<AuthState>,
     Extension(user): Extension<AuthUser>,
@@ -697,6 +660,7 @@ pub async fn renew_token(
 /// # Panics
 ///
 /// Does not panic.
+#[tracing::instrument(skip_all, fields(sub = %user.user_id), err)]
 pub async fn revoke_token(
     State(state): State<AuthState>,
     Extension(user): Extension<AuthUser>,
@@ -733,7 +697,6 @@ mod tests {
     use dashmap::DashMap;
     use jsonwebtoken::{EncodingKey, Header, encode};
     use secrecy::SecretString;
-    use serde_json::Value;
     use std::{
         sync::Arc,
         time::{Duration, SystemTime, UNIX_EPOCH},
@@ -783,7 +746,7 @@ mod tests {
     }
 
     fn auth_state(roles: RoleStore, tokens: TokenStore) -> AuthState {
-        AuthState::with_ttl(
+        AuthState::new_for_ttl(
             &SecretString::from(TEST_SECRET.to_string()),
             roles,
             tokens,
@@ -1144,13 +1107,13 @@ mod tests {
         response.assert_status(StatusCode::UNAUTHORIZED);
     }
 
-    // ---- with_ttl guard ----
+    // ---- new_for_ttl guard ----
 
-    /// Verifies `with_ttl` rejects a zero lifetime rather than minting
+    /// Verifies `new_for_ttl` rejects a zero lifetime rather than minting
     /// tokens that are dead on arrival.
     #[test_log::test(tokio::test)]
-    async fn test_with_ttl_failure_zero_duration() {
-        let result = AuthState::with_ttl(
+    async fn test_new_for_ttl_failure_zero_duration() {
+        let result = AuthState::new_for_ttl(
             &SecretString::from(TEST_SECRET.to_string()),
             Arc::new(DashMap::new()),
             Arc::new(DashMap::new()),
@@ -1160,11 +1123,12 @@ mod tests {
         assert!(matches!(result, Err(super::AppError::UnprocessableEntity)));
     }
 
-    /// Verifies `with_ttl` rejects a sub-second lifetime, which truncates
-    /// to zero seconds and would otherwise slip past an `is_zero()` check.
+    /// Verifies `new_for_ttl` rejects a sub-second lifetime, which
+    /// truncates to zero seconds and would otherwise slip past an
+    /// `is_zero()` check.
     #[test_log::test(tokio::test)]
-    async fn test_with_ttl_failure_sub_second_duration() {
-        let result = AuthState::with_ttl(
+    async fn test_new_for_ttl_failure_sub_second_duration() {
+        let result = AuthState::new_for_ttl(
             &SecretString::from(TEST_SECRET.to_string()),
             Arc::new(DashMap::new()),
             Arc::new(DashMap::new()),

@@ -244,14 +244,14 @@ impl AuthState {
         tokens: TokenStore,
         token_ttl: Duration,
     ) -> AppResult<Self> {
+        let secret = jwt_secret.expose_secret().as_bytes();
+
         // Check the truncated value, not the `Duration` itself: a
         // sub-second duration is not zero, but `as_secs()` on it is.
         let token_ttl = token_ttl.as_secs();
         if token_ttl < 1 {
             return Err(AppError::UnprocessableEntity);
         }
-
-        let secret = jwt_secret.expose_secret().as_bytes();
 
         Ok(Self {
             decoding_key: DecodingKey::from_secret(secret),

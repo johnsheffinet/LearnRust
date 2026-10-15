@@ -101,27 +101,40 @@ pub enum AppError {
     /// opaque error as malformed ones, so a caller cannot distinguish
     /// "your token was renewed elsewhere" from "your token was never
     /// valid".
-    #[error("Failed to read bearer token!")]
+    #[error("Bearer token is missing or invalid!")]
     #[status_code("401")]
     #[code("UNAUTHORIZED")]
     Unauthorized,
 
     /// Token is valid but the authenticated user lacks the role required
     /// for this resource; responds with `403 Forbidden`.
-    #[error("Failed with inadequate role!")]
+    #[error("User's role is inadequate!")]
     #[status_code("403")]
     #[code("FORBIDDEN")]
     Forbidden,
 
-    /// The computed `exp` for a new token overflowed the clock, or the
-    /// configured lifetime truncated to zero. Responds with
-    /// `422 Unprocessable Entity` when reached from a request; when
-    /// returned by [`AuthState::new_for_ttl`] it is a startup-time
-    /// configuration failure.
-    #[error("Failed to set expiry in bearer token!")]
+    /// The token lifetime configured on [`AuthState`] was zero, or a
+    /// `Duration` that truncated to zero seconds. This never reaches a
+    /// request: it is a startup-time configuration failure returned by
+    /// [`AuthState::new_for_ttl`], and the process should refuse to start.
+    ///
+    /// The `422` status is carried for completeness — it would apply if
+    /// this variant ever surfaced from a handler — but no code path
+    /// produces it during a request.
+    #[error("Token lifetime is less than one second!")]
     #[status_code("422")]
     #[code("UNPROCESSABLE_ENTITY")]
-    UnprocessableEntity,
+    InvalidTokenLifetime,
+
+    /// The system clock is before the Unix epoch, so no token can be
+    /// given a sane `exp`. Responds with `500 Internal Server Error`.
+    ///
+    /// Reaching this means the host's clock is misconfigured, not that the
+    /// caller did anything wrong.
+    #[error("System clock is before the Unix epoch!")]
+    #[status_code("500")]
+    #[code("INTERNAL_SERVER_ERROR")]
+    ClockBeforeEpoch,
 
     /// The JWT could not be signed. Practically unreachable with HMAC
     /// secrets, but surfaced rather than `panic!`ed so a bad configuration
@@ -130,9 +143,7 @@ pub enum AppError {
     #[status_code("500")]
     #[code("INTERNAL_SERVER_ERROR")]
     InternalServerError(#[from] jsonwebtoken::errors::Error),
-
 }
-
 // ---------------------------------------------------------------------------
 // Structs
 // ---------------------------------------------------------------------------
@@ -548,7 +559,6 @@ pub async fn authz_layer(
 /// of the clock and a duration, testable without constructing an
 /// [`AuthState`] — and so the `u64`-to-`usize` cast and both error
 /// mappings live in one place.
-#[tracing::instrument(skip_all, fields(token_ttl = %token_ttl), err)]
 fn exp_from_ttl(token_ttl: u64) -> AppResult<usize> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)

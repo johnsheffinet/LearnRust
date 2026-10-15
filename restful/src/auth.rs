@@ -113,14 +113,6 @@ pub enum AppError {
     #[code("FORBIDDEN")]
     Forbidden,
 
-    /// The JWT could not be signed. Practically unreachable with HMAC
-    /// secrets, but surfaced rather than `panic!`ed so a bad configuration
-    /// cannot take down a worker. Responds with `500 Internal Server Error`.
-    #[error("Failed to sign token! {0}")]
-    #[status_code("500")]
-    #[code("INTERNAL_SERVER_ERROR")]
-    InternalServerError(#[from] jsonwebtoken::errors::Error),
-
     /// The computed `exp` for a new token overflowed the clock, or the
     /// configured lifetime truncated to zero. Responds with
     /// `422 Unprocessable Entity` when reached from a request; when
@@ -130,6 +122,15 @@ pub enum AppError {
     #[status_code("422")]
     #[code("UNPROCESSABLE_ENTITY")]
     UnprocessableEntity,
+
+    /// The JWT could not be signed. Practically unreachable with HMAC
+    /// secrets, but surfaced rather than `panic!`ed so a bad configuration
+    /// cannot take down a worker. Responds with `500 Internal Server Error`.
+    #[error("Failed to sign bearer token! {0}")]
+    #[status_code("500")]
+    #[code("INTERNAL_SERVER_ERROR")]
+    InternalServerError(#[from] jsonwebtoken::errors::Error),
+
 }
 
 // ---------------------------------------------------------------------------

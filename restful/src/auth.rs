@@ -346,6 +346,20 @@ pub struct Claims {
     pub ver: u64,
 }
 
+/// Response body for the token-lifecycle handlers.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TokenResponse {
+    /// The encoded JWT. Present on [`issue_token`] and [`renew_token`];
+    /// absent on [`revoke_token`], which issues no replacement.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+    /// The `jti` of the token that was minted (or, for revoke, the most
+    /// recently active one that was invalidated).
+    pub jti: String,
+    /// The `ver` claim now in force for the caller.
+    pub ver: u64,
+}
+
 /// Per-user token revocation state.
 ///
 /// `version` is the current generation; any token carrying a different
@@ -364,20 +378,6 @@ pub struct TokenState {
     pub version: u64,
     /// The `jti` of the newest token minted for this user, if any.
     pub active_jti: Option<String>,
-}
-
-/// Response body for the token-lifecycle handlers.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TokenResponse {
-    /// The encoded JWT. Present on [`issue_token`] and [`renew_token`];
-    /// absent on [`revoke_token`], which issues no replacement.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub token: Option<String>,
-    /// The `jti` of the token that was minted (or, for revoke, the most
-    /// recently active one that was invalidated).
-    pub jti: String,
-    /// The `ver` claim now in force for the caller.
-    pub ver: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -547,6 +547,7 @@ pub async fn authz_layer(
 /// of the clock and a duration, testable without constructing an
 /// [`AuthState`] — and so the `u64`-to-`usize` cast and both error
 /// mappings live in one place.
+#[tracing::instrument(skip_all, fields(token_ttl = %token_ttl), err)]
 fn exp_from_ttl(token_ttl: u64) -> AppResult<usize> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)

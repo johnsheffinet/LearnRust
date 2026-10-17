@@ -346,7 +346,7 @@ pub struct Claims {
     /// Standard `exp` claim: a Unix timestamp (seconds since the epoch)
     /// after which the token is no longer valid. Enforced by
     /// [`jsonwebtoken::decode`] during [`authn_layer`].
-    pub exp: usize,
+    pub exp: u64,
     /// Standard `jti` claim: a unique identifier for this specific token.
     /// Not used for lookup — carried so tokens are distinguishable in logs
     /// and so a per-token denylist could be added later without a
@@ -484,29 +484,29 @@ pub async fn authn_layer(
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or(AppError::Unauthorized)?;
 
-    let token_data = decode::<Claims>(token, &state.decoding_key, &state.validation)
-        .map_err(|_| AppError::Unauthorized)?;
+    let Claims { sub: user_id, ver, .. } =
+        decode::<Claims>(token, &state.decoding_key, &state.validation)
+            .map_err(|_| AppError::Unauthorized)?
+            .claims;
 
+    // Fail closed: unknown user or stale version => reject
     let current_ver = state
         .tokens
-        .get(&token_data.claims.sub)
+        .get(&user_id)
         .map(|entry| entry.version)
-        .unwrap_or(0);
+        .ok_or(AppError::Unauthorized)?;
 
-    if token_data.claims.ver != current_ver {
+    if ver != current_ver {
         return Err(AppError::Unauthorized);
     }
 
     let roles = state
         .roles
-        .get(&token_data.claims.sub)
+        .get(&user_id)
         .map(|entry| entry.clone())
         .unwrap_or_default();
 
-    req.extensions_mut().insert(AuthUser {
-        user_id: token_data.claims.sub,
-        roles,
-    });
+    req.extensions_mut().insert(AuthUser { user_id, roles });
 
     Ok(next.run(req).await)
 }
@@ -559,15 +559,13 @@ pub async fn authz_layer(
 /// of the clock and a duration, testable without constructing an
 /// [`AuthState`] — and so the `u64`-to-`usize` cast and both error
 /// mappings live in one place.
-fn exp_from_ttl(token_ttl: u64) -> AppResult<usize> {
-    let now = SystemTime::now()
+fn exp_from_ttl(token_ttl: u64) -> AppResult<u64> {
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|_| AppError::UnprocessableEntity)?
-        .as_secs();
-
-    now.checked_add(token_ttl)
-        .map(|exp| exp as usize)
-        .ok_or(AppError::UnprocessableEntity)
+        .map_err(|_| AppError::ClockBeforeEpoch)?
+        .as_secs()
+        .checked_add(token_ttl)
+        .ok_or(AppError::InvalidTokenLifetime)
 }
 
 /// Handles `POST /auth/token`: issues a fresh token for the caller.
@@ -616,6 +614,22 @@ pub async fn issue_token(
     ))
 }
 
+/*
+pub async fn issue_token(
+    State(state): State<AuthState>,
+    Extension(user): Extension<AuthUser>,
+) -> AppResult<impl IntoResponse> {
+    
+    Ok((
+        StatusCode::CREATED,
+        Json(TokenResponse {
+            token: Some(token),
+            jti,
+            ver,
+        })
+    ))
+}
+ */
 /// Handles `PUT /auth/token`: renews the caller's token.
 ///
 /// Bumps the caller's version, which immediately invalidates every token

@@ -126,6 +126,11 @@ pub enum AppError {
     #[code("UNPROCESSABLE_ENTITY")]
     InvalidTokenLifetime,
 
+    #[error("Failed to increment bearer token version!")]
+    #[status_code("422")]
+    #[code("UNPROCESSABLE_ENTITY")]
+    InvalidTokenVersion,
+
     /// The system clock is before the Unix epoch, so no token can be
     /// given a sane `exp`. Responds with `500 Internal Server Error`.
     ///
@@ -590,21 +595,17 @@ pub async fn issue_token(
     State(state): State<AuthState>,
     Extension(user): Extension<AuthUser>,
 ) -> AppResult<impl IntoResponse> {
-    let user_id = user.user_id;
-
-    let ver = state
+    let mut entry = state
         .tokens
-        .get(&user_id)
-        .map(|entry| entry.version)
-        .unwrap_or(0);
+        .get_mut(&user.user_id)
+        .ok_or(AppError::Unauthorized)?;
 
-    let (token, jti) = state.sign(&user_id, ver)?;
+    let ver = entry.version;
+    
+    let (token, jti) = state.sign(&user.user_id, ver)?;
 
-    state
-        .tokens
-        .entry(user_id)
-        .or_default()
-        .active_jti = Some(jti.clone());
+    entry.active_jti = Some(jti.clone());
+    drop(entry);
 
     Ok((
         StatusCode::CREATED,
@@ -636,13 +637,21 @@ pub async fn renew_token(
     State(state): State<AuthState>,
     Extension(user): Extension<AuthUser>,
 ) -> AppResult<impl IntoResponse> {
-    let mut entry = state.tokens.entry(user.user_id.clone()).or_default();
+    let mut entry = state
+        .tokens
+        .get_mut(&user.user_id)
+        .ok_or(AppError::Unauthorized)?;
 
-    let ver = entry.version.saturating_add(1);
+    let ver = entry
+        .version
+        .checked_add(1)
+        .ok_or(AppError::InvalidTokenVersion)?;
+    
     let (token, jti) = state.sign(&user.user_id, ver)?;
 
     entry.version = ver;
     entry.active_jti = Some(jti.clone());
+    drop(entry);
 
     Ok((
         StatusCode::OK,
@@ -654,35 +663,6 @@ pub async fn renew_token(
     ))
 }
 
-/*
-pub async fn renew_token(
-    State(state): State<AuthState>,
-    Extension(user): Extension<AuthUser>,
-) -> AppResult<impl IntoResponse> {
-    let user_id = user.user_id.clone();
-
-    let entry = state
-        .tokens
-        .entry(user_id)
-        .or_default();
-
-    let ver = entry.version.saturating_add(1);
-    
-    let (token, jti) = state.sign(&user_id, ver);
-
-    entry.version = ver;
-    entry.active_jti = Some(jti.clone());
-
-    Ok((
-        StatusCode::OK,
-        Json(TokenResponse {
-            token: Some(token),
-            jti,
-            ver,
-        })
-    ))
-}
- */
 /// Handles `DELETE /auth/token`: revokes the caller's tokens.
 ///
 /// Bumps the caller's version without issuing a replacement, so every
@@ -706,16 +686,23 @@ pub async fn revoke_token(
     State(state): State<AuthState>,
     Extension(user): Extension<AuthUser>,
 ) -> AppResult<impl IntoResponse> {
-    let mut entry = state.tokens.entry(user.user_id.clone()).or_default();
+    let mut entry = state
+        .tokens
+        .get_mut(&user.user_id)
+        .ok_or(AppError::Unauthorized)?;
 
-    let ver = entry.version.saturating_add(1);
-    let jti = entry.active_jti.take().unwrap_or_default();
+    let ver = entry
+        .version
+        .checked_add(1)
+        .ok_or(AppError::InvalidTokenVersion)?;
+    
     entry.version = ver;
+    drop(entry);
 
     Ok((
         StatusCode::OK,
         Json(TokenResponse {
-            token: None,
+            token: Some(token),
             jti,
             ver,
         }),

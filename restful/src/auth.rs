@@ -590,17 +590,19 @@ pub async fn issue_token(
     State(state): State<AuthState>,
     Extension(user): Extension<AuthUser>,
 ) -> AppResult<impl IntoResponse> {
+    let user_id = user.user_id;
+
     let ver = state
         .tokens
-        .get(&user.user_id)
+        .get(&user_id)
         .map(|entry| entry.version)
         .unwrap_or(0);
 
-    let (token, jti) = state.sign(&user.user_id, ver)?;
+    let (token, jti) = state.sign(&user_id, ver)?;
 
     state
         .tokens
-        .entry(user.user_id)
+        .entry(user_id)
         .or_default()
         .active_jti = Some(jti.clone());
 
@@ -614,22 +616,6 @@ pub async fn issue_token(
     ))
 }
 
-/*
-pub async fn issue_token(
-    State(state): State<AuthState>,
-    Extension(user): Extension<AuthUser>,
-) -> AppResult<impl IntoResponse> {
-    
-    Ok((
-        StatusCode::CREATED,
-        Json(TokenResponse {
-            token: Some(token),
-            jti,
-            ver,
-        })
-    ))
-}
- */
 /// Handles `PUT /auth/token`: renews the caller's token.
 ///
 /// Bumps the caller's version, which immediately invalidates every token
@@ -668,6 +654,35 @@ pub async fn renew_token(
     ))
 }
 
+/*
+pub async fn renew_token(
+    State(state): State<AuthState>,
+    Extension(user): Extension<AuthUser>,
+) -> AppResult<impl IntoResponse> {
+    let user_id = user.user_id.clone();
+
+    let entry = state
+        .tokens
+        .entry(user_id)
+        .or_default();
+
+    let ver = entry.version.saturating_add(1);
+    
+    let (token, jti) = state.sign(&user_id, ver);
+
+    entry.version = ver;
+    entry.active_jti = Some(jti.clone());
+
+    Ok((
+        StatusCode::OK,
+        Json(TokenResponse {
+            token: Some(token),
+            jti,
+            ver,
+        })
+    ))
+}
+ */
 /// Handles `DELETE /auth/token`: revokes the caller's tokens.
 ///
 /// Bumps the caller's version without issuing a replacement, so every

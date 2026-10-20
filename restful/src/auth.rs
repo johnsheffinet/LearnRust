@@ -101,17 +101,17 @@ pub enum AppError {
     /// opaque error as malformed ones, so a caller cannot distinguish
     /// "your token was renewed elsewhere" from "your token was never
     /// valid".
-    #[error("Bearer token is missing or invalid!")]
+    #[error("User is unauthorized!")]
     #[status_code("401")]
     #[code("UNAUTHORIZED")]
-    Unauthorized,
+    UserUnauthorized,
 
     /// Token is valid but the authenticated user lacks the role required
     /// for this resource; responds with `403 Forbidden`.
-    #[error("User's role is inadequate!")]
+    #[error("Role is forbidden!")]
     #[status_code("403")]
     #[code("FORBIDDEN")]
-    Forbidden,
+    RoleForbidden,
 
     /// The token lifetime configured on [`AuthState`] was zero, or a
     /// `Duration` that truncated to zero seconds. This never reaches a
@@ -121,33 +121,33 @@ pub enum AppError {
     /// The `422` status is carried for completeness — it would apply if
     /// this variant ever surfaced from a handler — but no code path
     /// produces it during a request.
-    #[error("Token lifetime is less than one second!")]
+    #[error("Token expiry is invalid!")]
     #[status_code("422")]
     #[code("UNPROCESSABLE_ENTITY")]
-    InvalidTokenLifetime,
+    TokenExpiryInvalid,
 
-    #[error("Failed to increment bearer token version!")]
+    #[error("Token version is invalid!")]
     #[status_code("422")]
     #[code("UNPROCESSABLE_ENTITY")]
-    InvalidTokenVersion,
+    TokenVersionInvalid,
 
     /// The system clock is before the Unix epoch, so no token can be
     /// given a sane `exp`. Responds with `500 Internal Server Error`.
     ///
     /// Reaching this means the host's clock is misconfigured, not that the
     /// caller did anything wrong.
-    #[error("System clock is before the Unix epoch!")]
+    #[error("System clock is invalid!")]
     #[status_code("500")]
     #[code("INTERNAL_SERVER_ERROR")]
-    ClockBeforeEpoch,
+    SystemClockInvalid,
 
     /// The JWT could not be signed. Practically unreachable with HMAC
     /// secrets, but surfaced rather than `panic!`ed so a bad configuration
     /// cannot take down a worker. Responds with `500 Internal Server Error`.
-    #[error("Failed to sign bearer token! {0}")]
+    #[error("Bearer token is not signed! {0}")]
     #[status_code("500")]
     #[code("INTERNAL_SERVER_ERROR")]
-    InternalServerError(#[from] jsonwebtoken::errors::Error),
+    TokenNotSigned(#[from] jsonwebtoken::errors::Error),
 }
 // ---------------------------------------------------------------------------
 // Structs
@@ -462,7 +462,7 @@ pub type TokenStore = Arc<DashMap<String, TokenState>>;
 ///
 /// # Errors
 ///
-/// Returns [`AppError::Unauthorized`] if the `Authorization` header is
+/// Returns [`AppError::UserUnauthorized`] if the `Authorization` header is
 /// missing, is not a valid UTF-8 string, does not start with `"Bearer "`,
 /// if the token fails to decode or validate (bad signature, malformed
 /// claims, or an expired `exp`), or if the token's `ver` does not match the
@@ -487,11 +487,11 @@ pub async fn authn_layer(
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .ok_or(AppError::Unauthorized)?;
+        .ok_or(AppError::UserUnauthorized)?;
 
     let Claims { sub: user_id, ver, .. } =
         decode::<Claims>(token, &state.decoding_key, &state.validation)
-            .map_err(|_| AppError::Unauthorized)?
+            .map_err(|_| AppError::UserUnauthorized)?
             .claims;
 
     // Fail closed: unknown user or stale version => reject
@@ -499,10 +499,10 @@ pub async fn authn_layer(
         .tokens
         .get(&user_id)
         .map(|entry| entry.version)
-        .ok_or(AppError::Unauthorized)?;
+        .ok_or(AppError::UserUnauthorized)?;
 
     if ver != current_ver {
-        return Err(AppError::Unauthorized);
+        return Err(AppError::UserUnauthorized);
     }
 
     let roles = state
@@ -530,7 +530,7 @@ pub async fn authn_layer(
 ///
 /// # Errors
 ///
-/// Returns [`AppError::Forbidden`] if the authenticated user's roles do not
+/// Returns [`AppError::RoleForbidden`] if the authenticated user's roles do not
 /// include `role`.
 ///
 /// # Panics
@@ -550,7 +550,7 @@ pub async fn authz_layer(
     if user.roles.iter().any(|r| r == role) {
         Ok(next.run(req).await)
     } else {
-        Err(AppError::Forbidden)
+        Err(AppError::RoleForbidden)
     }
 }
 
@@ -567,10 +567,10 @@ pub async fn authz_layer(
 fn exp_from_ttl(token_ttl: u64) -> AppResult<u64> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|_| AppError::ClockBeforeEpoch)?
+        .map_err(|_| AppError::SystemClockInvalid)?
         .as_secs()
         .checked_add(token_ttl)
-        .ok_or(AppError::InvalidTokenLifetime)
+        .ok_or(AppError::TokenExpiryInvalid)
 }
 
 /// Handles `POST /auth/token`: issues a fresh token for the caller.
@@ -584,7 +584,7 @@ fn exp_from_ttl(token_ttl: u64) -> AppResult<u64> {
 ///
 /// # Errors
 ///
-/// Returns [`AppError::InternalServerError`] if the token cannot be signed,
+/// Returns [`AppError::TokenNotSigned`] if the token cannot be signed,
 /// or [`AppError::UnprocessableEntity`] if the computed `exp` overflows.
 ///
 /// # Panics
@@ -598,7 +598,7 @@ pub async fn issue_token(
     let mut entry = state
         .tokens
         .get_mut(&user.user_id)
-        .ok_or(AppError::Unauthorized)?;
+        .ok_or(AppError::UserUnauthorized)?;
 
     let ver = entry.version;
     
@@ -625,7 +625,7 @@ pub async fn issue_token(
 ///
 /// # Errors
 ///
-/// Returns [`AppError::InternalServerError`] or
+/// Returns [`AppError::TokenNotSigned`] or
 /// [`AppError::UnprocessableEntity`] under the same conditions as
 /// [`issue_token`].
 ///
@@ -640,12 +640,12 @@ pub async fn renew_token(
     let mut entry = state
         .tokens
         .get_mut(&user.user_id)
-        .ok_or(AppError::Unauthorized)?;
+        .ok_or(AppError::UserUnauthorized)?;
 
     let ver = entry
         .version
         .checked_add(1)
-        .ok_or(AppError::InvalidTokenVersion)?;
+        .ok_or(AppError::TokenVersionInvalid)?;
     
     let (token, jti) = state.sign(&user.user_id, ver)?;
 
@@ -689,12 +689,12 @@ pub async fn revoke_token(
     let mut entry = state
         .tokens
         .get_mut(&user.user_id)
-        .ok_or(AppError::Unauthorized)?;
+        .ok_or(AppError::UserUnauthorized)?;
 
     let ver = entry
         .version
         .checked_add(1)
-        .ok_or(AppError::InvalidTokenVersion)?;
+        .ok_or(AppError::TokenVersionInvalid)?;
     
     entry.version = ver;
     drop(entry);

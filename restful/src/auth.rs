@@ -595,18 +595,6 @@ pub async fn issue_token(
     State(state): State<AuthState>,
     Extension(user): Extension<AuthUser>,
 ) -> AppResult<impl IntoResponse> {
-    let mut entry = state
-        .tokens
-        .get_mut(&user.user_id)
-        .ok_or(AppError::UserUnauthorized)?;
-
-    let ver = entry.version;
-    
-    let (token, jti) = state.sign(&user.user_id, ver)?;
-
-    entry.active_jti = Some(jti.clone());
-    drop(entry);
-
     Ok((
         StatusCode::CREATED,
         Json(TokenResponse {
@@ -637,22 +625,6 @@ pub async fn renew_token(
     State(state): State<AuthState>,
     Extension(user): Extension<AuthUser>,
 ) -> AppResult<impl IntoResponse> {
-    let mut entry = state
-        .tokens
-        .get_mut(&user.user_id)
-        .ok_or(AppError::UserUnauthorized)?;
-
-    let ver = entry
-        .version
-        .checked_add(1)
-        .ok_or(AppError::TokenVersionInvalid)?;
-    
-    let (token, jti) = state.sign(&user.user_id, ver)?;
-
-    entry.version = ver;
-    entry.active_jti = Some(jti.clone());
-    drop(entry);
-
     Ok((
         StatusCode::OK,
         Json(TokenResponse {
@@ -686,23 +658,10 @@ pub async fn revoke_token(
     State(state): State<AuthState>,
     Extension(user): Extension<AuthUser>,
 ) -> AppResult<impl IntoResponse> {
-    let mut entry = state
-        .tokens
-        .get_mut(&user.user_id)
-        .ok_or(AppError::UserUnauthorized)?;
-
-    let ver = entry
-        .version
-        .checked_add(1)
-        .ok_or(AppError::TokenVersionInvalid)?;
-    
-    entry.version = ver;
-    drop(entry);
-
     Ok((
-        StatusCode::OK,
+        StatusCode::NO_CONTENT,
         Json(TokenResponse {
-            token: Some(token),
+            token: None,
             jti,
             ver,
         }),

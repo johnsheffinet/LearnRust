@@ -595,6 +595,24 @@ pub async fn issue_token(
     State(state): State<AuthState>,
     Extension(user): Extension<AuthUser>,
 ) -> AppResult<impl IntoResponse> {
+    let ver = {
+        let entry = state
+            .tokens
+            .get(&user.user_id)
+            .ok_or(AppError::UserUnauthorized)?;
+        entry.version
+    };
+
+    let (token, jti) = state.sign(&user.user_id, ver)?;
+
+    {
+        let mut entry = state
+            .tokens
+            .get_mut(&user.user_id)
+            .ok_or(AppError::UserUnauthorized);
+        entry.active_jti = Some(jti.clone());
+    };
+    
     Ok((
         StatusCode::CREATED,
         Json(TokenResponse {

@@ -749,21 +749,21 @@ mod tests {
             tokens.insert(
                 user.to_string(),
                 TokenState {
-                    version: 1,
+                    active_ver: 1,
                     active_jti: None,
                 },
             );
         }
         tokens
     }
-
+    
     /// Encodes a test JWT for `sub` at `ver`, valid for one hour from now —
     /// or, if `expired` is true, expired one hour ago.
     fn mint_token(sub: &str, ver: u64, expired: bool) -> String {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs() as usize;
+            .as_secs();
         let exp = if expired { now - 3600 } else { now + 3600 };
 
         let claims = Claims {
@@ -780,7 +780,7 @@ mod tests {
         )
         .unwrap()
     }
-
+    
     fn auth_state(roles: RoleStore, tokens: TokenStore) -> AuthState {
         AuthState::new_for_ttl(
             &SecretString::from(TEST_SECRET.to_string()),
@@ -803,7 +803,7 @@ mod tests {
         );
         roles.insert("bob".to_string(), vec!["user".to_string()]);
 
-        let tokens = seeded_tokens(&["alice", "bob"]);
+        let tokens = seeded_tokens(&["alice", "bob", "mallory"]);
         let state = auth_state(roles, tokens);
 
         let token_routes = Router::new().route(

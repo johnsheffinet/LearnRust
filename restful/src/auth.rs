@@ -372,7 +372,7 @@ pub struct TokenResponse {
 #[derive(Clone, Debug, Default)]
 pub struct TokenState {
     /// The current revocation generation for this user.
-    pub version: u64,
+    pub active_ver: u64,
     /// The `jti` of the newest token minted for this user, if any.
     pub active_jti: Option<String>,
 }
@@ -478,7 +478,7 @@ pub async fn authn_layer(
     let current_ver = state
         .tokens
         .get(&user_id)
-        .map(|entry| entry.version)
+        .map(|entry| entry.active_ver)
         .ok_or(AppError::UserUnauthorized)?;
 
     if ver != current_ver {

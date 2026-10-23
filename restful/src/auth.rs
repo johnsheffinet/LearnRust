@@ -192,7 +192,7 @@ impl AuthState {
     ///
     /// # Errors
     ///
-    /// Returns [`AppError::UnprocessableEntity`] only if the one-hour
+    /// Returns [`AppError::TokenExpiryInvalid`] only if the one-hour
     /// default is invalid, which cannot happen — the `Result` is returned
     /// so callers can `?` it uniformly with [`AuthState::new_for_ttl`].
     ///
@@ -230,7 +230,7 @@ impl AuthState {
     ///
     /// # Errors
     ///
-    /// Returns [`AppError::UnprocessableEntity`] if `token_ttl` truncates
+    /// Returns [`AppError::TokenExpiryInvalid`] if `token_ttl` truncates
     /// to zero seconds. A zero lifetime produces a token whose `exp`
     /// equals its mint time, which [`jsonwebtoken::decode`] rejects as
     /// already expired — so the token would be dead on arrival, and a
@@ -312,7 +312,7 @@ pub struct AuthUser {
 /// ```
 /// # use serde::{Deserialize, Serialize};
 /// # #[derive(Debug, Clone, Deserialize, Serialize)]
-/// # struct Claims { sub: String, exp: usize, jti: String, ver: u64 }
+/// # struct Claims { sub: String, exp: u64, jti: String, ver: u64 }
 /// let claims = Claims {
 ///     sub: "alice".to_string(),
 ///     exp: 9_999_999_999,
@@ -359,7 +359,7 @@ pub struct TokenResponse {
 
 /// Per-user token revocation state.
 ///
-/// `version` is the current generation; any token carrying a different
+/// `active_ver` is the current generation; any token carrying a different
 /// `ver` is rejected by [`authn_layer`]. Bumping it revokes every
 /// outstanding token for that user at once — this is what [`renew_token`]
 /// and [`revoke_token`] do.
@@ -537,13 +537,13 @@ pub async fn authz_layer(
 /// Computes the `exp` claim for a token minted now, given a lifetime in
 /// seconds, as a Unix timestamp.
 ///
-/// Returns [`AppError::UnprocessableEntity`] if the system clock is before
-/// the epoch or the addition overflows `u64`.
+/// Returns [`AppError::SystemClockInvalid`] if the system clock is before
+/// the epoch, or [`AppError::TokenExpiryInvalid`] if the addition
+/// overflows `u64`.
 ///
-/// Factored out of [`AuthState::sign`] so the `exp` math is a pure function
-/// of the clock and a duration, testable without constructing an
-/// [`AuthState`] — and so the `u64`-to-`usize` cast and both error
-/// mappings live in one place.
+/// Factored out of [`sign_token`] so the `exp` math is a pure function of
+/// the clock and a duration, testable without constructing an
+/// [`AuthState`].
 fn exp_from_ttl(token_ttl: u64) -> AppResult<u64> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -565,7 +565,7 @@ fn exp_from_ttl(token_ttl: u64) -> AppResult<u64> {
 /// # Errors
 ///
 /// Returns [`AppError::TokenNotSigned`] if the token cannot be signed,
-/// or [`AppError::UnprocessableEntity`] if the computed `exp` overflows.
+/// or [`AppError::TokenExpiryInvalid`] if the computed `exp` overflows.
 ///
 /// # Panics
 ///
@@ -605,7 +605,7 @@ pub async fn issue_token(
 /// # Errors
 ///
 /// Returns [`AppError::TokenNotSigned`] or
-/// [`AppError::UnprocessableEntity`] under the same conditions as
+/// [`AppError::TokenExpiryInvalid`] under the same conditions as
 /// [`issue_token`].
 ///
 /// # Panics

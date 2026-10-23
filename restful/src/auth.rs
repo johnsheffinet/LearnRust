@@ -255,7 +255,7 @@ impl AuthState {
         // sub-second duration is not zero, but `as_secs()` on it is.
         let token_ttl = token_ttl.as_secs();
         if token_ttl < 1 {
-            return Err(AppError::UnprocessableEntity);
+            return Err(AppError::TokenExpiryInvalid);
         }
 
         Ok(Self {
@@ -266,26 +266,6 @@ impl AuthState {
             tokens,
             token_ttl,
         })
-    }
-
-    /// Signs a token for `sub` at the given version, returning the encoded
-    /// JWT and the `jti` embedded in it.
-    ///
-    /// Returned as `(token, jti)` — the token first, the identifier second
-    /// — matching how every call site destructures it.
-    fn sign(&self, sub: &str, ver: u64) -> AppResult<(String, String)> {
-        let jti = Uuid::new_v4().to_string();
-
-        let claims = Claims {
-            sub: sub.to_owned(),
-            exp: exp_from_ttl(self.token_ttl)?,
-            jti: jti.clone(),
-            ver,
-        };
-
-        let token = encode(&Header::default(), &claims, &self.encoding_key)?;
-
-        Ok((token, jti))
     }
 }
 

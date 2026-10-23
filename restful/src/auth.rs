@@ -686,6 +686,32 @@ pub async fn revoke_token(
     ))
 }
 
+/// Signs a token for `sub` at the given version, returning the encoded
+/// JWT and the `jti` embedded in it.
+///
+/// Takes the key and lifetime directly rather than `&AuthState` so callers
+/// can hold a `TokenStore` write guard across the call without borrowing
+/// the whole state (which would conflict with the guard).
+fn sign_token(
+    sub: &str,
+    token_ttl: u64,
+    ver: u64,
+    encoding_key: &EncodingKey,
+) -> AppResult<(String, String)> {
+    let jti = Uuid::new_v4().to_string();
+
+    let claims = Claims {
+        sub: sub.to_owned(),
+        exp: exp_from_ttl(token_ttl)?,
+        jti: jti.clone(),
+        ver,
+    };
+
+    let token = encode(&Header::default(), &claims, encoding_key)?;
+
+    Ok((token, jti))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

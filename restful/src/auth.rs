@@ -582,7 +582,7 @@ pub async fn issue_token(
 
     let ver = entry.active_ver;
 
-    let (token, jti) = sign_token(&user.user_id, state.token_ttl, ver, state.encoding_key)?;
+    let (token, jti) = sign_token(&user.user_id, state.token_ttl, ver, &state.encoding_key)?;
 
     entry.active_jti = Some(jti.clone());
     
@@ -626,7 +626,7 @@ pub async fn renew_token(
         .checked_add(1)
         .ok_or(AppError::TokenVersionInvalid)?;
 
-    let (token, jti) = sign_token(&user.user_id, state.token_ttl, ver, state.encoding_key)?;
+    let (token, jti) = sign_token(&user.user_id, state.token_ttl, ver, &state.encoding_key)?;
 
     entry.active_ver = ver;
     entry.active_jti = Some(jti.clone());
@@ -701,7 +701,7 @@ fn sign_token(
     sub: &str,
     token_ttl: u64,
     ver: u64,
-    encoding_key: EncodingKey,
+    encoding_key: &EncodingKey,
 ) -> AppResult<(String, String)> {
     let jti = Uuid::new_v4().to_string();
 

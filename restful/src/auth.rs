@@ -550,7 +550,7 @@ fn exp_from_ttl(token_ttl: u64) -> AppResult<u64> {
         .map_err(|_| AppError::SystemClockInvalid)?
         .as_secs()
         .checked_add(token_ttl)
-        .ok_or(AppError::TokenExpiryInvalid)?
+        .ok_or(AppError::TokenExpiryInvalid)
 }
 
 /// Handles `POST /auth/token`: issues a fresh token for the caller.

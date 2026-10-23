@@ -550,7 +550,7 @@ fn exp_from_ttl(token_ttl: u64) -> AppResult<u64> {
         .map_err(|_| AppError::SystemClockInvalid)?
         .as_secs()
         .checked_add(token_ttl)
-        .ok_or(AppError::TokenExpiryInvalid)
+        .ok_or(AppError::TokenExpiryInvalid)?
 }
 
 /// Handles `POST /auth/token`: issues a fresh token for the caller.
@@ -575,23 +575,16 @@ pub async fn issue_token(
     State(state): State<AuthState>,
     Extension(user): Extension<AuthUser>,
 ) -> AppResult<impl IntoResponse> {
-    let ver = {
-        let entry = state
-            .tokens
-            .get(&user.user_id)
-            .ok_or(AppError::UserUnauthorized)?;
-        entry.version
-    };
+    let mut entry = state
+        .tokens
+        .get_mut(&user.user_id)
+        .ok_or(AppError::UserUnauthorized)?;
 
-    let (token, jti) = state.sign(&user.user_id, ver)?;
+    let ver = entry.active_ver;
 
-    {
-        let mut entry = state
-            .tokens
-            .get_mut(&user.user_id)
-            .ok_or(AppError::UserUnauthorized);
-        entry.active_jti = Some(jti.clone());
-    };
+    let (token, jti) = sign_token(&user.user_id, &state.token_ttl, ver, &state.encoding_key)?;
+
+    entry.active_jti = Some(jti.clone());
     
     Ok((
         StatusCode::CREATED,
@@ -623,6 +616,21 @@ pub async fn renew_token(
     State(state): State<AuthState>,
     Extension(user): Extension<AuthUser>,
 ) -> AppResult<impl IntoResponse> {
+    let mut entry = state
+        .tokens
+        .get_mut(&user.user_id)
+        .ok_or(AppError::UserUnauthorized)?;
+
+    let ver = entry
+        .active_ver
+        .checked_add(1)
+        .ok_or(AppError::TokenVersionInvalid)?;
+
+    let (token, jti) = sign_token(&user.user_id, &state.token_ttl, ver, &state.encoding_key)?;
+
+    entry.active_ver = ver;
+    entry.active_jti = Some(jti.clone());
+
     Ok((
         StatusCode::OK,
         Json(TokenResponse {
@@ -656,8 +664,25 @@ pub async fn revoke_token(
     State(state): State<AuthState>,
     Extension(user): Extension<AuthUser>,
 ) -> AppResult<impl IntoResponse> {
+    let mut entry = state
+        .tokens
+        .get_mut(&user.user_id)
+        .ok_or(AppError::UserUnauthorized)?;
+
+    let ver = entry
+        .active_ver
+        .checked_add(1)
+        .ok_or(AppError::TokenVersionInvalid)?;
+
+    let jti = entry
+        .active_jti
+        .take()
+        .unwrap_or_default();
+
+    entry.active_ver = ver;
+
     Ok((
-        StatusCode::NO_CONTENT,
+        StatusCode::OK,
         Json(TokenResponse {
             token: None,
             jti,

@@ -836,11 +836,12 @@ mod tests {
     /// Verifies `exp_from_ttl` produces a timestamp roughly `token_ttl`
     /// seconds in the future.
     #[test_log::test(tokio::test)]
+    #[test_log::test(tokio::test)]
     async fn test_exp_from_ttl_success() {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs() as usize;
+            .as_secs();
 
         let exp = exp_from_ttl(3600).unwrap();
 
@@ -848,7 +849,7 @@ mod tests {
         assert!(exp > now + 3500);
         assert!(exp <= now + 3600);
     }
-
+    
     // ---- authn / authz ----
 
     /// Verifies a valid token authenticates and `AuthUser` is extractable.
@@ -889,7 +890,7 @@ mod tests {
     async fn test_authenticate_failure_invalid_token() {
         let claims = Claims {
             sub: "alice".to_string(),
-            exp: usize::MAX,
+            exp: u64::MAX,
             jti: Uuid::new_v4().to_string(),
             ver: 1,
         };
@@ -910,7 +911,7 @@ mod tests {
 
         response.assert_status(StatusCode::UNAUTHORIZED);
     }
-
+    
     /// Verifies an expired token is rejected.
     #[test_log::test(tokio::test)]
     async fn test_authenticate_failure_expired_token() {
@@ -938,10 +939,10 @@ mod tests {
         response.assert_status(StatusCode::UNAUTHORIZED);
     }
 
-    /// Verifies a valid token for a subject with no `TokenStore` entry at
-    /// all is treated as version 0, not an error.
+    /// Verifies a valid token for a subject with no `TokenStore` entry is
+    /// rejected — `authn_layer` fails closed on an unknown user.
     #[test_log::test(tokio::test)]
-    async fn test_authenticate_success_unknown_user_version_zero() {
+    async fn test_authenticate_failure_unknown_user() {
         let token = mint_token("newcomer", 0, false); // not in TokenStore
 
         let response = test_server()
@@ -949,10 +950,9 @@ mod tests {
             .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
             .await;
 
-        response.assert_status(StatusCode::OK);
-        response.assert_text("newcomer");
+        response.assert_status(StatusCode::UNAUTHORIZED);
     }
-
+    
     /// Verifies a user holding the required role is allowed through.
     #[test_log::test(tokio::test)]
     async fn test_authorize_success() {
@@ -1156,9 +1156,21 @@ mod tests {
             Duration::ZERO,
         );
 
-        assert!(matches!(result, Err(super::AppError::UnprocessableEntity)));
+        assert!(matches!(result, Err(super::AppError::TokenExpiryInvalid)));
     }
 
+    #[test_log::test(tokio::test)]
+    async fn test_new_for_ttl_failure_sub_second_duration() {
+        let result = AuthState::new_for_ttl(
+            &SecretString::from(TEST_SECRET.to_string()),
+            Arc::new(DashMap::new()),
+            Arc::new(DashMap::new()),
+            Duration::from_millis(500),
+        );
+
+        assert!(matches!(result, Err(super::AppError::TokenExpiryInvalid)));
+    }
+    
     /// Verifies `new_for_ttl` rejects a sub-second lifetime, which
     /// truncates to zero seconds and would otherwise slip past an
     /// `is_zero()` check.

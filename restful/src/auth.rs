@@ -741,6 +741,34 @@ mod tests {
 
     const TEST_SECRET: &str = "test-only-secret-do-not-use-in-prod";
 
+/*
+fn minted_token(sub: &str, ver: u64, expired: bool) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let exp = if expired { now - 3600 } else { now + 3600 };
+
+    let claims = Claims {
+        sub: sub.to_string(),
+        exp,
+        jti: Uuid::new_v4().to_string(),
+        ver,
+    };
+
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(TEST_SECRET.as_bytes()),
+    )
+    .unwrap()
+}
+
+fn test_server() -> TestServer {
+    
+}
+ */
+    
     /// Seeds a `TokenStore` with the given users at version 1, matching
     /// what a first `issue_token` would have produced, and returns it.
     fn seeded_tokens(users: &[&str]) -> TokenStore {

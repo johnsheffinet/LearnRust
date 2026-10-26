@@ -765,7 +765,31 @@ fn minted_token(sub: &str, ver: u64, expired: bool) -> String {
 }
 
 fn test_server() -> TestServer {
-    
+    let roles = ;
+
+    let tokens = ;
+
+    let state = ;
+
+    let token_routes = ;
+
+    let admin_route = Route::new()
+        .route("/admin", get(|| async { "admin ok" }))
+        .layer(middleware::from_fn(|usr, req, nxt| { authz_layer} ));
+
+    let user_route = Route::new()
+        .route(
+            "/user",
+            get(|Extension(user): Extension<AuthUser>| async move { user.user_id }),
+        );
+
+    let app = Route::new()
+        .merge(token_routes)
+        .merge(admin_route)
+        .merge(user_route)
+        .layer(middleware::from_fn_with_state(state, authn_layer));
+
+    TestServer::new(app)
 }
  */
     

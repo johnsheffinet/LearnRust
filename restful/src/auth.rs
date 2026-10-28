@@ -856,7 +856,15 @@ mod tests {
     /// Verifies a valid token authenticates and `AuthUser` is extractable.
     #[test_log::test(tokio::test)]
     async fn test_authn_layer_success() {
-        
+        let server = test_server();
+
+        let token = minted_token("jack", 1, false);
+
+        let response = server
+            .get("/user")
+            .;
+
+        response.assert_status(StatusCode::OK);
     }
 
     /// Verifies a missing `Authorization` header is rejected.

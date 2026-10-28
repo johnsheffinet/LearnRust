@@ -765,24 +765,45 @@ fn minted_token(sub: &str, ver: u64, expired: bool) -> String {
 }
 
 fn test_server() -> TestServer {
-    let roles = ;
+    let mut roles = Arc::new(DashMap::new());
+    roles.insert(
+        "jack".to_string(),
+        vec!["admin".to_string(), "user".to_string()]
+    );
+    roles.insert(
+        "jane".to_string(),
+        vec!["user".to_string()]
+    );
+    roles.insert();
 
-    let tokens = ;
+    let mut tokens = Arc::new(DashMap::new());
+    for user in ["jack", "jane", "john"] {
+        tokens.insert(
+            user.to_string,
+            TokenState {
+                active_jti: None,
+                active_ver: 1,
+            }
+        );
+    }
 
-    let state = ;
+    let state = AuthState::new(TEST_SECRET.to_string(), roles, tokens).unwrap();
 
     let token_routes = Route::new()
-        .route()
-        .layer();
+        .route(
+            "/token", post(issue_token).put(renew_token).delete(revoke_token)
+        );
 
     let admin_route = Route::new()
-        .route("/admin", get(|| async { "admin ok" }))
-        .layer(middleware::from_fn(|usr, req, nxt| { authz_layer} ));
+        .route(
+            "/admin", get(|| async { "admin ok" })
+        )
+        .layer(middleware::from_fn(|usr, req, nxt| { authz_layer("admin", usr, req, nxt) }));
 
     let user_route = Route::new()
         .route(
-            "/user",
-            get(|Extension(user): Extension<AuthUser>| async move { user.user_id }),
+            "/user", 
+            get(|Extension(user): Extension<AuthUser>| async move { user.user_id })
         );
 
     let app = Route::new()
@@ -877,7 +898,7 @@ fn test_server() -> TestServer {
         );
 
         let app = Router::new()
-            .merge(token_routes)
+            .merge(token_route)
             .merge(admin_only)
             .merge(me)
             .layer(middleware::from_fn_with_state(state, authn_layer));

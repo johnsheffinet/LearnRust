@@ -862,7 +862,7 @@ mod tests {
 
         let response = server
             .get("/user")
-            .;
+            .add_header(AUTHORIZATION, format!("Bearer {token}"));
 
         response.assert_status(StatusCode::OK);
     }

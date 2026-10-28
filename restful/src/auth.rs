@@ -725,7 +725,7 @@ mod tests {
     };
     use axum::{
         Extension, Router,
-        http::StatusCode,
+        http::{StatusCode, header::AUTHORIZATION},
         middleware,
         routing::{delete, get, post, put},
     };
@@ -862,27 +862,58 @@ mod tests {
 
         let response = server
             .get("/user")
-            .add_header(AUTHORIZATION, format!("Bearer {token}"));
+            .add_header(AUTHORIZATION, format!("Bearer {token}"))
+            .await;
 
         response.assert_status(StatusCode::OK);
+        response.assert_text("jack");
     }
 
     /// Verifies a missing `Authorization` header is rejected.
     #[test_log::test(tokio::test)]
     async fn test_authn_layer_failure_authorization_header_missing() {
-        
+        let server = test_server();
+
+        let token = minted_token("jack", 1, false);
+
+        let response = server
+            .get("/user")
+            .await;
+
+        response.assert_status(StatusCode::UNAUTHORIZED);
     }
 
     /// Verifies a header without a `Bearer ` prefix is rejected.
     #[test_log::test(tokio::test)]
     async fn test_authn_layer_failure_authorization_header_invalid() {
-        
+        let server = test_server();
+
+        let token = minted_token("jack", 1, false);
+
+        let response = server
+            .get("/user")
+            .add_header(AUTHORIZATION, format!("{token}"))
+            .await;
+
+        response.assert_status(StatusCode::OK);
     }
 
     /// Verifies a token signed with a different secret is rejected.
     #[test_log::test(tokio::test)]
     async fn test_authn_layer_failure_bearer_token_invalid() {
+        let server = test_server();
+
+        let claims = Claims {};
+        let token = encode();
         
+        let token = minted_token("jack", 1, false);
+
+        let response = server
+            .get("/user")
+            .add_header(AUTHORIZATION, format!("Bearer {token}"))
+            .await;
+
+        response.assert_status(StatusCode::OK);
     }
 
     /// Verifies an expired token is rejected.

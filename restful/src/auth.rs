@@ -771,7 +771,9 @@ fn test_server() -> TestServer {
 
     let state = ;
 
-    let token_routes = ;
+    let token_routes = Route::new()
+        .route()
+        .layer();
 
     let admin_route = Route::new()
         .route("/admin", get(|| async { "admin ok" }))

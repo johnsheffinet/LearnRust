@@ -282,7 +282,7 @@ impl AuthState {
 /// # #[derive(Clone, Debug)]
 /// # struct AuthUser { user_id: String, roles: Vec<String> }
 /// let user = AuthUser {
-///     user_id: "alice".to_string(),
+///     user_id: "jack".to_string(),
 ///     roles: vec!["admin".to_string(), "user".to_string()],
 /// };
 ///
@@ -314,13 +314,13 @@ pub struct AuthUser {
 /// # #[derive(Debug, Clone, Deserialize, Serialize)]
 /// # struct Claims { sub: String, exp: u64, jti: String, ver: u64 }
 /// let claims = Claims {
-///     sub: "alice".to_string(),
+///     sub: "jack".to_string(),
 ///     exp: 9_999_999_999,
 ///     jti: "0b6f...".to_string(),
 ///     ver: 1,
 /// };
 ///
-/// assert_eq!(claims.sub, "alice");
+/// assert_eq!(claims.sub, "jack");
 /// assert_eq!(claims.ver, 1);
 /// ```
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -397,10 +397,10 @@ pub type AppResult<T> = Result<T, AppError>;
 /// use std::sync::Arc;
 ///
 /// let roles: Arc<DashMap<String, Vec<String>>> = Arc::new(DashMap::new());
-/// roles.insert("alice".to_string(), vec!["admin".to_string()]);
+/// roles.insert("jack".to_string(), vec!["admin".to_string()]);
 ///
 /// assert_eq!(
-///     roles.get("alice").map(|r| r.clone()),
+///     roles.get("jack").map(|r| r.clone()),
 ///     Some(vec!["admin".to_string()])
 /// );
 /// ```
@@ -741,113 +741,22 @@ mod tests {
 
     const TEST_SECRET: &str = "test-only-secret-do-not-use-in-prod";
 
-/*
-fn minted_token(sub: &str, ver: u64, expired: bool) -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    let exp = if expired { now - 3600 } else { now + 3600 };
-
-    let claims = Claims {
-        sub: sub.to_string(),
-        exp,
-        jti: Uuid::new_v4().to_string(),
-        ver,
-    };
-
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(TEST_SECRET.as_bytes()),
-    )
-    .unwrap()
-}
-
-fn test_server() -> TestServer {
-    let mut roles = Arc::new(DashMap::new());
-    roles.insert(
-        "jack".to_string(),
-        vec!["admin".to_string(), "user".to_string()]
-    );
-    roles.insert(
-        "jane".to_string(),
-        vec!["user".to_string()]
-    );
-    roles.insert();
-
-    let mut tokens = Arc::new(DashMap::new());
-    for user in ["jack", "jane", "john"] {
-        tokens.insert(
-            user.to_string,
-            TokenState {
-                active_jti: None,
-                active_ver: 1,
-            }
-        );
-    }
-
-    let state = AuthState::new(TEST_SECRET.to_string(), roles, tokens).unwrap();
-
-    let token_routes = Route::new()
-        .route(
-            "/token", post(issue_token).put(renew_token).delete(revoke_token)
-        );
-
-    let admin_route = Route::new()
-        .route(
-            "/admin", get(|| async { "admin ok" })
-        )
-        .layer(middleware::from_fn(|usr, req, nxt| { authz_layer("admin", usr, req, nxt) }));
-
-    let user_route = Route::new()
-        .route(
-            "/user", 
-            get(|Extension(user): Extension<AuthUser>| async move { user.user_id })
-        );
-
-    let app = Route::new()
-        .merge(token_routes)
-        .merge(admin_route)
-        .merge(user_route)
-        .layer(middleware::from_fn_with_state(state, authn_layer));
-
-    TestServer::new(app)
-}
- */
-    
-    /// Seeds a `TokenStore` with the given users at version 1, matching
-    /// what a first `issue_token` would have produced, and returns it.
-    fn seeded_tokens(users: &[&str]) -> TokenStore {
-        let tokens: TokenStore = Arc::new(DashMap::new());
-        for user in users {
-            tokens.insert(
-                user.to_string(),
-                TokenState {
-                    active_ver: 1,
-                    active_jti: None,
-                },
-            );
-        }
-        tokens
-    }
-    
     /// Encodes a test JWT for `sub` at `ver`, valid for one hour from now —
     /// or, if `expired` is true, expired one hour ago.
-    fn mint_token(sub: &str, ver: u64, expired: bool) -> String {
+    fn minted_token(sub: &str, ver: u64, expired: bool) -> String {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
         let exp = if expired { now - 3600 } else { now + 3600 };
-
+    
         let claims = Claims {
             sub: sub.to_string(),
             exp,
             jti: Uuid::new_v4().to_string(),
             ver,
         };
-
+    
         encode(
             &Header::default(),
             &claims,
@@ -856,57 +765,66 @@ fn test_server() -> TestServer {
         .unwrap()
     }
     
-    fn auth_state(roles: RoleStore, tokens: TokenStore) -> AuthState {
-        AuthState::new_for_ttl(
-            &SecretString::from(TEST_SECRET.to_string()),
-            roles,
-            tokens,
-            Duration::from_secs(3600),
-        )
-        .unwrap()
-    }
-
     /// A minimal router exercising both middleware and all three lifecycle
     /// handlers, plus a `/me` probe and an admin-only `/admin` probe.
-    /// Seeded with "alice" (admin + user, ver 1) and "bob" (user only,
+    /// Seeded with "jack" (admin + user, ver 1) and "jane" (user only,
     /// ver 1).
     fn test_server() -> TestServer {
-        let roles: RoleStore = Arc::new(DashMap::new());
+        let roles = Arc::new(DashMap::new());
         roles.insert(
-            "alice".to_string(),
-            vec!["admin".to_string(), "user".to_string()],
+            "jack".to_string(),
+            vec!["admin".to_string(), "user".to_string()]
         );
-        roles.insert("bob".to_string(), vec!["user".to_string()]);
-
-        let tokens = seeded_tokens(&["alice", "bob", "mallory"]);
-        let state = auth_state(roles, tokens);
-
-        let token_routes = Router::new().route(
-            "/auth/token",
-            post(issue_token).put(renew_token).delete(revoke_token),
+        roles.insert(
+            "jane".to_string(),
+            vec!["user".to_string()]
         );
-
-        let admin_only = Router::new()
-            .route("/admin", get(|| async { "admin ok" }))
-            .layer(middleware::from_fn(|ext, req, next| {
-                authz_layer("admin", ext, req, next)
-            }));
-
-        let me = Router::new().route(
-            "/me",
-            get(|Extension(user): Extension<AuthUser>| async move { user.user_id }),
-        );
-
+    
+        let tokens = Arc::new(DashMap::new());
+        for user in ["jack", "jane", "john"] {
+            tokens.insert(
+                user.to_string(),
+                TokenState {
+                    active_jti: None,
+                    active_ver: 1,
+                }
+            );
+        }
+    
+        let state = AuthState::new(
+            &SecretString::from(TEST_SECRET.to_string()),
+            roles,
+            tokens
+            )
+            .unwrap();
+    
+        let token_routes = Router::new()
+            .route(
+                "/token",
+                post(issue_token).put(renew_token).delete(revoke_token)
+            );
+    
+        let admin_route = Router::new()
+            .route(
+                "/admin",
+                get(|| async { "admin ok" })
+            )
+            .layer(middleware::from_fn(|usr, req, nxt| { authz_layer("admin", usr, req, nxt) }));
+    
+        let user_route = Router::new()
+            .route(
+                "/user", 
+                get(|Extension(user): Extension<AuthUser>| async move { user.user_id })
+            );
+    
         let app = Router::new()
-            .merge(token_route)
-            .merge(admin_only)
-            .merge(me)
+            .merge(token_routes)
+            .merge(admin_route)
+            .merge(user_route)
             .layer(middleware::from_fn_with_state(state, authn_layer));
-
+    
         TestServer::new(app)
     }
-
-    // ---- exp_from_ttl ----
 
     /// Verifies `exp_from_ttl` produces a timestamp roughly `token_ttl`
     /// seconds in the future.
@@ -931,7 +849,7 @@ fn test_server() -> TestServer {
     #[test_log::test(tokio::test)]
     async fn test_authenticate_success() {
         let server = test_server();
-        let token = mint_token("alice", 1, false);
+        let token = mint_token("jack", 1, false);
 
         let response = server
             .get("/me")
@@ -939,7 +857,7 @@ fn test_server() -> TestServer {
             .await;
 
         response.assert_status(StatusCode::OK);
-        response.assert_text("alice");
+        response.assert_text("jack");
     }
 
     /// Verifies a missing `Authorization` header is rejected.
@@ -964,7 +882,7 @@ fn test_server() -> TestServer {
     #[test_log::test(tokio::test)]
     async fn test_authenticate_failure_invalid_token() {
         let claims = Claims {
-            sub: "alice".to_string(),
+            sub: "jack".to_string(),
             exp: u64::MAX,
             jti: Uuid::new_v4().to_string(),
             ver: 1,
@@ -990,7 +908,7 @@ fn test_server() -> TestServer {
     /// Verifies an expired token is rejected.
     #[test_log::test(tokio::test)]
     async fn test_authenticate_failure_expired_token() {
-        let token = mint_token("alice", 1, true);
+        let token = mint_token("jack", 1, true);
 
         let response = test_server()
             .get("/me")
@@ -1004,7 +922,7 @@ fn test_server() -> TestServer {
     /// the core of revocation.
     #[test_log::test(tokio::test)]
     async fn test_authenticate_failure_stale_version() {
-        let token = mint_token("alice", 0, false); // store says 1
+        let token = mint_token("jack", 0, false); // store says 1
 
         let response = test_server()
             .get("/me")
@@ -1031,7 +949,7 @@ fn test_server() -> TestServer {
     /// Verifies a user holding the required role is allowed through.
     #[test_log::test(tokio::test)]
     async fn test_authorize_success() {
-        let token = mint_token("alice", 1, false); // alice: admin, user
+        let token = mint_token("jack", 1, false); // jack: admin, user
 
         let response = test_server()
             .get("/admin")
@@ -1046,7 +964,7 @@ fn test_server() -> TestServer {
     /// forbidden.
     #[test_log::test(tokio::test)]
     async fn test_authorize_failure_forbidden() {
-        let token = mint_token("bob", 1, false); // bob: user only
+        let token = mint_token("jane", 1, false); // jane: user only
 
         let response = test_server()
             .get("/admin")
@@ -1060,7 +978,7 @@ fn test_server() -> TestServer {
     /// all is treated as having zero roles, not an error.
     #[test_log::test(tokio::test)]
     async fn test_authorize_failure_unknown_user_has_no_roles() {
-        let token = mint_token("mallory", 0, false); // not seeded in RoleStore
+        let token = mint_token("john", 0, false); // not seeded in RoleStore
 
         let response = test_server()
             .get("/admin")
@@ -1077,7 +995,7 @@ fn test_server() -> TestServer {
     #[test_log::test(tokio::test)]
     async fn test_issue_token_success_additive() {
         let server = test_server();
-        let existing = mint_token("alice", 1, false);
+        let existing = mint_token("jack", 1, false);
 
         let response = server
             .post("/auth/token")
@@ -1104,7 +1022,7 @@ fn test_server() -> TestServer {
             )
             .await
             .assert_status(StatusCode::OK)
-            .assert_text("alice");
+            .assert_text("jack");
 
         // ...and the one used to call the endpoint still works too,
         // because issuing didn't bump the version.
@@ -1133,7 +1051,7 @@ fn test_server() -> TestServer {
     #[test_log::test(tokio::test)]
     async fn test_renew_token_success_invalidates_previous() {
         let server = test_server();
-        let existing = mint_token("alice", 1, false);
+        let existing = mint_token("jack", 1, false);
 
         let response = server
             .put("/auth/token")
@@ -1184,7 +1102,7 @@ fn test_server() -> TestServer {
     #[test_log::test(tokio::test)]
     async fn test_revoke_token_success_invalidates_previous() {
         let server = test_server();
-        let existing = mint_token("alice", 1, false);
+        let existing = mint_token("jack", 1, false);
 
         let response = server
             .delete("/auth/token")

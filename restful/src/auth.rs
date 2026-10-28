@@ -18,17 +18,17 @@
 //! A bare JWT cannot be updated or revoked, so every token carries a `ver`
 //! (version) claim. The [`TokenStore`] records the current version per
 //! user; [`authn_layer`] rejects any token whose `ver` doesn't match. That
-//! makes three self-service operations well-defined, all at `/auth/token`
+//! makes three self-service operations well-defined, all at `/token`
 //! and all scoped to the caller (they sit inside the [`authn_layer`]
 //! group, so the caller must already hold a valid token):
 //!
-//! - [`issue_token`] (`POST /auth/token`): mints a fresh token for the
+//! - [`issue_token`] (`POST /token`): mints a fresh token for the
 //!   caller at their *current* version. Previously issued tokens remain
 //!   valid — additive, useful for a second device.
-//! - [`renew_token`] (`PUT /auth/token`): bumps the caller's version,
+//! - [`renew_token`] (`PUT /token`): bumps the caller's version,
 //!   immediately invalidating every token they previously held, and
 //!   returns one replacement at the new version.
-//! - [`revoke_token`] (`DELETE /auth/token`): bumps the caller's version
+//! - [`revoke_token`] (`DELETE /token`): bumps the caller's version
 //!   without issuing a replacement, killing all the caller's tokens.
 //!
 //! Bootstrapping the very first token for a user is deliberately *not* an
@@ -51,7 +51,7 @@
 //! use axum::{middleware, routing::{post, put, delete}, Router};
 //!
 //! let token_routes = Router::new().route(
-//!     "/auth/token",
+//!     "/token",
 //!     post(auth::issue_token).put(auth::renew_token).delete(auth::revoke_token),
 //! );
 //!
@@ -553,7 +553,7 @@ fn exp_from_ttl(token_ttl: u64) -> AppResult<u64> {
         .ok_or(AppError::TokenExpiryInvalid)
 }
 
-/// Handles `POST /auth/token`: issues a fresh token for the caller.
+/// Handles `POST /token`: issues a fresh token for the caller.
 ///
 /// The new token carries the caller's *current* version, so any tokens
 /// they already hold stay valid — issuing is additive. Use
@@ -596,7 +596,7 @@ pub async fn issue_token(
     ))
 }
 
-/// Handles `PUT /auth/token`: renews the caller's token.
+/// Handles `PUT /token`: renews the caller's token.
 ///
 /// Bumps the caller's version, which immediately invalidates every token
 /// previously issued to them, then mints and returns a replacement at the
@@ -641,7 +641,7 @@ pub async fn renew_token(
     ))
 }
 
-/// Handles `DELETE /auth/token`: revokes the caller's tokens.
+/// Handles `DELETE /token`: revokes the caller's tokens.
 ///
 /// Bumps the caller's version without issuing a replacement, so every
 /// token they currently hold is rejected by [`authn_layer`] on its next
@@ -827,18 +827,30 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
-    async fn test_auth_state_new_success() {
-        
+    async fn test_new_for_ttl_success() {
+        let result = super::AuthState::new_for_ttl(
+            &SecretString::from(TEST_SECRET.to_string()),
+            Arc::new(DashMap::new()),
+            Arc::new(DashMap::new()),
+            Duration::from_secs(3600)
+        );
+
+        assert!(result.is_ok());        
     }
 
-    /// Verifies `new_for_ttl` rejects a zero lifetime rather than minting
-    /// tokens that are dead on arrival.
     /// Verifies `new_for_ttl` rejects a sub-second lifetime, which
     /// truncates to zero seconds and would otherwise slip past an
     /// `is_zero()` check.
     #[test_log::test(tokio::test)]
-    async fn test_auth_state_new_failure() {
-        
+    async fn test_new_for_ttl_failure_token_expiry_invalid() {
+        let result = super::AuthState::new_for_ttl(
+            &SecretString::from(TEST_SECRET.to_string()),
+            Arc::new(DashMap::new()),
+            Arc::new(DashMap::new()),
+            Duration::from_millis(500)
+        );
+
+        assert!(matches!(result, super::AppError::TokenExpiryInvalid));        
     }
 
     /// Verifies a valid token authenticates and `AuthUser` is extractable.
@@ -848,15 +860,40 @@ mod tests {
     }
 
     /// Verifies a missing `Authorization` header is rejected.
+    #[test_log::test(tokio::test)]
+    async fn test_authn_layer_failure_authorization_header_missing() {
+        
+    }
+
     /// Verifies a header without a `Bearer ` prefix is rejected.
+    #[test_log::test(tokio::test)]
+    async fn test_authn_layer_failure_authorization_header_invalid() {
+        
+    }
+
     /// Verifies a token signed with a different secret is rejected.
+    #[test_log::test(tokio::test)]
+    async fn test_authn_layer_failure_bearer_token_invalid() {
+        
+    }
+
     /// Verifies an expired token is rejected.
+    #[test_log::test(tokio::test)]
+    async fn test_authn_layer_failure_bearer_token_expired() {
+        
+    }
+
     /// Verifies a token whose `ver` is behind the store's is rejected —
     /// the core of revocation.
+    #[test_log::test(tokio::test)]
+    async fn test_authn_layer_failure_token_version_invalid() {
+        
+    }
+
     /// Verifies a valid token for a subject with no `TokenStore` entry is
     /// rejected — `authn_layer` fails closed on an unknown user.
     #[test_log::test(tokio::test)]
-    async fn test_authn_layer_failure() {
+    async fn test_authn_layer_failure_user_unknown() {
         
     }
 
@@ -868,10 +905,15 @@ mod tests {
 
     /// Verifies an authenticated user lacking the required role is
     /// forbidden.
+    #[test_log::test(tokio::test)]
+    async fn test_authz_layer_failure_user_forbidden() {
+        
+    }
+
     /// Verifies a valid token for a subject with no `RoleStore` entry at
     /// all is treated as having zero roles, not an error.
     #[test_log::test(tokio::test)]
-    async fn test_authz_layer_failure() {
+    async fn test_authz_layer_failure_user_unknown() {
         
     }
 
@@ -887,43 +929,43 @@ mod tests {
         
     }
 
-    /// Verifies `POST /auth/token` returns a working token at the caller's
+    /// Verifies `POST /token` returns a working token at the caller's
     /// current version, and leaves previously issued tokens valid.
     #[test_log::test(tokio::test)]
     async fn test_issue_token_success() {
         
     }
 
-    /// Verifies `POST /auth/token` without a bearer token is rejected —
+    /// Verifies `POST /token` without a bearer token is rejected —
     /// lifecycle endpoints require the caller to already be authenticated.
     #[test_log::test(tokio::test)]
-    async fn test_issue_token_failure() {
+    async fn test_issue_token_failure_user_unauthorized() {
         
     }
 
-    /// Verifies `PUT /auth/token` returns a working token at a bumped
+    /// Verifies `PUT /token` returns a working token at a bumped
     /// version and invalidates the token used to call it.
     #[test_log::test(tokio::test)]
     async fn test_renew_token_success() {
         
     }
 
-    /// Verifies `PUT /auth/token` without a bearer token is rejected.
+    /// Verifies `PUT /token` without a bearer token is rejected.
     #[test_log::test(tokio::test)]
-    async fn test_renew_token_failure() {
+    async fn test_renew_token_failure_user_unauthorized() {
         
     }
 
-    /// Verifies `DELETE /auth/token` bumps the version, returns no token,
+    /// Verifies `DELETE /token` bumps the version, returns no token,
     /// and kills the token used to call it.
     #[test_log::test(tokio::test)]
     async fn test_revoke_token_success() {
         
     }
 
-    /// Verifies `DELETE /auth/token` without a bearer token is rejected.
+    /// Verifies `DELETE /token` without a bearer token is rejected.
     #[test_log::test(tokio::test)]
-    async fn test_revoke_token_failure() {
+    async fn test_revoke_token_failure_user_unauthorized() {
         
     }
 
@@ -1118,7 +1160,7 @@ mod tests {
 
     // ---- lifecycle: issue ----
 
-    /// Verifies `POST /auth/token` returns a working token at the caller's
+    /// Verifies `POST /token` returns a working token at the caller's
     /// current version, and leaves previously issued tokens valid.
     #[test_log::test(tokio::test)]
     async fn test_issue_token_success_additive() {
@@ -1126,7 +1168,7 @@ mod tests {
         let existing = mint_token("jack", 1, false);
 
         let response = server
-            .post("/auth/token")
+            .post("/token")
             .add_header(
                 axum::http::header::AUTHORIZATION,
                 format!("Bearer {existing}"),
@@ -1164,17 +1206,17 @@ mod tests {
             .assert_status(StatusCode::OK);
     }
 
-    /// Verifies `POST /auth/token` without a bearer token is rejected —
+    /// Verifies `POST /token` without a bearer token is rejected —
     /// lifecycle endpoints require the caller to already be authenticated.
     #[test_log::test(tokio::test)]
     async fn test_issue_token_failure_unauthenticated() {
-        let response = test_server().post("/auth/token").await;
+        let response = test_server().post("/token").await;
         response.assert_status(StatusCode::UNAUTHORIZED);
     }
 
     // ---- lifecycle: renew ----
 
-    /// Verifies `PUT /auth/token` returns a working token at a bumped
+    /// Verifies `PUT /token` returns a working token at a bumped
     /// version and invalidates the token used to call it.
     #[test_log::test(tokio::test)]
     async fn test_renew_token_success_invalidates_previous() {
@@ -1182,7 +1224,7 @@ mod tests {
         let existing = mint_token("jack", 1, false);
 
         let response = server
-            .put("/auth/token")
+            .put("/token")
             .add_header(
                 axum::http::header::AUTHORIZATION,
                 format!("Bearer {existing}"),
@@ -1216,16 +1258,16 @@ mod tests {
             .assert_status(StatusCode::UNAUTHORIZED);
     }
 
-    /// Verifies `PUT /auth/token` without a bearer token is rejected.
+    /// Verifies `PUT /token` without a bearer token is rejected.
     #[test_log::test(tokio::test)]
     async fn test_renew_token_failure_unauthenticated() {
-        let response = test_server().put("/auth/token").await;
+        let response = test_server().put("/token").await;
         response.assert_status(StatusCode::UNAUTHORIZED);
     }
 
     // ---- lifecycle: revoke ----
 
-    /// Verifies `DELETE /auth/token` bumps the version, returns no token,
+    /// Verifies `DELETE /token` bumps the version, returns no token,
     /// and kills the token used to call it.
     #[test_log::test(tokio::test)]
     async fn test_revoke_token_success_invalidates_previous() {
@@ -1233,7 +1275,7 @@ mod tests {
         let existing = mint_token("jack", 1, false);
 
         let response = server
-            .delete("/auth/token")
+            .delete("/token")
             .add_header(
                 axum::http::header::AUTHORIZATION,
                 format!("Bearer {existing}"),
@@ -1257,10 +1299,10 @@ mod tests {
             .assert_status(StatusCode::UNAUTHORIZED);
     }
 
-    /// Verifies `DELETE /auth/token` without a bearer token is rejected.
+    /// Verifies `DELETE /token` without a bearer token is rejected.
     #[test_log::test(tokio::test)]
     async fn test_revoke_token_failure_unauthenticated() {
-        let response = test_server().delete("/auth/token").await;
+        let response = test_server().delete("/token").await;
         response.assert_status(StatusCode::UNAUTHORIZED);
     }
 

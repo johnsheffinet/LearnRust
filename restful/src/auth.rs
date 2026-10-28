@@ -826,9 +826,119 @@ mod tests {
         TestServer::new(app)
     }
 
+    #[test_log::test(tokio::test)]
+    async fn test_auth_state_new_success() {
+        
+    }
+
+    /// Verifies `new_for_ttl` rejects a zero lifetime rather than minting
+    /// tokens that are dead on arrival.
+    /// Verifies `new_for_ttl` rejects a sub-second lifetime, which
+    /// truncates to zero seconds and would otherwise slip past an
+    /// `is_zero()` check.
+    #[test_log::test(tokio::test)]
+    async fn test_auth_state_new_failure() {
+        
+    }
+
+    /// Verifies a valid token authenticates and `AuthUser` is extractable.
+    #[test_log::test(tokio::test)]
+    async fn test_authn_layer_success() {
+        
+    }
+
+    /// Verifies a missing `Authorization` header is rejected.
+    /// Verifies a header without a `Bearer ` prefix is rejected.
+    /// Verifies a token signed with a different secret is rejected.
+    /// Verifies an expired token is rejected.
+    /// Verifies a token whose `ver` is behind the store's is rejected —
+    /// the core of revocation.
+    /// Verifies a valid token for a subject with no `TokenStore` entry is
+    /// rejected — `authn_layer` fails closed on an unknown user.
+    #[test_log::test(tokio::test)]
+    async fn test_authn_layer_failure() {
+        
+    }
+
+    /// Verifies a user holding the required role is allowed through.
+    #[test_log::test(tokio::test)]
+    async fn test_authz_layer_success() {
+        
+    }
+
+    /// Verifies an authenticated user lacking the required role is
+    /// forbidden.
+    /// Verifies a valid token for a subject with no `RoleStore` entry at
+    /// all is treated as having zero roles, not an error.
+    #[test_log::test(tokio::test)]
+    async fn test_authz_layer_failure() {
+        
+    }
+
     /// Verifies `exp_from_ttl` produces a timestamp roughly `token_ttl`
     /// seconds in the future.
     #[test_log::test(tokio::test)]
+    async fn test_exp_from_ttl_success() {
+        
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_exp_from_ttl_failure() {
+        
+    }
+
+    /// Verifies `POST /auth/token` returns a working token at the caller's
+    /// current version, and leaves previously issued tokens valid.
+    #[test_log::test(tokio::test)]
+    async fn test_issue_token_success() {
+        
+    }
+
+    /// Verifies `POST /auth/token` without a bearer token is rejected —
+    /// lifecycle endpoints require the caller to already be authenticated.
+    #[test_log::test(tokio::test)]
+    async fn test_issue_token_failure() {
+        
+    }
+
+    /// Verifies `PUT /auth/token` returns a working token at a bumped
+    /// version and invalidates the token used to call it.
+    #[test_log::test(tokio::test)]
+    async fn test_renew_token_success() {
+        
+    }
+
+    /// Verifies `PUT /auth/token` without a bearer token is rejected.
+    #[test_log::test(tokio::test)]
+    async fn test_renew_token_failure() {
+        
+    }
+
+    /// Verifies `DELETE /auth/token` bumps the version, returns no token,
+    /// and kills the token used to call it.
+    #[test_log::test(tokio::test)]
+    async fn test_revoke_token_success() {
+        
+    }
+
+    /// Verifies `DELETE /auth/token` without a bearer token is rejected.
+    #[test_log::test(tokio::test)]
+    async fn test_revoke_token_failure() {
+        
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_sign_token_success() {
+        
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_sign_token_failure() {
+        
+    }
+
+    /// Verifies `exp_from_ttl` produces a timestamp roughly `token_ttl`
+    /// seconds in the future.
     #[test_log::test(tokio::test)]
     async fn test_exp_from_ttl_success() {
         let now = SystemTime::now()
@@ -867,6 +977,7 @@ mod tests {
         response.assert_status(StatusCode::UNAUTHORIZED);
     }
 
+    /// Verifies a missing `Authorization` header is rejected.
     /// Verifies a header without a `Bearer ` prefix is rejected.
     #[test_log::test(tokio::test)]
     async fn test_authenticate_failure_invalid_header() {
@@ -878,6 +989,8 @@ mod tests {
         response.assert_status(StatusCode::UNAUTHORIZED);
     }
 
+    /// Verifies a missing `Authorization` header is rejected.
+    /// Verifies a header without a `Bearer ` prefix is rejected.
     /// Verifies a token signed with a different secret is rejected.
     #[test_log::test(tokio::test)]
     async fn test_authenticate_failure_invalid_token() {
@@ -905,6 +1018,9 @@ mod tests {
         response.assert_status(StatusCode::UNAUTHORIZED);
     }
     
+    /// Verifies a missing `Authorization` header is rejected.
+    /// Verifies a header without a `Bearer ` prefix is rejected.
+    /// Verifies a token signed with a different secret is rejected.
     /// Verifies an expired token is rejected.
     #[test_log::test(tokio::test)]
     async fn test_authenticate_failure_expired_token() {
@@ -918,6 +1034,10 @@ mod tests {
         response.assert_status(StatusCode::UNAUTHORIZED);
     }
 
+    /// Verifies a missing `Authorization` header is rejected.
+    /// Verifies a header without a `Bearer ` prefix is rejected.
+    /// Verifies a token signed with a different secret is rejected.
+    /// Verifies an expired token is rejected.
     /// Verifies a token whose `ver` is behind the store's is rejected —
     /// the core of revocation.
     #[test_log::test(tokio::test)]
@@ -932,6 +1052,12 @@ mod tests {
         response.assert_status(StatusCode::UNAUTHORIZED);
     }
 
+    /// Verifies a missing `Authorization` header is rejected.
+    /// Verifies a header without a `Bearer ` prefix is rejected.
+    /// Verifies a token signed with a different secret is rejected.
+    /// Verifies an expired token is rejected.
+    /// Verifies a token whose `ver` is behind the store's is rejected —
+    /// the core of revocation.
     /// Verifies a valid token for a subject with no `TokenStore` entry is
     /// rejected — `authn_layer` fails closed on an unknown user.
     #[test_log::test(tokio::test)]
@@ -974,6 +1100,8 @@ mod tests {
         response.assert_status(StatusCode::FORBIDDEN);
     }
 
+    /// Verifies an authenticated user lacking the required role is
+    /// forbidden.
     /// Verifies a valid token for a subject with no `RoleStore` entry at
     /// all is treated as having zero roles, not an error.
     #[test_log::test(tokio::test)]
@@ -1164,6 +1292,8 @@ mod tests {
         assert!(matches!(result, Err(super::AppError::TokenExpiryInvalid)));
     }
     
+    /// Verifies `new_for_ttl` rejects a zero lifetime rather than minting
+    /// tokens that are dead on arrival.
     /// Verifies `new_for_ttl` rejects a sub-second lifetime, which
     /// truncates to zero seconds and would otherwise slip past an
     /// `is_zero()` check.

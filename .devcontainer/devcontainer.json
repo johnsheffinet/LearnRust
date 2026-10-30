@@ -13,7 +13,7 @@
     "ANTHROPIC_API_KEY": "",
     "ANTHROPIC_DEFAULT_FABLE_MODEL": "qwen/qwen3.6-plus:free"
   },
-  "postCreateCommand": "npm install --global waifu-code && cargo install cargo-tarpaulin --locked",
+  "postCreateCommand": "cargo install cargo-tarpaulin --locked",
   "customizations": {
     "vscode": {
       "extensions": [

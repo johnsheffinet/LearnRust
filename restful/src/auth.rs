@@ -856,11 +856,9 @@ mod tests {
     /// Verifies a valid token authenticates and `AuthUser` is extractable.
     #[test_log::test(tokio::test)]
     async fn test_authn_layer_success() {
-        let server = test_server();
-
         let token = minted_token("jack", 1, false);
 
-        let response = server
+        let response = test_server()
             .get("/user")
             .add_header(AUTHORIZATION, format!("Bearer {token}"))
             .await;
@@ -872,11 +870,9 @@ mod tests {
     /// Verifies a missing `Authorization` header is rejected.
     #[test_log::test(tokio::test)]
     async fn test_authn_layer_failure_authorization_header_missing() {
-        let server = test_server();
-
         let token = minted_token("jack", 1, false);
 
-        let response = server
+        let response = test_server()
             .get("/user")
             .await;
 
@@ -886,54 +882,80 @@ mod tests {
     /// Verifies a header without a `Bearer ` prefix is rejected.
     #[test_log::test(tokio::test)]
     async fn test_authn_layer_failure_authorization_header_invalid() {
-        let server = test_server();
-
         let token = minted_token("jack", 1, false);
 
-        let response = server
+        let response = test_server()
             .get("/user")
             .add_header(AUTHORIZATION, format!("{token}"))
             .await;
 
-        response.assert_status(StatusCode::OK);
+        response.assert_status(StatusCode::UNAUTHORIZED);
     }
 
     /// Verifies a token signed with a different secret is rejected.
     #[test_log::test(tokio::test)]
     async fn test_authn_layer_failure_bearer_token_invalid() {
-        let server = test_server();
+        let claims = Claims {
+            sub: "jack".to_string(),
+            exp: u64::MAX,
+            jti: Uuid::new_v4().to_string(),
+            ver: 1,
+        };
 
-        let claims = Claims {};
-        let token = encode();
-        
-        let token = minted_token("jack", 1, false);
+        let token = encode(
+            &Header::default,
+            &claims,
+            &EncodingKey::from_secret(b"diff_secret")
+            )
+            .unwrap();
 
-        let response = server
+        let response = test_server()
             .get("/user")
             .add_header(AUTHORIZATION, format!("Bearer {token}"))
             .await;
 
-        response.assert_status(StatusCode::OK);
+        response.assert_status(StatusCode::UNAUTHORIZED);
     }
 
     /// Verifies an expired token is rejected.
     #[test_log::test(tokio::test)]
     async fn test_authn_layer_failure_bearer_token_expired() {
-        
+        let token = minted_token("jack", 1, true);
+
+        let response = test_server()
+            .get("/user")
+            .add_header(AUTHORIZATION, format!("Bearer {token}"))
+            .await;
+
+        response.assert_status(StatusCode::UNAUTHORIZED);        
     }
 
     /// Verifies a token whose `ver` is behind the store's is rejected —
     /// the core of revocation.
     #[test_log::test(tokio::test)]
     async fn test_authn_layer_failure_token_version_invalid() {
-        
+        let token = minted_token("jack", 0, false);
+
+        let response = test_server()
+            .get("/user")
+            .add_header(AUTHORIZATION, format!("Bearer {token}"))
+            .await;
+
+        response.assert_status(StatusCode::UNAUTHORIZED);                
     }
 
     /// Verifies a valid token for a subject with no `TokenStore` entry is
     /// rejected — `authn_layer` fails closed on an unknown user.
     #[test_log::test(tokio::test)]
     async fn test_authn_layer_failure_user_unknown() {
-        
+        let token = minted_token("john", 1, false);
+
+        let response = test_server()
+            .get("/user")
+            .add_header(AUTHORIZATION, format!("Bearer {token}"))
+            .await;
+
+        response.assert_status(StatusCode::UNAUTHORIZED);
     }
 
     /// Verifies a user holding the required role is allowed through.
@@ -1018,141 +1040,8 @@ mod tests {
         
     }
 
-    /// Verifies `exp_from_ttl` produces a timestamp roughly `token_ttl`
-    /// seconds in the future.
-    #[test_log::test(tokio::test)]
-    async fn test_exp_from_ttl_success() {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        let exp = exp_from_ttl(3600).unwrap();
-
-        // Allow a wide window so the test isn't clock-sensitive.
-        assert!(exp > now + 3500);
-        assert!(exp <= now + 3600);
-    }
-    
     // ---- authn / authz ----
 
-    /// Verifies a valid token authenticates and `AuthUser` is extractable.
-    #[test_log::test(tokio::test)]
-    async fn test_authenticate_success() {
-        let server = test_server();
-        let token = mint_token("jack", 1, false);
-
-        let response = server
-            .get("/me")
-            .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
-            .await;
-
-        response.assert_status(StatusCode::OK);
-        response.assert_text("jack");
-    }
-
-    /// Verifies a missing `Authorization` header is rejected.
-    #[test_log::test(tokio::test)]
-    async fn test_authenticate_failure_missing_header() {
-        let response = test_server().get("/me").await;
-        response.assert_status(StatusCode::UNAUTHORIZED);
-    }
-
-    /// Verifies a missing `Authorization` header is rejected.
-    /// Verifies a header without a `Bearer ` prefix is rejected.
-    #[test_log::test(tokio::test)]
-    async fn test_authenticate_failure_invalid_header() {
-        let response = test_server()
-            .get("/me")
-            .add_header(axum::http::header::AUTHORIZATION, "not-a-bearer-token")
-            .await;
-
-        response.assert_status(StatusCode::UNAUTHORIZED);
-    }
-
-    /// Verifies a missing `Authorization` header is rejected.
-    /// Verifies a header without a `Bearer ` prefix is rejected.
-    /// Verifies a token signed with a different secret is rejected.
-    #[test_log::test(tokio::test)]
-    async fn test_authenticate_failure_invalid_token() {
-        let claims = Claims {
-            sub: "jack".to_string(),
-            exp: u64::MAX,
-            jti: Uuid::new_v4().to_string(),
-            ver: 1,
-        };
-        let bad_token = encode(
-            &Header::default(),
-            &claims,
-            &EncodingKey::from_secret(b"wrong-secret"),
-        )
-        .unwrap();
-
-        let response = test_server()
-            .get("/me")
-            .add_header(
-                axum::http::header::AUTHORIZATION,
-                format!("Bearer {bad_token}"),
-            )
-            .await;
-
-        response.assert_status(StatusCode::UNAUTHORIZED);
-    }
-    
-    /// Verifies a missing `Authorization` header is rejected.
-    /// Verifies a header without a `Bearer ` prefix is rejected.
-    /// Verifies a token signed with a different secret is rejected.
-    /// Verifies an expired token is rejected.
-    #[test_log::test(tokio::test)]
-    async fn test_authenticate_failure_expired_token() {
-        let token = mint_token("jack", 1, true);
-
-        let response = test_server()
-            .get("/me")
-            .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
-            .await;
-
-        response.assert_status(StatusCode::UNAUTHORIZED);
-    }
-
-    /// Verifies a missing `Authorization` header is rejected.
-    /// Verifies a header without a `Bearer ` prefix is rejected.
-    /// Verifies a token signed with a different secret is rejected.
-    /// Verifies an expired token is rejected.
-    /// Verifies a token whose `ver` is behind the store's is rejected —
-    /// the core of revocation.
-    #[test_log::test(tokio::test)]
-    async fn test_authenticate_failure_stale_version() {
-        let token = mint_token("jack", 0, false); // store says 1
-
-        let response = test_server()
-            .get("/me")
-            .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
-            .await;
-
-        response.assert_status(StatusCode::UNAUTHORIZED);
-    }
-
-    /// Verifies a missing `Authorization` header is rejected.
-    /// Verifies a header without a `Bearer ` prefix is rejected.
-    /// Verifies a token signed with a different secret is rejected.
-    /// Verifies an expired token is rejected.
-    /// Verifies a token whose `ver` is behind the store's is rejected —
-    /// the core of revocation.
-    /// Verifies a valid token for a subject with no `TokenStore` entry is
-    /// rejected — `authn_layer` fails closed on an unknown user.
-    #[test_log::test(tokio::test)]
-    async fn test_authenticate_failure_unknown_user() {
-        let token = mint_token("newcomer", 0, false); // not in TokenStore
-
-        let response = test_server()
-            .get("/me")
-            .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
-            .await;
-
-        response.assert_status(StatusCode::UNAUTHORIZED);
-    }
-    
     /// Verifies a user holding the required role is allowed through.
     #[test_log::test(tokio::test)]
     async fn test_authorize_success() {

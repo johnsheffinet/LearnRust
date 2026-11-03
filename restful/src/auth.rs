@@ -5,9 +5,8 @@
 //!
 //! - [`authn_layer`] verifies the `Authorization: Bearer <jwt>` header,
 //!   decodes [`Claims`], checks the token's `ver` against the version
-//!   recorded in the [`TokenStore`] (rejecting renewed/revoked tokens),
-//!   looks the subject up in a [`RoleStore`], and inserts an [`AuthUser`]
-//!   into the request's extensions.
+//!   recorded in the caller's [`User`] entry (rejecting renewed/revoked
+//!   tokens), and inserts an [`AuthUser`] into the request's extensions.
 //! - [`authz_layer`] reads that [`AuthUser`] back out and rejects the
 //!   request if it doesn't hold the required role. It must run *after*
 //!   [`authn_layer`] on the same request, since it only reads what that
@@ -16,52 +15,34 @@
 //! # Token lifecycle
 //!
 //! A bare JWT cannot be updated or revoked, so every token carries a `ver`
-//! (version) claim. The [`TokenStore`] records the current version per
-//! user; [`authn_layer`] rejects any token whose `ver` doesn't match. That
-//! makes three self-service operations well-defined, all at `/token`
-//! and all scoped to the caller (they sit inside the [`authn_layer`]
-//! group, so the caller must already hold a valid token):
+//! (version) claim. Each user's [`User`] entry records the current version;
+//! [`authn_layer`] rejects any token whose `ver` doesn't match. That makes
+//! three self-service operations well-defined, all at `/auth/token` and all
+//! scoped to the caller (they sit inside the [`authn_layer`] group, so the
+//! caller must already hold a valid token):
 //!
-//! - [`issue_token`] (`POST /token`): mints a fresh token for the
+//! - [`issue_token`] (`POST /auth/token`): mints a fresh token for the
 //!   caller at their *current* version. Previously issued tokens remain
 //!   valid — additive, useful for a second device.
-//! - [`renew_token`] (`PUT /token`): bumps the caller's version,
+//! - [`renew_token`] (`PUT /auth/token`): bumps the caller's version,
 //!   immediately invalidating every token they previously held, and
 //!   returns one replacement at the new version.
-//! - [`revoke_token`] (`DELETE /token`): bumps the caller's version
+//! - [`revoke_token`] (`DELETE /auth/token`): bumps the caller's version
 //!   without issuing a replacement, killing all the caller's tokens.
 //!
-//! Bootstrapping the very first token for a user is deliberately *not* an
-//! HTTP endpoint. An unauthenticated "mint me a token" route is a
-//! privilege-escalation hole, and the authenticated operations above all
-//! require a token to call — so the first one has to come from somewhere
-//! else. Seed it out-of-band (a startup task, a CLI subcommand, or your
-//! real identity provider).
+//! Roles live on the same [`User`] entry as the version, so a single lookup
+//! resolves both, and a user cannot exist in one store but not the other.
+//! Role assignments are still not embedded in the token; a token's
+//! authority is whatever the [`User`] entry says about its subject when the
+//! token is presented, so a role change takes effect on the subject's next
+//! request.
 //!
-//! Role assignments are stored separately in the [`RoleStore`] and are not
-//! embedded in the token; a token's authority is whatever the store says
-//! about its subject when the token is presented, so a role change takes
-//! effect on the subject's next request.
-//!
-//! # Examples
-//!
-//! Applying the middleware and lifecycle routes:
-//!
-//! ```ignore
-//! use axum::{middleware, routing::{post, put, delete}, Router};
-//!
-//! let token_routes = Router::new().route(
-//!     "/token",
-//!     post(auth::issue_token).put(auth::renew_token).delete(auth::revoke_token),
-//! );
-//!
-//! let protected = Router::new()
-//!     .merge(token_routes)
-//!     .layer(middleware::from_fn_with_state(
-//!         auth::AuthState::new(&jwt_secret, roles.clone(), tokens.clone())?,
-//!         auth::authn_layer,
-//!     ));
-//! ```
+//! Bootstrapping the very first user is deliberately *not* an HTTP endpoint.
+//! An unauthenticated "mint me a token" route is a privilege-escalation
+//! hole, and the authenticated operations above all require a token to
+//! call — so the first user, their roles, and their initial token version
+//! have to come from somewhere else. Seed them out-of-band (a startup task,
+//! a CLI subcommand, or your real identity provider).
 
 use axum::{
     Extension, Json,
@@ -97,10 +78,11 @@ pub enum AppError {
     /// Missing, malformed, invalid/expired, or renewed/revoked bearer
     /// token; responds with `401 Unauthorized`.
     ///
-    /// Renewed/revoked tokens (wrong `ver`) deliberately map to the same
-    /// opaque error as malformed ones, so a caller cannot distinguish
-    /// "your token was renewed elsewhere" from "your token was never
-    /// valid".
+    /// Renewed/revoked tokens (wrong `ver`) and unknown subjects (no
+    /// [`User`] entry) deliberately map to the same opaque error as
+    /// malformed ones, so a caller cannot distinguish "your token was
+    /// renewed elsewhere" from "your token was never valid" from "you were
+    /// never a user."
     #[error("User is unauthorized!")]
     #[status_code("401")]
     #[code("UNAUTHORIZED")]
@@ -126,6 +108,8 @@ pub enum AppError {
     #[code("UNPROCESSABLE_ENTITY")]
     TokenExpiryInvalid,
 
+    /// A user's version counter could not be incremented (it is already
+    /// `u64::MAX`); responds with `422 Unprocessable Entity`.
     #[error("Token version is invalid!")]
     #[status_code("422")]
     #[code("UNPROCESSABLE_ENTITY")]
@@ -149,14 +133,15 @@ pub enum AppError {
     #[code("INTERNAL_SERVER_ERROR")]
     TokenNotSigned(#[from] jsonwebtoken::errors::Error),
 }
+
 // ---------------------------------------------------------------------------
 // Structs
 // ---------------------------------------------------------------------------
 
 /// State captured by the [`authn_layer`] middleware and shared with the
 /// lifecycle handlers: the keys used to sign and verify tokens, the
-/// validation rules, the role store, the token store, and the lifetime
-/// assigned to newly minted tokens.
+/// validation rules, the user store, and the lifetime assigned to newly
+/// minted tokens.
 ///
 /// Built once at startup and passed to
 /// [`middleware::from_fn_with_state`](axum::middleware::from_fn_with_state)
@@ -172,11 +157,10 @@ pub struct AuthState {
     /// Validation rules (algorithm, required claims, clock skew, etc.)
     /// applied to every token. Currently [`Validation::default`].
     validation: Validation,
-    /// Store consulted for the authenticated subject's roles.
-    roles: RoleStore,
-    /// Store consulted for the subject's current token version, and
+    /// Store of users: their roles and their current token version, keyed
+    /// by the JWT `sub` (user id). Consulted by [`authn_layer`] and
     /// updated by the lifecycle handlers.
-    tokens: TokenStore,
+    users: UserStore,
     /// Lifetime of tokens minted by this service, in whole seconds.
     ///
     /// Stored truncated to seconds because `exp` is a second-resolution
@@ -185,8 +169,8 @@ pub struct AuthState {
 }
 
 impl AuthState {
-    /// Builds authentication state from the app's JWT signing secret, role
-    /// store, and token store, with the default one-hour token lifetime.
+    /// Builds authentication state from the app's JWT signing secret and
+    /// user store, with the default one-hour token lifetime.
     ///
     /// See [`AuthState::new_for_ttl`] to override the lifetime.
     ///
@@ -204,17 +188,12 @@ impl AuthState {
     /// use std::sync::Arc;
     ///
     /// let jwt_secret = SecretString::from("super-secret-demo-key".to_string());
-    /// let roles = Arc::new(DashMap::new());
-    /// let tokens = Arc::new(DashMap::new());
+    /// let users = Arc::new(DashMap::new());
     ///
-    /// let auth_state = auth::AuthState::new(&jwt_secret, roles, tokens)?;
+    /// let auth_state = auth::AuthState::new(&jwt_secret, users)?;
     /// ```
-    pub fn new(
-        jwt_secret: &SecretString,
-        roles: RoleStore,
-        tokens: TokenStore,
-    ) -> AppResult<Self> {
-        Self::new_for_ttl(jwt_secret, roles, tokens, Duration::from_secs(60 * 60))
+    pub fn new(jwt_secret: &SecretString, users: UserStore) -> AppResult<Self> {
+        Self::new_for_ttl(jwt_secret, users, Duration::from_secs(60 * 60))
     }
 
     /// Builds authentication state with an explicit token lifetime.
@@ -245,8 +224,7 @@ impl AuthState {
     /// one) and cannot fail.
     pub fn new_for_ttl(
         jwt_secret: &SecretString,
-        roles: RoleStore,
-        tokens: TokenStore,
+        users: UserStore,
         token_ttl: Duration,
     ) -> AppResult<Self> {
         let secret = jwt_secret.expose_secret().as_bytes();
@@ -262,8 +240,7 @@ impl AuthState {
             decoding_key: DecodingKey::from_secret(secret),
             encoding_key: EncodingKey::from_secret(secret),
             validation: Validation::default(),
-            roles,
-            tokens,
+            users,
             token_ttl,
         })
     }
@@ -282,7 +259,7 @@ impl AuthState {
 /// # #[derive(Clone, Debug)]
 /// # struct AuthUser { user_id: String, roles: Vec<String> }
 /// let user = AuthUser {
-///     user_id: "jack".to_string(),
+///     user_id: "alice".to_string(),
 ///     roles: vec!["admin".to_string(), "user".to_string()],
 /// };
 ///
@@ -292,7 +269,7 @@ impl AuthState {
 pub struct AuthUser {
     /// The JWT subject (user id) this request was authenticated as.
     pub user_id: String,
-    /// Roles held by this user, as of the [`RoleStore`] lookup performed
+    /// Roles held by this user, as of the [`UserStore`] lookup performed
     /// by [`authn_layer`] for this request. Not re-checked for the
     /// lifetime of the request, so role changes take effect on the next
     /// request, not the current one.
@@ -314,19 +291,19 @@ pub struct AuthUser {
 /// # #[derive(Debug, Clone, Deserialize, Serialize)]
 /// # struct Claims { sub: String, exp: u64, jti: String, ver: u64 }
 /// let claims = Claims {
-///     sub: "jack".to_string(),
+///     sub: "alice".to_string(),
 ///     exp: 9_999_999_999,
 ///     jti: "0b6f...".to_string(),
 ///     ver: 1,
 /// };
 ///
-/// assert_eq!(claims.sub, "jack");
+/// assert_eq!(claims.sub, "alice");
 /// assert_eq!(claims.ver, 1);
 /// ```
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Claims {
-    /// The token subject — the user id used to look roles up in the
-    /// [`RoleStore`] and the version up in the [`TokenStore`].
+    /// The token subject — the user id used to look the [`User`] entry up
+    /// in the [`UserStore`].
     pub sub: String,
     /// Standard `exp` claim: a Unix timestamp (seconds since the epoch)
     /// after which the token is no longer valid. Enforced by
@@ -339,7 +316,7 @@ pub struct Claims {
     pub jti: String,
     /// This service's revocation generation for `sub`. [`authn_layer`]
     /// rejects the token unless it matches the version currently recorded
-    /// in the [`TokenStore`].
+    /// in the subject's [`User`] entry.
     pub ver: u64,
 }
 
@@ -357,7 +334,12 @@ pub struct TokenResponse {
     pub ver: u64,
 }
 
-/// Per-user token revocation state.
+/// A user: their role assignments and their current token revocation
+/// state, together under one key.
+///
+/// Combining the two means a single lookup resolves both what a user may
+/// do and which of their tokens are still valid, and makes it impossible
+/// for a user to exist in one store but not the other.
 ///
 /// `active_ver` is the current generation; any token carrying a different
 /// `ver` is rejected by [`authn_layer`]. Bumping it revokes every
@@ -370,7 +352,10 @@ pub struct TokenResponse {
 /// which token it killed and so a future "list my sessions" endpoint has
 /// something to read.
 #[derive(Clone, Debug, Default)]
-pub struct TokenState {
+pub struct User {
+    /// Roles held by this user. Empty means "authenticated but
+    /// unauthorized for anything role-gated."
+    pub roles: Vec<String>,
     /// The current revocation generation for this user.
     pub active_ver: u64,
     /// The `jti` of the newest token minted for this user, if any.
@@ -384,11 +369,14 @@ pub struct TokenState {
 /// Convenience alias for results returned by items in [`auth`](self).
 pub type AppResult<T> = Result<T, AppError>;
 
-/// In-memory role assignments, keyed by the JWT `sub` (user id).
+/// In-memory user records, keyed by the JWT `sub` (user id).
 ///
 /// This is a thread-safe, reference-counted, concurrent map, so cloning a
-/// `RoleStore` is cheap and shares the same underlying data — the same
+/// `UserStore` is cheap and shares the same underlying data — the same
 /// pattern used by [`AppStore`](crate::config::AppStore) for items.
+///
+/// Each entry holds both the user's roles and their token revocation
+/// state, so [`authn_layer`] resolves both with one lookup.
 ///
 /// # Examples
 ///
@@ -396,32 +384,22 @@ pub type AppResult<T> = Result<T, AppError>;
 /// use dashmap::DashMap;
 /// use std::sync::Arc;
 ///
-/// let roles: Arc<DashMap<String, Vec<String>>> = Arc::new(DashMap::new());
-/// roles.insert("jack".to_string(), vec!["admin".to_string()]);
+/// let users: Arc<DashMap<String, User>> = Arc::new(DashMap::new());
+/// users.insert("alice".to_string(), User { roles: vec!["admin".to_string()], ..Default::default() });
 ///
 /// assert_eq!(
-///     roles.get("jack").map(|r| r.clone()),
+///     users.get("alice").map(|u| u.roles.clone()),
 ///     Some(vec!["admin".to_string()])
 /// );
 /// ```
-pub type RoleStore = Arc<DashMap<String, Vec<String>>>;
-
-/// In-memory token revocation state, keyed by the JWT `sub` (user id).
-///
-/// Like [`RoleStore`], this is a thread-safe, reference-counted, concurrent
-/// map, so cloning a `TokenStore` is cheap and shares the same underlying
-/// data.
-///
-/// Memory use is O(distinct users), not O(issued tokens): rotation reuses
-/// a single counter rather than retaining a per-token denylist.
-pub type TokenStore = Arc<DashMap<String, TokenState>>;
+pub type UserStore = Arc<DashMap<String, User>>;
 
 // ---------------------------------------------------------------------------
 // Functions
 // ---------------------------------------------------------------------------
 
 /// Authenticates an incoming request: validates its Bearer token, confirms
-/// it hasn't been renewed or revoked, and, on success, attaches an
+/// the token hasn't been renewed or revoked, and, on success, attaches an
 /// [`AuthUser`] to the request's extensions before passing it on to `next`.
 ///
 /// Intended to be layered with
@@ -430,24 +408,14 @@ pub type TokenStore = Arc<DashMap<String, TokenState>>;
 /// handlers and middleware (such as [`authz_layer`]) can then read the
 /// attached [`AuthUser`].
 ///
-/// # Examples
-///
-/// ```ignore
-/// use axum::{middleware, Router};
-///
-/// let protected = Router::new()
-///     // ...routes...
-///     .layer(middleware::from_fn_with_state(auth_state, auth::authn_layer));
-/// ```
-///
 /// # Errors
 ///
 /// Returns [`AppError::UserUnauthorized`] if the `Authorization` header is
 /// missing, is not a valid UTF-8 string, does not start with `"Bearer "`,
 /// if the token fails to decode or validate (bad signature, malformed
-/// claims, or an expired `exp`), or if the token's `ver` does not match the
-/// subject's current version in the [`TokenStore`] (i.e. it was renewed or
-/// revoked).
+/// claims, or an expired `exp`), if the subject has no [`User`] entry, or
+/// if the token's `ver` does not match the subject's current version (i.e.
+/// it was renewed or revoked).
 ///
 /// # Panics
 ///
@@ -474,22 +442,19 @@ pub async fn authn_layer(
             .map_err(|_| AppError::UserUnauthorized)?
             .claims;
 
-    // Fail closed: unknown user or stale version => reject
-    let current_ver = state
-        .tokens
+    // Fail closed: unknown user or stale version => reject. One lookup
+    // resolves both the version and the roles.
+    let entry = state
+        .users
         .get(&user_id)
-        .map(|entry| entry.active_ver)
         .ok_or(AppError::UserUnauthorized)?;
 
-    if ver != current_ver {
+    if ver != entry.active_ver {
         return Err(AppError::UserUnauthorized);
     }
 
-    let roles = state
-        .roles
-        .get(&user_id)
-        .map(|entry| entry.clone())
-        .unwrap_or_default();
+    let roles = entry.roles.clone();
+    drop(entry);
 
     req.extensions_mut().insert(AuthUser { user_id, roles });
 
@@ -505,13 +470,12 @@ pub async fn authn_layer(
 ///
 /// Because [`middleware::from_fn`](axum::middleware::from_fn) expects a
 /// fixed function signature, `role` is supplied by wrapping this function
-/// in a closure per call site rather than partially applying it directly
-/// (see the module-level example).
+/// in a closure per call site rather than partially applying it directly.
 ///
 /// # Errors
 ///
-/// Returns [`AppError::RoleForbidden`] if the authenticated user's roles do not
-/// include `role`.
+/// Returns [`AppError::RoleForbidden`] if the authenticated user's roles do
+/// not include `role`.
 ///
 /// # Panics
 ///
@@ -553,7 +517,7 @@ fn exp_from_ttl(token_ttl: u64) -> AppResult<u64> {
         .ok_or(AppError::TokenExpiryInvalid)
 }
 
-/// Handles `POST /token`: issues a fresh token for the caller.
+/// Handles `POST /auth/token`: issues a fresh token for the caller.
 ///
 /// The new token carries the caller's *current* version, so any tokens
 /// they already hold stay valid — issuing is additive. Use
@@ -576,7 +540,7 @@ pub async fn issue_token(
     Extension(user): Extension<AuthUser>,
 ) -> AppResult<impl IntoResponse> {
     let mut entry = state
-        .tokens
+        .users
         .get_mut(&user.user_id)
         .ok_or(AppError::UserUnauthorized)?;
 
@@ -585,7 +549,7 @@ pub async fn issue_token(
     let (token, jti) = sign_token(&user.user_id, state.token_ttl, ver, &state.encoding_key)?;
 
     entry.active_jti = Some(jti.clone());
-    
+
     Ok((
         StatusCode::CREATED,
         Json(TokenResponse {
@@ -596,7 +560,7 @@ pub async fn issue_token(
     ))
 }
 
-/// Handles `PUT /token`: renews the caller's token.
+/// Handles `PUT /auth/token`: renews the caller's token.
 ///
 /// Bumps the caller's version, which immediately invalidates every token
 /// previously issued to them, then mints and returns a replacement at the
@@ -606,7 +570,8 @@ pub async fn issue_token(
 ///
 /// Returns [`AppError::TokenNotSigned`] or
 /// [`AppError::TokenExpiryInvalid`] under the same conditions as
-/// [`issue_token`].
+/// [`issue_token`], or [`AppError::TokenVersionInvalid`] if the version
+/// counter is exhausted.
 ///
 /// # Panics
 ///
@@ -617,7 +582,7 @@ pub async fn renew_token(
     Extension(user): Extension<AuthUser>,
 ) -> AppResult<impl IntoResponse> {
     let mut entry = state
-        .tokens
+        .users
         .get_mut(&user.user_id)
         .ok_or(AppError::UserUnauthorized)?;
 
@@ -641,7 +606,7 @@ pub async fn renew_token(
     ))
 }
 
-/// Handles `DELETE /token`: revokes the caller's tokens.
+/// Handles `DELETE /auth/token`: revokes the caller's tokens.
 ///
 /// Bumps the caller's version without issuing a replacement, so every
 /// token they currently hold is rejected by [`authn_layer`] on its next
@@ -653,8 +618,9 @@ pub async fn renew_token(
 ///
 /// # Errors
 ///
-/// Does not currently fail; returns [`AppResult`] so a future persistent
-/// backing store can surface write failures without a signature change.
+/// Returns [`AppError::UserUnauthorized`] if the caller has no [`User`]
+/// entry, or [`AppError::TokenVersionInvalid`] if the version counter is
+/// exhausted.
 ///
 /// # Panics
 ///
@@ -665,7 +631,7 @@ pub async fn revoke_token(
     Extension(user): Extension<AuthUser>,
 ) -> AppResult<impl IntoResponse> {
     let mut entry = state
-        .tokens
+        .users
         .get_mut(&user.user_id)
         .ok_or(AppError::UserUnauthorized)?;
 
@@ -674,10 +640,7 @@ pub async fn revoke_token(
         .checked_add(1)
         .ok_or(AppError::TokenVersionInvalid)?;
 
-    let jti = entry
-        .active_jti
-        .take()
-        .unwrap_or_default();
+    let jti = entry.active_jti.take().unwrap_or_default();
 
     entry.active_ver = ver;
 
@@ -695,7 +658,7 @@ pub async fn revoke_token(
 /// JWT and the `jti` embedded in it.
 ///
 /// Takes the key and lifetime directly rather than `&AuthState` so callers
-/// can hold a `TokenStore` write guard across the call without borrowing
+/// can hold a [`UserStore`] write guard across the call without borrowing
 /// the whole state (which would conflict with the guard).
 fn sign_token(
     sub: &str,
@@ -715,567 +678,4 @@ fn sign_token(
     let token = encode(&Header::default(), &claims, encoding_key)?;
 
     Ok((token, jti))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        AuthState, AuthUser, Claims, RoleStore, TokenResponse, TokenState, TokenStore, authn_layer,
-        authz_layer, exp_from_ttl, issue_token, renew_token, revoke_token,
-    };
-    use axum::{
-        Extension, Router,
-        http::{StatusCode, header::AUTHORIZATION},
-        middleware,
-        routing::{delete, get, post, put},
-    };
-    use axum_test::TestServer;
-    use dashmap::DashMap;
-    use jsonwebtoken::{EncodingKey, Header, encode};
-    use secrecy::SecretString;
-    use std::{
-        sync::Arc,
-        time::{Duration, SystemTime, UNIX_EPOCH},
-    };
-    use uuid::Uuid;
-
-    const TEST_SECRET: &str = "test-only-secret-do-not-use-in-prod";
-
-    /// Encodes a test JWT for `sub` at `ver`, valid for one hour from now —
-    /// or, if `expired` is true, expired one hour ago.
-    fn minted_token(sub: &str, ver: u64, expired: bool) -> String {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let exp = if expired { now - 3600 } else { now + 3600 };
-    
-        let claims = Claims {
-            sub: sub.to_string(),
-            exp,
-            jti: Uuid::new_v4().to_string(),
-            ver,
-        };
-    
-        encode(
-            &Header::default(),
-            &claims,
-            &EncodingKey::from_secret(TEST_SECRET.as_bytes()),
-        )
-        .unwrap()
-    }
-    
-    /// A minimal router exercising both middleware and all three lifecycle
-    /// handlers, plus a `/me` probe and an admin-only `/admin` probe.
-    /// Seeded with "jack" (admin + user, ver 1) and "jane" (user only,
-    /// ver 1).
-    fn test_server() -> TestServer {
-        let roles = Arc::new(DashMap::new());
-        roles.insert(
-            "jack".to_string(),
-            vec!["admin".to_string(), "user".to_string()]
-        );
-        roles.insert(
-            "jane".to_string(),
-            vec!["user".to_string()]
-        );
-    
-        let tokens = Arc::new(DashMap::new());
-        for user in ["jack", "jane", "john"] {
-            tokens.insert(
-                user.to_string(),
-                TokenState {
-                    active_jti: None,
-                    active_ver: 1,
-                }
-            );
-        }
-    
-        let state = AuthState::new(
-            &SecretString::from(TEST_SECRET.to_string()),
-            roles,
-            tokens
-            )
-            .unwrap();
-    
-        let token_routes = Router::new()
-            .route(
-                "/token",
-                post(issue_token).put(renew_token).delete(revoke_token)
-            );
-    
-        let admin_route = Router::new()
-            .route(
-                "/admin",
-                get(|| async { "admin ok" })
-            )
-            .layer(middleware::from_fn(|usr, req, nxt| { authz_layer("admin", usr, req, nxt) }));
-    
-        let user_route = Router::new()
-            .route(
-                "/user", 
-                get(|Extension(user): Extension<AuthUser>| async move { user.user_id })
-            );
-    
-        let app = Router::new()
-            .merge(token_routes)
-            .merge(admin_route)
-            .merge(user_route)
-            .layer(middleware::from_fn_with_state(state, authn_layer));
-    
-        TestServer::new(app)
-    }
-
-    #[test_log::test(tokio::test)]
-    async fn test_new_for_ttl_success() {
-        let result = super::AuthState::new_for_ttl(
-            &SecretString::from(TEST_SECRET.to_string()),
-            Arc::new(DashMap::new()),
-            Arc::new(DashMap::new()),
-            Duration::from_secs(3600)
-        );
-
-        assert!(result.is_ok());        
-    }
-
-    /// Verifies `new_for_ttl` rejects a sub-second lifetime, which
-    /// truncates to zero seconds and would otherwise slip past an
-    /// `is_zero()` check.
-    #[test_log::test(tokio::test)]
-    async fn test_new_for_ttl_failure_token_expiry_invalid() {
-        let result = super::AuthState::new_for_ttl(
-            &SecretString::from(TEST_SECRET.to_string()),
-            Arc::new(DashMap::new()),
-            Arc::new(DashMap::new()),
-            Duration::from_millis(500)
-        );
-
-        assert!(matches!(result, super::AppError::TokenExpiryInvalid));        
-    }
-
-    /// Verifies a valid token authenticates and `AuthUser` is extractable.
-    #[test_log::test(tokio::test)]
-    async fn test_authn_layer_success() {
-        let token = minted_token("jack", 1, false);
-
-        let response = test_server()
-            .get("/user")
-            .add_header(AUTHORIZATION, format!("Bearer {token}"))
-            .await;
-
-        response.assert_status(StatusCode::OK);
-        response.assert_text("jack");
-    }
-
-    /// Verifies a missing `Authorization` header is rejected.
-    #[test_log::test(tokio::test)]
-    async fn test_authn_layer_failure_authorization_header_missing() {
-        let token = minted_token("jack", 1, false);
-
-        let response = test_server()
-            .get("/user")
-            .await;
-
-        response.assert_status(StatusCode::UNAUTHORIZED);
-    }
-
-    /// Verifies a header without a `Bearer ` prefix is rejected.
-    #[test_log::test(tokio::test)]
-    async fn test_authn_layer_failure_authorization_header_invalid() {
-        let token = minted_token("jack", 1, false);
-
-        let response = test_server()
-            .get("/user")
-            .add_header(AUTHORIZATION, format!("{token}"))
-            .await;
-
-        response.assert_status(StatusCode::UNAUTHORIZED);
-    }
-
-    /// Verifies a token signed with a different secret is rejected.
-    #[test_log::test(tokio::test)]
-    async fn test_authn_layer_failure_bearer_token_invalid() {
-        let claims = Claims {
-            sub: "jack".to_string(),
-            exp: u64::MAX,
-            jti: Uuid::new_v4().to_string(),
-            ver: 1,
-        };
-
-        let token = encode(
-            &Header::default,
-            &claims,
-            &EncodingKey::from_secret(b"diff_secret")
-            )
-            .unwrap();
-
-        let response = test_server()
-            .get("/user")
-            .add_header(AUTHORIZATION, format!("Bearer {token}"))
-            .await;
-
-        response.assert_status(StatusCode::UNAUTHORIZED);
-    }
-
-    /// Verifies an expired token is rejected.
-    #[test_log::test(tokio::test)]
-    async fn test_authn_layer_failure_bearer_token_expired() {
-        let token = minted_token("jack", 1, true);
-
-        let response = test_server()
-            .get("/user")
-            .add_header(AUTHORIZATION, format!("Bearer {token}"))
-            .await;
-
-        response.assert_status(StatusCode::UNAUTHORIZED);        
-    }
-
-    /// Verifies a token whose `ver` is behind the store's is rejected —
-    /// the core of revocation.
-    #[test_log::test(tokio::test)]
-    async fn test_authn_layer_failure_token_version_invalid() {
-        let token = minted_token("jack", 0, false);
-
-        let response = test_server()
-            .get("/user")
-            .add_header(AUTHORIZATION, format!("Bearer {token}"))
-            .await;
-
-        response.assert_status(StatusCode::UNAUTHORIZED);                
-    }
-
-    /// Verifies a valid token for a subject with no `TokenStore` entry is
-    /// rejected — `authn_layer` fails closed on an unknown user.
-    #[test_log::test(tokio::test)]
-    async fn test_authn_layer_failure_user_unknown() {
-        let token = minted_token("john", 1, false);
-
-        let response = test_server()
-            .get("/user")
-            .add_header(AUTHORIZATION, format!("Bearer {token}"))
-            .await;
-
-        response.assert_status(StatusCode::UNAUTHORIZED);
-    }
-
-    /// Verifies a user holding the required role is allowed through.
-    #[test_log::test(tokio::test)]
-    async fn test_authz_layer_success() {
-        
-    }
-
-    /// Verifies an authenticated user lacking the required role is
-    /// forbidden.
-    #[test_log::test(tokio::test)]
-    async fn test_authz_layer_failure_user_forbidden() {
-        
-    }
-
-    /// Verifies a valid token for a subject with no `RoleStore` entry at
-    /// all is treated as having zero roles, not an error.
-    #[test_log::test(tokio::test)]
-    async fn test_authz_layer_failure_user_unknown() {
-        
-    }
-
-    /// Verifies `exp_from_ttl` produces a timestamp roughly `token_ttl`
-    /// seconds in the future.
-    #[test_log::test(tokio::test)]
-    async fn test_exp_from_ttl_success() {
-        
-    }
-
-    #[test_log::test(tokio::test)]
-    async fn test_exp_from_ttl_failure() {
-        
-    }
-
-    /// Verifies `POST /token` returns a working token at the caller's
-    /// current version, and leaves previously issued tokens valid.
-    #[test_log::test(tokio::test)]
-    async fn test_issue_token_success() {
-        
-    }
-
-    /// Verifies `POST /token` without a bearer token is rejected —
-    /// lifecycle endpoints require the caller to already be authenticated.
-    #[test_log::test(tokio::test)]
-    async fn test_issue_token_failure_user_unauthorized() {
-        
-    }
-
-    /// Verifies `PUT /token` returns a working token at a bumped
-    /// version and invalidates the token used to call it.
-    #[test_log::test(tokio::test)]
-    async fn test_renew_token_success() {
-        
-    }
-
-    /// Verifies `PUT /token` without a bearer token is rejected.
-    #[test_log::test(tokio::test)]
-    async fn test_renew_token_failure_user_unauthorized() {
-        
-    }
-
-    /// Verifies `DELETE /token` bumps the version, returns no token,
-    /// and kills the token used to call it.
-    #[test_log::test(tokio::test)]
-    async fn test_revoke_token_success() {
-        
-    }
-
-    /// Verifies `DELETE /token` without a bearer token is rejected.
-    #[test_log::test(tokio::test)]
-    async fn test_revoke_token_failure_user_unauthorized() {
-        
-    }
-
-    #[test_log::test(tokio::test)]
-    async fn test_sign_token_success() {
-        
-    }
-
-    #[test_log::test(tokio::test)]
-    async fn test_sign_token_failure() {
-        
-    }
-
-    // ---- authn / authz ----
-
-    /// Verifies a user holding the required role is allowed through.
-    #[test_log::test(tokio::test)]
-    async fn test_authorize_success() {
-        let token = mint_token("jack", 1, false); // jack: admin, user
-
-        let response = test_server()
-            .get("/admin")
-            .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
-            .await;
-
-        response.assert_status(StatusCode::OK);
-        response.assert_text("admin ok");
-    }
-
-    /// Verifies an authenticated user lacking the required role is
-    /// forbidden.
-    #[test_log::test(tokio::test)]
-    async fn test_authorize_failure_forbidden() {
-        let token = mint_token("jane", 1, false); // jane: user only
-
-        let response = test_server()
-            .get("/admin")
-            .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
-            .await;
-
-        response.assert_status(StatusCode::FORBIDDEN);
-    }
-
-    /// Verifies an authenticated user lacking the required role is
-    /// forbidden.
-    /// Verifies a valid token for a subject with no `RoleStore` entry at
-    /// all is treated as having zero roles, not an error.
-    #[test_log::test(tokio::test)]
-    async fn test_authorize_failure_unknown_user_has_no_roles() {
-        let token = mint_token("john", 0, false); // not seeded in RoleStore
-
-        let response = test_server()
-            .get("/admin")
-            .add_header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
-            .await;
-
-        response.assert_status(StatusCode::FORBIDDEN);
-    }
-
-    // ---- lifecycle: issue ----
-
-    /// Verifies `POST /token` returns a working token at the caller's
-    /// current version, and leaves previously issued tokens valid.
-    #[test_log::test(tokio::test)]
-    async fn test_issue_token_success_additive() {
-        let server = test_server();
-        let existing = mint_token("jack", 1, false);
-
-        let response = server
-            .post("/token")
-            .add_header(
-                axum::http::header::AUTHORIZATION,
-                format!("Bearer {existing}"),
-            )
-            .await;
-
-        response.assert_status(StatusCode::CREATED);
-
-        let TokenResponse { token, jti, ver } = response.json();
-        assert_eq!(ver, 1);
-        assert!(!jti.is_empty());
-
-        let new_token = token.expect("issue must return a token");
-
-        // The freshly issued token works...
-        server
-            .get("/me")
-            .add_header(
-                axum::http::header::AUTHORIZATION,
-                format!("Bearer {new_token}"),
-            )
-            .await
-            .assert_status(StatusCode::OK)
-            .assert_text("jack");
-
-        // ...and the one used to call the endpoint still works too,
-        // because issuing didn't bump the version.
-        server
-            .get("/me")
-            .add_header(
-                axum::http::header::AUTHORIZATION,
-                format!("Bearer {existing}"),
-            )
-            .await
-            .assert_status(StatusCode::OK);
-    }
-
-    /// Verifies `POST /token` without a bearer token is rejected —
-    /// lifecycle endpoints require the caller to already be authenticated.
-    #[test_log::test(tokio::test)]
-    async fn test_issue_token_failure_unauthenticated() {
-        let response = test_server().post("/token").await;
-        response.assert_status(StatusCode::UNAUTHORIZED);
-    }
-
-    // ---- lifecycle: renew ----
-
-    /// Verifies `PUT /token` returns a working token at a bumped
-    /// version and invalidates the token used to call it.
-    #[test_log::test(tokio::test)]
-    async fn test_renew_token_success_invalidates_previous() {
-        let server = test_server();
-        let existing = mint_token("jack", 1, false);
-
-        let response = server
-            .put("/token")
-            .add_header(
-                axum::http::header::AUTHORIZATION,
-                format!("Bearer {existing}"),
-            )
-            .await;
-
-        response.assert_status(StatusCode::OK);
-
-        let TokenResponse { token, ver, .. } = response.json();
-        assert_eq!(ver, 2);
-        let renewed = token.expect("renew must return a token");
-
-        // The renewed token works...
-        server
-            .get("/me")
-            .add_header(
-                axum::http::header::AUTHORIZATION,
-                format!("Bearer {renewed}"),
-            )
-            .await
-            .assert_status(StatusCode::OK);
-
-        // ...and the one used to call the endpoint is now dead.
-        server
-            .get("/me")
-            .add_header(
-                axum::http::header::AUTHORIZATION,
-                format!("Bearer {existing}"),
-            )
-            .await
-            .assert_status(StatusCode::UNAUTHORIZED);
-    }
-
-    /// Verifies `PUT /token` without a bearer token is rejected.
-    #[test_log::test(tokio::test)]
-    async fn test_renew_token_failure_unauthenticated() {
-        let response = test_server().put("/token").await;
-        response.assert_status(StatusCode::UNAUTHORIZED);
-    }
-
-    // ---- lifecycle: revoke ----
-
-    /// Verifies `DELETE /token` bumps the version, returns no token,
-    /// and kills the token used to call it.
-    #[test_log::test(tokio::test)]
-    async fn test_revoke_token_success_invalidates_previous() {
-        let server = test_server();
-        let existing = mint_token("jack", 1, false);
-
-        let response = server
-            .delete("/token")
-            .add_header(
-                axum::http::header::AUTHORIZATION,
-                format!("Bearer {existing}"),
-            )
-            .await;
-
-        response.assert_status(StatusCode::OK);
-
-        let TokenResponse { token, ver, .. } = response.json();
-        assert_eq!(ver, 2);
-        assert!(token.is_none(), "revoke must not return a token");
-
-        // The token used to revoke is now dead.
-        server
-            .get("/me")
-            .add_header(
-                axum::http::header::AUTHORIZATION,
-                format!("Bearer {existing}"),
-            )
-            .await
-            .assert_status(StatusCode::UNAUTHORIZED);
-    }
-
-    /// Verifies `DELETE /token` without a bearer token is rejected.
-    #[test_log::test(tokio::test)]
-    async fn test_revoke_token_failure_unauthenticated() {
-        let response = test_server().delete("/token").await;
-        response.assert_status(StatusCode::UNAUTHORIZED);
-    }
-
-    // ---- new_for_ttl guard ----
-
-    /// Verifies `new_for_ttl` rejects a zero lifetime rather than minting
-    /// tokens that are dead on arrival.
-    #[test_log::test(tokio::test)]
-    async fn test_new_for_ttl_failure_zero_duration() {
-        let result = AuthState::new_for_ttl(
-            &SecretString::from(TEST_SECRET.to_string()),
-            Arc::new(DashMap::new()),
-            Arc::new(DashMap::new()),
-            Duration::ZERO,
-        );
-
-        assert!(matches!(result, Err(super::AppError::TokenExpiryInvalid)));
-    }
-
-    #[test_log::test(tokio::test)]
-    async fn test_new_for_ttl_failure_sub_second_duration() {
-        let result = AuthState::new_for_ttl(
-            &SecretString::from(TEST_SECRET.to_string()),
-            Arc::new(DashMap::new()),
-            Arc::new(DashMap::new()),
-            Duration::from_millis(500),
-        );
-
-        assert!(matches!(result, Err(super::AppError::TokenExpiryInvalid)));
-    }
-    
-    /// Verifies `new_for_ttl` rejects a zero lifetime rather than minting
-    /// tokens that are dead on arrival.
-    /// Verifies `new_for_ttl` rejects a sub-second lifetime, which
-    /// truncates to zero seconds and would otherwise slip past an
-    /// `is_zero()` check.
-    #[test_log::test(tokio::test)]
-    async fn test_new_for_ttl_failure_sub_second_duration() {
-        let result = AuthState::new_for_ttl(
-            &SecretString::from(TEST_SECRET.to_string()),
-            Arc::new(DashMap::new()),
-            Arc::new(DashMap::new()),
-            Duration::from_millis(500),
-        );
-
-        assert!(matches!(result, Err(super::AppError::UnprocessableEntity)));
-    }
 }
